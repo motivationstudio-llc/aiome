@@ -59,6 +59,9 @@ impl AgentAct for ConceptManager {
                 script_intro: concept.script_intro.clone(),
                 script_body: concept.script_body.clone(),
                 script_outro: concept.script_outro.clone(),
+                style_intro: concept.style_intro.clone(),
+                style_body: concept.style_body.clone(),
+                style_outro: concept.style_outro.clone(),
             },
             ja_script.clone(),
         ];
@@ -71,6 +74,9 @@ impl AgentAct for ConceptManager {
         concept.script_intro = ja_script.script_intro;
         concept.script_body = ja_script.script_body;
         concept.script_outro = ja_script.script_outro;
+        concept.style_intro = ja_script.style_intro;
+        concept.style_body = ja_script.style_body;
+        concept.style_outro = ja_script.style_outro;
 
         info!("✅ ConceptManager: Multilingual concept finalized: '{}' (Langs: [en, ja])", concept.title);
         Ok(concept)
@@ -123,6 +129,9 @@ impl ConceptManager {
               \"script_intro\": \"...\",
               \"script_body\": \"...\",
               \"script_outro\": \"...\",
+              \"style_intro\": \"One of: Neutral, Happy, Sad, Angry, Fear, Surprise\",
+              \"style_body\": \"One of: Neutral, Happy, Sad, Angry, Fear, Surprise\",
+              \"style_outro\": \"One of: Neutral, Happy, Sad, Angry, Fear, Surprise\",
               \"common_style\": \"cinematic anime style, hyper-detailed, dramatic lighting, futuristic atmosphere\",
               \"style_profile\": \"{}\",
               \"visual_prompts\": [\"intro prompt\", \"body prompt\", \"outro prompt\"],
@@ -166,7 +175,10 @@ impl ConceptManager {
               \"display_outro\": \"...\",
               \"script_intro\": \"...\",
               \"script_body\": \"...\",
-              \"script_outro\": \"...\"
+              \"script_outro\": \"...\",
+              \"style_intro\": \"(Copy from English)\",
+              \"style_body\": \"(Copy from English)\",
+              \"style_outro\": \"(Copy from English)\"
             }}
             ```";
 

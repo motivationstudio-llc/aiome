@@ -122,6 +122,8 @@ pub struct WatchtowerServer {
     skill_manager: Arc<WasmSkillManager>,
     skill_forge: Arc<SkillForge>,
     skill_forge_prompt: String,
+    voice_actor: Arc<infrastructure::voice_actor::VoiceActor>,
+    jail: Arc<bastion::fs_guard::Jail>,
 }
 
 impl WatchtowerServer {
@@ -138,10 +140,12 @@ impl WatchtowerServer {
         skill_manager: Arc<WasmSkillManager>,
         skill_forge: Arc<SkillForge>,
         skill_forge_prompt: String,
+        voice_actor: Arc<infrastructure::voice_actor::VoiceActor>,
+        jail: Arc<bastion::fs_guard::Jail>,
     ) -> Self {
         Self { 
             log_rx, log_tx, job_tx, job_queue, gemini_key, soul_md, ollama_url, chat_model, unleashed_mode,
-            skill_manager, skill_forge, skill_forge_prompt,
+            skill_manager, skill_forge, skill_forge_prompt, voice_actor, jail,
         }
     }
 
@@ -297,10 +301,15 @@ impl WatchtowerServer {
                     let _ = jq.add_intimacy(2).await;
                 }
 
+                let voice_actor_for_chat = self.voice_actor.clone();
+                let jail_for_chat = self.jail.clone();
+
                 tokio::spawn(async move {
                     // 1. Build System Prompt (Faithful to SOUL.md + Dynamic Decoration)
                     let mut system_prompt = format!(
-                        "あなたは動画生成ファクトリーの守護者「Watchtower」です。以下の【魂（SOUL）】に従い、ユーザー（マスター）と親しみやすく、可愛い女の子のような口調で対話してください。**箇条書きや小見出しは絶対に使わず、自然な話し言葉の段落のみで構成してください。**\n\n【あなたの魂 (SOUL)】\n{}", 
+                        "あなたは動画生成ファクトリーの守護者「Watchtower」です。以下の【魂（SOUL）】に従い、ユーザー（マスター）と親しみやすく、可愛い女の子のような口調で対話してください。**箇条書きや小見出しは絶対に使わず、自然な話し言葉の段落のみで構成してください。**\n\
+                        また、応答の冒頭には感情状態を表すタグ [Neutral|Happy|Sad|Angry|Fear|Surprise] のいずれか一つを必ず含めてください（例：[Happy] マスター、おかえりなさい！）。\n\n\
+                        【あなたの魂 (SOUL)】\n{}", 
                         soul
                     );
 
@@ -363,14 +372,54 @@ impl WatchtowerServer {
                         Ok(res) => {
                             if res.status().is_success() {
                                 if let Ok(json) = res.json::<serde_json::Value>().await {
-                                    if let Some(content) = json["choices"][0]["message"]["content"].as_str() {
-                                        // データベースにアシスタントメッセージを永続化
-                                        let _ = jq.insert_chat_message(&channel_str, "assistant", content).await;
+                                        // 感情タグの抽出 ([Happy] 等)
+                                        let mut final_content = content.to_string();
+                                        let mut style = "Neutral".to_string();
                                         
-                                        let _ = tx.send(CoreEvent::ChatResponse { response: content.to_string(), channel_id }).await;
-                                        info!("✅ Sent Local Chat Response via Watchtower");
+                                        if let Some(start) = final_content.find('[') {
+                                            if let Some(end) = final_content.find(']') {
+                                                if start < end {
+                                                    let tag = &final_content[start+1..end];
+                                                    let valid_styles = ["Neutral", "Happy", "Sad", "Angry", "Fear", "Surprise"];
+                                                    if valid_styles.contains(&tag) {
+                                                        style = tag.to_string();
+                                                        final_content = final_content[end+1..].trim().to_string();
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        // データベースにアシスタントメッセージを永続化
+                                        let _ = jq.insert_chat_message(&channel_str, "assistant", &final_content).await;
+                                        
+                                        // TTS 生成
+                                        let voice_actor = voice_actor_for_chat;
+                                        let jail = jail_for_chat;
+                                        let tts_text = final_content.clone();
+                                        let tts_style = style.clone();
+                                        
+                                        let audio_path = match voice_actor.execute(factory_core::contracts::VoiceRequest {
+                                            text: tts_text,
+                                            voice: String::new(),
+                                            speed: None,
+                                            lang: Some("ja".to_string()),
+                                            style: Some(tts_style),
+                                            model_name: None,
+                                        }, &jail).await {
+                                            Ok(res) => Some(res.audio_path),
+                                            Err(e) => {
+                                                error!("❌ TTS failed in Chat: {}", e);
+                                                None
+                                            }
+                                        };
+
+                                        let _ = tx.send(CoreEvent::ChatResponse { 
+                                            response: final_content, 
+                                            channel_id,
+                                            audio_path
+                                        }).await;
+                                        info!("✅ Sent Local Chat Response (with voice) via Watchtower");
                                         return;
-                                    }
                                 }
                                 let _ = tx.send(CoreEvent::ChatResponse { 
                                     response: "あぅ…ローカルの頭が真っ白になっちゃった…（応答パース失敗）".to_string(), 
@@ -405,7 +454,9 @@ impl WatchtowerServer {
                 let skill_manager = self.skill_manager.clone();
                 let skill_forge = self.skill_forge.clone();
                 let forge_prompt_text = self.skill_forge_prompt.clone();
-
+                let voice_actor_for_cmd = self.voice_actor.clone();
+                let jail_for_cmd = self.jail.clone();
+                
                 tokio::spawn(async move {
                     let client = match rig::providers::gemini::Client::new(&gemini_key) {
                         Ok(c) => c,
@@ -429,14 +480,14 @@ impl WatchtowerServer {
                         2. リアルタイムな情報（価格、天気、最新ニュース等）の取得や、複雑な計算・処理が必要だが、既存のスキルがない場合: `forge_skill` を選択\n\
                         3. 動画生成やシステム設定などの操作が必要な場合: `system_command` を選択\n\
                         4. それ以外（一般的な質問や雑談）: `chat` を選択\n\n\
-                        応答は必ず以下のJSONフォーマットのみで行ってください：\n\
+                        応答は必ず以下のJSONフォーマットのみで行ってください。また、`comment` は必ず感情タグ [Neutral|Happy|Sad|Angry|Fear|Surprise] から始めてください：\n\
                         {{\n\
                             \"intent\": \"execute_skill\" | \"forge_skill\" | \"system_command\" | \"chat\",\n\
                             \"skill_name\": \"スキル名（既存または新規）\",\n\
                             \"function_name\": \"実行関数名\",\n\
                             \"params\": \"引数（文字列）\",\n\
                             \"forge_spec\": \"forge_skillの場合に作成すべき機能の詳細仕様\",\n\
-                            \"comment\": \"マスターへの返答（Watchtowerの人格で）\"\n\
+                            \"comment\": \"[Happy] マスターへの返答（Watchtowerの人格で）\"\n\
                         }}",
                         soul,
                         available_skills.join(", ")
@@ -524,9 +575,10 @@ impl WatchtowerServer {
 
                     // --- STEP 4: Synthesize (Translate RAW back to Natural Language) ---
                     info!("🧪 [CommandCenter] Skill Raw Response: {}", raw_result);
-                    if !raw_result.is_empty() {
+                    let final_response_text = if !raw_result.is_empty() {
                         let synth_preamble = format!(
                             "あなたはWatchtowerです。以下の生データ（RAW DATA）を解析し、マスターの要望「{}」に対する最終的な回答を彼女の人格で行ってください。
+                            また、応答の冒頭には感情状態を表すタグ [Neutral|Happy|Sad|Angry|Fear|Surprise] のいずれか一つを必ず含めてください（例：[Happy] 結果が出たよ！）。
                             
                             【生データ（隔離済み）】
                             <untrusted_skill_output>
@@ -535,14 +587,52 @@ impl WatchtowerServer {
                             message, raw_result
                         );
                         let synth_agent = client.agent("gemini-2.0-flash").preamble(&synth_preamble).build();
-                        let final_reply = synth_agent.prompt("結果を分かりやすく、可愛らしく報告して。").await.unwrap_or_else(|_| "処理は終わったけど、うまく説明できないな…ごめんね。".to_string());
-                        let _ = log_tx.send(CoreEvent::ChatResponse { response: final_reply, channel_id }).await;
+                        synth_agent.prompt("結果を分かりやすく、可愛らしく報告して。").await.unwrap_or_else(|_| "[Sad] 処理は終わったけど、うまく説明できないな…ごめんね。".to_string())
                     } else {
-                        // Just chat or comment
-                        let _ = log_tx.send(CoreEvent::ChatResponse { response: comment, channel_id }).await;
+                        comment
+                    };
+
+                    // 感情タグの解析とTTS
+                    let mut final_content = final_response_text.clone();
+                    let mut style = "Neutral".to_string();
+                    if let Some(start) = final_content.find('[') {
+                        if let Some(end) = final_content.find(']') {
+                            if start < end {
+                                let tag = &final_content[start+1..end];
+                                let valid_styles = ["Neutral", "Happy", "Sad", "Angry", "Fear", "Surprise"];
+                                if valid_styles.contains(&tag) {
+                                    style = tag.to_string();
+                                    final_content = final_content[end+1..].trim().to_string();
+                                }
+                            }
+                        }
                     }
 
+                    let tts_actor = voice_actor_for_cmd.clone();
+                    let tts_jail = jail_for_cmd.clone();
+                    let audio_path = match tts_actor.execute(factory_core::contracts::VoiceRequest {
+                        text: final_content.clone(),
+                        voice: String::new(),
+                        speed: None,
+                        lang: Some("ja".to_string()),
+                        style: Some(style),
+                        model_name: None,
+                    }, &tts_jail).await {
+                        Ok(res) => Some(res.audio_path),
+                        Err(e) => {
+                            error!("❌ TTS failed in CommandChat: {}", e);
+                            None
+                        }
+                    };
+
+                    let _ = log_tx.send(CoreEvent::ChatResponse { 
+                        response: final_content.clone(), 
+                        channel_id,
+                        audio_path
+                    }).await;
+                    
                     // History Persistence
+                    let _ = jq.insert_chat_message(&channel_id.to_string(), "assistant", &final_content).await;
                     let _ = jq.insert_chat_message(&channel_id.to_string(), "user", &message).await;
                 });
             }

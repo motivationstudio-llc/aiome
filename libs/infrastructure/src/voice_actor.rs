@@ -144,24 +144,36 @@ impl AgentAct for VoiceActor {
         // 言語別デフォルトスピード
         let speed = input.speed.unwrap_or_else(|| Self::default_speed_for_lang(lang));
 
+        // Style-Bert-VITS2 特有のパラメータ
+        let model_name = input.model_name.as_deref().unwrap_or("amitaro");
+        let style = input.style.as_deref().unwrap_or("Neutral");
+
+        // Style-Bert-VITS2 では 'length' が時間軸の倍率
+        // (1.1 = longer/slower, 0.9 = shorter/faster)
+        // input.speed は一般的に「倍速」(1.2 = faster) なので逆数をとる
+        let length = 1.0 / speed;
+
         info!(
-            "🗣️ VoiceActor: Synthesizing full text [{}] with voice '{}' at speed {} for: '{}'",
-            lang,
-            voice,
-            speed,
+            "🗣️ VoiceActor: Synthesizing with Style-Bert-VITS2 [model: {}, style: {}, length: {:.2}] for: '{}'",
+            model_name,
+            style,
+            length,
             sanitized_text.chars().take(80).collect::<String>()
         );
 
-        let url = format!("{}/v1/audio/speech", self.server_url);
-
-        let body = serde_json::json!({
-            "input": sanitized_text,
-            "voice": voice,
-            "response_format": "wav",
-            "speed": speed,
-        });
-
-        let response = self.client.post(&url).json(&body).send().await
+        let url = format!("{}/voice", self.server_url);
+        
+        // Style-Bert-VITS2 は Query Parameter で全ての入力を受け取る実装が一般的
+        let response = self.client.post(&url)
+            .query(&[
+                ("text", &sanitized_text),
+                ("model_name", &model_name.to_string()),
+                ("style", &style.to_string()),
+                ("length", &length.to_string()), 
+                ("save_path", &"".to_string()),
+            ])
+            .send()
+            .await
             .map_err(|e| FactoryError::TtsFailure {
                 reason: format!("Failed to connect to TTS: {}", e),
             })?;

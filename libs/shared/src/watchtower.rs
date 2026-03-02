@@ -29,8 +29,13 @@ pub enum CoreEvent {
         style: String,
         thumbnail_url: Option<String>,
     },
-    /// コアからの対話応答
-    ChatResponse { response: String, channel_id: u64 },
+    /// コアからの対話応答 (音声付き)
+    ChatResponse { 
+        response: String, 
+        channel_id: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        audio_path: Option<String> 
+    },
     /// 自律的な話しかけ（プッシュ通知）
     ProactiveTalk { message: String, channel_id: u64 },
 }

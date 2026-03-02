@@ -153,16 +153,22 @@ impl AgentAct for ProductionOrchestrator {
                 if let Some(script) = concept_res.scripts.iter().find(|s| &s.lang == lang) {
                     info!("🗣️ Generating TTS for language: {}", lang);
                     let mut lang_audios = Vec::new();
-                    let acts = vec![&script.script_intro, &script.script_body, &script.script_outro];
+                    let sections = vec![
+                        (&script.script_intro, &script.style_intro),
+                        (&script.script_body, &script.style_body),
+                        (&script.script_outro, &script.style_outro)
+                    ];
                     
-                    for (i, script_text) in acts.into_iter().enumerate() {
+                    for (i, (script_text, style_name)) in sections.into_iter().enumerate() {
                         let audio_path = project_root.join(format!("audio/scene_{}_{}.wav", i, lang));
                         if !audio_path.exists() {
                             let voice_req = VoiceRequest {
                                 text: script_text.clone(),
-                                voice: String::new(), // Auto-map by lang in VoiceActor
+                                voice: String::new(), 
                                 speed: None,
                                 lang: Some(lang.clone()),
+                                style: if style_name.is_empty() { None } else { Some(style_name.clone()) },
+                                model_name: None, // Default in VoiceActor
                             };
                             let v_res = self.supervisor.enforce_act(&self.voice_actor, voice_req).await?;
                             let temp_v = self.supervisor.jail().root().join(&v_res.audio_path);

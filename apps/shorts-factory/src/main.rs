@@ -232,6 +232,10 @@ async fn main() -> Result<(), anyhow::Error> {
         String::new()
     });
 
+    // 5.4 Voice Architecture (Style-Bert-VITS2)
+    let tts_url = "http://localhost:5001";
+    let voice_actor = Arc::new(VoiceActor::new(tts_url, "jvnv-F1-jp"));
+    
     // 0.2. Start Watchtower UDS Server (deferred — needs job_queue Arc)
     let wt_server = server::watchtower::WatchtowerServer::new(
         log_rx, 
@@ -246,6 +250,8 @@ async fn main() -> Result<(), anyhow::Error> {
         skill_manager,
         skill_forge,
         skill_forge_prompt,
+        voice_actor.clone(),
+        jail.clone(),
     );
     tokio::spawn(wt_server.start());
 
@@ -281,11 +287,11 @@ async fn main() -> Result<(), anyhow::Error> {
         // TIME_WAIT ソケット解放を待機
         tokio::time::sleep(Duration::from_secs(2)).await;
         let mut cmd = Command::new(".venv/bin/python");
-        cmd.arg("tts_server.py")
+        cmd.arg("server_fastapi.py")
            .env("PYTORCH_ENABLE_MPS_FALLBACK", "1")
-           .current_dir("services/qwen3-tts");
+           .current_dir("services/Style-Bert-VITS2");
         sm.spawn(cmd).await?;
-        info!("🎙️  TTS Sidecar server (Qwen3-TTS) spawned on port 5001");
+        info!("🎙️  TTS Sidecar server (Style-Bert-VITS2) spawned on port 5001");
         // コールドスタート（モデルロード）待機
         tokio::time::sleep(Duration::from_secs(10)).await;
     }
@@ -300,7 +306,7 @@ async fn main() -> Result<(), anyhow::Error> {
         &config.comfyui_base_dir,
         config.comfyui_timeout_secs,
     );
-    let voice_actor = VoiceActor::new("http://localhost:5001", "aiome_narrator");
+    let voice_actor_val: VoiceActor = (*voice_actor).clone();
     let bgm_path = std::env::current_dir()?.join("resources/bgm");
     if !bgm_path.exists() {
         std::fs::create_dir_all(&bgm_path)?;
@@ -312,7 +318,7 @@ async fn main() -> Result<(), anyhow::Error> {
     let orchestrator = Arc::new(ProductionOrchestrator::new(
         trend_sonar,
         concept_manager,
-        voice_actor,
+        voice_actor_val,
         comfy_bridge,
         media_forge,
         sound_mixer,

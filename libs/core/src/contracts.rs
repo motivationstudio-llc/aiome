@@ -51,6 +51,12 @@ pub struct LocalizedScript {
     pub script_intro: String,
     pub script_body: String,
     pub script_outro: String,
+    #[serde(default)]
+    pub style_intro: String,
+    #[serde(default)]
+    pub style_body: String,
+    #[serde(default)]
+    pub style_outro: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -72,6 +78,13 @@ pub struct ConceptResponse {
     /// 結末 (backward compatibility)
     #[serde(default)]
     pub script_outro: String,
+    
+    #[serde(default)]
+    pub style_intro: String,
+    #[serde(default)]
+    pub style_body: String,
+    #[serde(default)]
+    pub style_outro: String,
     
     /// 多言語化された台本リスト
     #[serde(default)]
@@ -112,6 +125,12 @@ pub struct VoiceRequest {
     /// 音声の言語 (ja, en等)
     #[serde(default)]
     pub lang: Option<String>,
+    /// 感情スタイル (Neutral, Happy, Sad, Angry等)
+    #[serde(default)]
+    pub style: Option<String>,
+    /// モデルディレクトリ名 (Noneの場合はデフォルト)
+    #[serde(default)]
+    pub model_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
