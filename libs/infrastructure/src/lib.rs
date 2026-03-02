@@ -16,3 +16,4 @@ pub mod workspace_manager;
 mod workspace_manager_tests;
 pub mod sns_watcher;
 pub mod oracle;
+pub mod skills;

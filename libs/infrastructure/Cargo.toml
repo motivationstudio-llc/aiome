@@ -8,7 +8,7 @@ factory_core = { path = "../core", package = "factory-core" }
 tuning = { path = "../tuning" }
 shared = { path = "../shared" }
 sqlx = { workspace = true }
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
 reqwest = { workspace = true }
 async-trait = "0.1"
 anyhow = { workspace = true }
@@ -26,6 +26,10 @@ chrono.workspace = true
 regex = "1.12.3"
 async-recursion = "1.1.1"
 unicode-normalization = { workspace = true }
+extism = "1.13.0"
+extism-convert = "1.13.0"
+wasi = "0.14.7"
+tokio-util = { workspace = true, features = ["codec", "io"] }
 
 [dev-dependencies]
 tempfile = "3"

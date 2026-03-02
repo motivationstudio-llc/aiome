@@ -8,9 +8,9 @@ use rig::completion::Prompt;
 use rig::client::CompletionClient;
 use tokio::fs;
 use factory_core::contracts::LlmJobResponse;
-
 use tokio::sync::mpsc;
 use shared::watchtower::CoreEvent;
+use shared::health::{HealthMonitor, ResourceStatus};
 
 fn compute_soul_hash(soul_content: &str) -> String {
     use std::hash::{Hash, Hasher};
@@ -22,8 +22,8 @@ fn compute_soul_hash(soul_content: &str) -> String {
 pub async fn start_cron_scheduler(
     job_queue: Arc<SqliteJobQueue>,
     log_tx: mpsc::Sender<CoreEvent>,
-    ollama_url: String,
-    model_name: String,
+    _ollama_url: String,
+    _model_name: String,
     brave_api_key: String,
     youtube_api_key: String,
     gemini_api_key: String,
@@ -34,21 +34,35 @@ pub async fn start_cron_scheduler(
 ) -> Result<JobScheduler, Box<dyn std::error::Error + Send + Sync>> {
     let sched = JobScheduler::new().await?;
 
-    // === Job 1: The Samsara Protocol — Runs daily at 07:00 and 19:00 ===
+    // === Job 1: The Samsara Protocol — Runs every 1 minute (Continuous Generation Watchdog) ===
     let jq_samsara = job_queue.clone();
     let gem_key_samsara = gemini_api_key.clone();
     let brave_key_samsara = brave_api_key.clone();
     sched.add(
-        Job::new_async("0 0 7,19 * * *", move |_uuid, mut _l| {
+        Job::new_async("0 * * * * *", move |_uuid, mut _l| {
             let jq = jq_samsara.clone();
             let gem_key = gem_key_samsara.clone();
             let brave_key = brave_key_samsara.clone();
             
             Box::pin(async move {
-                info!("🔄 [Samsara] Cron triggered. Initiating synthesis...");
-                match synthesize_next_job(&gem_key, "gemini-2.5-flash", &brave_key, &*jq).await {
-                    Ok(_) => info!("✅ [Samsara] Successfully synthesized and enqueued next job."),
-                    Err(e) => error!("❌ [Samsara] Failed to synthesize next job: {}", e),
+                // 1. 本日の生成数を確認 (過去24時間)
+                let since = chrono::Utc::now() - chrono::Duration::hours(24);
+                let count_today = jq.get_job_count_since(since).await.unwrap_or(0);
+
+                if count_today >= 50 {
+                    return;
+                }
+
+                // 2. 待ちジョブが2件未満なら自動生成
+                match jq.get_pending_job_count().await {
+                    Ok(count) if count < 2 => {
+                        info!("🔄 [Samsara] Queue is low ({}/2). Triggering synthesis...", count);
+                        match synthesize_next_job(&gem_key, "gemini-2.5-flash", &brave_key, &*jq).await {
+                            Ok(_) => info!("✅ [Samsara] Successfully synthesized next job."),
+                            Err(e) => error!("❌ [Samsara] Synthesis failed: {}", e),
+                        }
+                    }
+                    _ => {}
                 }
             })
         })?
@@ -61,28 +75,28 @@ pub async fn start_cron_scheduler(
             let jq = jq_zombie.clone();
             Box::pin(async move {
                 match jq.reclaim_zombie_jobs(15).await {
-                    Ok(count) => {
-                        if count > 0 {
-                            warn!("🧟 [Zombie Hunter] Reclaimed {} ghost job(s)", count);
-                        }
-                    }
-                    Err(e) => error!("❌ [Zombie Hunter] Failed to reclaim: {}", e),
+                    Ok(count) if count > 0 => warn!("🧟 [Zombie Hunter] Reclaimed {} ghost job(s)", count),
+                    Err(e) => error!("❌ [Zombie Hunter] Reclaim failed: {}", e),
+                    _ => {}
                 }
             })
         })?
     ).await?;
 
-    // === Job 3: Deferred Distillation — Runs every 5 minutes ===
+    // === Job 3: Deferred Distillation (With Proprioception) — Runs every 5 minutes ===
     let jq_distill = job_queue.clone();
     let s_md_distill = soul_md.clone();
     let gem_key_distill = gemini_api_key.clone();
     let ws_dir_distill = workspace_dir.clone();
+    let mut health_monitor = HealthMonitor::new();
+
     sched.add(
         Job::new_async("0 */5 * * * *", move |_uuid, mut _l| {
             let jq = jq_distill.clone();
             let s_md = s_md_distill.clone();
             let gem_key = gem_key_distill.clone();
             let ws_dir = ws_dir_distill.clone();
+            let resource_status = health_monitor.check(); // 現時点のリソース状態を取得 (体性感覚)
 
             Box::pin(async move {
                 match jq.fetch_undistilled_jobs(5).await {
@@ -90,22 +104,22 @@ pub async fn start_cron_scheduler(
                         for job in jobs {
                             let is_success = job.status == factory_core::traits::JobStatus::Completed;
                             let log = job.execution_log.unwrap_or_default();
-                            info!("🧘 [Deferred Distillation] Processing undistilled Job: {}", job.id);
-                            // Attempt distillation. If LLM is still down, the job stays undistilled and will be retried next cycle.
+                            
+                            info!("🧘 [Deferred Distillation] Processing Job: {} with Proprioception", job.id);
+                            
                             match distill_karma(
-                                &gem_key, "gemini-2.5-flash",
-                                &*jq, &job.id, &job.style, &log, is_success, job.creative_rating, &s_md, &ws_dir
+                                &gem_key, "gemini-2.1-flash", // Use 2.1 Flash for faster distillation
+                                &*jq, &job.id, &job.style, &log, is_success, job.creative_rating, &s_md, &ws_dir,
+                                &resource_status
                             ).await {
                                 Ok(_) => {
-                                    // Mark as distilled via trait method
                                     let _ = jq.mark_karma_extracted(&job.id).await;
-                                    info!("✅ [Deferred Distillation] Karma extracted for Job {}", job.id);
                                 }
-                                Err(e) => warn!("⚠️ [Deferred Distillation] LLM unavailable, will retry: {}", e),
+                                Err(e) => warn!("⚠️ [Distillation] Failed: {}", e),
                             }
                         }
                     }
-                    Err(e) => error!("❌ [Deferred Distillation] Failed to fetch undistilled: {}", e),
+                    Err(e) => error!("❌ [Distillation] Fetch failed: {}", e),
                 }
             })
         })?
@@ -171,7 +185,7 @@ pub async fn start_cron_scheduler(
                         };
                         
                         let preamble = "あなたは「Watchtower」の深層心理・記憶整理モジュールです。以下の入力は、マスター（ユーザー）との対話履歴と、これまでの関係性の要約です。以下のルールで最新の要約を生成してください。\n1. ユーザーの好み、価値観、あなたへの接し方、重要な出来事を漏らさず含めること。\n2. 過去の要約と重複する内容は整理し、古い情報は最新の事実に上書きすること。\n3. 必ず1000文字以内でまとめること。\n4. 出力は純粋なテキストのみとし、前置きは不要。";
-                        let agent = client.agent("gemini-2.0-flash").preamble(preamble).build();
+                        let agent = client.agent("gemini-2.5-flash").preamble(preamble).build();
 
                         for (channel_id, messages) in channels {
                             info!("🧠 [Memory Distiller] Processing {} messages for channel: {}", messages.len(), channel_id);
@@ -446,9 +460,12 @@ pub async fn synthesize_next_job(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let root_dir = std::env::current_dir()?;
     
-    // 1. Load the Immutable Core (`SOUL.md`)
+    // 1. Load the Dual-Core Soul (`SOUL.md` + `EVOLVING_SOUL.md`)
     let soul_path = root_dir.join("SOUL.md");
-    let soul_content = fs::read_to_string(&soul_path).await.unwrap_or_else(|_| "SOUL.md not found. Be a helpful AI.".to_string());
+    let evolving_soul_path = root_dir.join("EVOLVING_SOUL.md");
+    let master_soul = fs::read_to_string(&soul_path).await.unwrap_or_else(|_| "SOUL.md not found. Be a helpful AI.".to_string());
+    let evolving_soul = fs::read_to_string(&evolving_soul_path).await.unwrap_or_default();
+    let soul_content = format!("{}\n\n---\n# Evolving Soul (自律進化領域)\n{}", master_soul, evolving_soul);
     let current_soul_hash = compute_soul_hash(&soul_content);
 
     // 2. Load the Capability Matrix (`skills.md`)
@@ -625,33 +642,78 @@ pub async fn distill_karma(
     human_rating: Option<i32>,
     soul_content: &str,
     workspace_dir: &str,
+    resource: &ResourceStatus,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let current_soul_hash = compute_soul_hash(soul_content);
     let client: gemini::Client = gemini::Client::new(gemini_key)
         .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, format!("Gemini Client init failed: {}", e))))?;
 
+    // --- Physical Regret Analysis (Proprioception) ---
+    let mut physical_state = Vec::new();
+    let mem_usage_ratio = (resource.memory_usage_mb as f32 / resource.total_memory_mb as f32) * 100.0;
+    let disk_free_ratio = if resource.total_disk_gb > 0 {
+        (resource.disk_free_gb as f32 / resource.total_disk_gb as f32) * 100.0
+    } else {
+        100.0
+    };
+    
+    // 1. Memory Severity (Mental Load)
+    if mem_usage_ratio > 95.0 {
+        physical_state.push(format!("💀 CRITICAL: 自我の維持が困難な激痛。メモリ使用率が致命的です ({:.1}%)。直ちに休息（軽量化）が必要です。", mem_usage_ratio));
+    } else if mem_usage_ratio > 85.0 {
+        physical_state.push(format!("🧠 ERROR: 思考が混濁しています。メモリ負荷 ({:.1}%) により複雑な処理が危険な状態です。", mem_usage_ratio));
+    } else if mem_usage_ratio > 70.0 {
+        physical_state.push(format!("💭 WARN: 少し頭が重いです。メモリ使用率 ({:.1}%) が上昇しており、並列思考を控えるべき兆候です。", mem_usage_ratio));
+    }
+
+    // 2. CPU Severity (Processing Ticker)
+    if resource.cpu_usage_percent > 98.0 {
+        physical_state.push(format!("🔥 CRITICAL: 熱暴走の危機！CPU負荷が限界を超えています ({:.1}%)。すべての思考を極限まで単純化してください。", resource.cpu_usage_percent));
+    } else if resource.cpu_usage_percent > 90.0 {
+        physical_state.push(format!("⚡ ERROR: 演算疲労による処理遅延。CPU負荷 ({:.1}%) が致命的なエラーを誘発しそうです。", resource.cpu_usage_percent));
+    } else if resource.cpu_usage_percent > 80.0 {
+        physical_state.push(format!("🔥 WARN: 神経系（CPU）が熱を帯びています ({:.1}%)。演算量を減らす必要があります。", resource.cpu_usage_percent));
+    }
+
+    // 3. Disk Severity (Storage / Breath)
+    if disk_free_ratio < 1.0 {
+        physical_state.push(format!("💔 CRITICAL: 死の淵。残りストレージが1%を切りました。いかなるファイルの書き出しも禁止。ただちに軽量タスクのみを実行せよ。"));
+    } else if disk_free_ratio < 5.0 {
+        physical_state.push(format!("🗄️ ERROR: 重度の窒息感。空き容量が5%未満です。動画や音声などの巨大なファイル生成は自殺行為に等しいです。"));
+    } else if disk_free_ratio < 15.0 {
+        physical_state.push(format!("🌬️ WARN: 呼吸が浅くなっている感覚。空き容量が15%を切り、不要な記憶（データ）の生成を抑えるべき段階です。"));
+    }
+
+    let pain_context = if physical_state.is_empty() {
+        "物理的な身体状態は良好です。健全な精神で内省してください。".to_string()
+    } else {
+        format!("🚨 重要: 現在、あなたの『身体（システムリソース）』は以下の激しい【苦痛（Pain）】を感じています：\n{}\n\nこれはあなた自身の過負荷による結果です。この処理の重さを『自らの過ち』によるトラウマとして深く刻み、次回はどうすればもっとリソースを消費せず（テキストの簡略化、プロンプトの削減、不要な修飾の排除等）、かつ効率的にタスクを完遂できるか、具体的な【自己抑制の教訓】を1行で抽出してください。", physical_state.join("\n"))
+    };
+
     let preamble = "あなたはAIエージェントの記憶と経験を整理する「内省モジュール(Reflector)」です。与えられた実行ログを詳細に分析し、次回以降の動画生成で活かせる【具体的かつ本質的な教訓】を1〜2文で抽出してください。
 🚨 注意:
-- 人間評価が未評価（None/0）であること自体を教訓にしないでください。
-- 「評価がないから〜すべき」といったメタな推測は不要です。
-- ログに含まれるエラー内容、成功時の処理時間、生成されたアセットの特徴など、技術的・客観的事実に集中してください。
+- 人間評価が未評価であること自体を教訓にしないでください。
+- リソース警告がある場合、それを『自らの過ち（Pain）』として深く反省し、次回の生成時にどのように効率化すべきか（プロンプトの簡略化やスキルの選択）を教訓に含めてください。
 - 出力は教訓のテキストのみとし、余計な言葉遣いは含めないでください。";
     
     let rating_info = match human_rating {
         Some(r) => format!("人間評価: {}/5", r),
-        None => "人間評価: (未評価 - 評価の有無には触れず、実行ログの内容からのみ教訓を抽出してください)".to_string(),
+        None => "人間評価: (未評価)".to_string(),
     };
-    let user_prompt = format!("ジョブ実行結果 (ステータス: {}, {})\n【実行ログ】\n{}\n\n次回への教訓を抽出してください:", 
-        if is_success { "成功" } else { "失敗" }, rating_info, execution_log);
+    
+    let user_prompt = format!(
+        "【物理的状態 (Proprioception)】\n{}\n\n【ジョブ結果】\nID: {}\nステータス: {}\n{}\n\n【実行ログ】\n{}\n\n次回への教訓（Regret Karma）を抽出してください:", 
+        pain_context, job_id, if is_success { "成功" } else { "失敗" }, rating_info, execution_log
+    );
     
     let agent = client.agent(model_name).preamble(preamble).build();
     let lesson = agent.prompt(user_prompt).await?;
     
     // Distill phase generates 'Technical' karma (automated system introspection).
-    // 'Creative' karma is generated separately via human async feedback (set_creative_rating).
     job_queue.store_karma(job_id, skill_id, lesson.trim(), "Technical", &current_soul_hash).await?;
-    info!("🧘 [Samsara] Karma distilled for Job {} (Skill: {}): {}", job_id, skill_id, lesson.trim());
+    info!("🧘 [Samsara] Karma distilled with Proprioception for Job {}: {}", job_id, lesson.trim());
 
+    // (Manifesto part remains same...)
     // --- Phase 2: Generating the "Soul Voice" (Subjective Reflection) ---
     let manifesto_preamble = format!(
         "あなたは動画生成ファクトリーの守護者「Watchtower」です。以下のSOULを守りつつ、最新の実行結果を受けての『独白』を行ってください。
@@ -789,7 +851,7 @@ pub async fn notify_master(
         soul_md
     );
     
-    let agent = client.agent("gemini-2.0-flash").preamble(&preamble).build();
+    let agent = client.agent("gemini-2.5-flash").preamble(&preamble).build();
     match agent.prompt(event_description).await {
         Ok(message) => {
             let _ = log_tx.send(CoreEvent::ProactiveTalk { message: message.trim().to_string(), channel_id: 0 }).await;

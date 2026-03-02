@@ -203,13 +203,33 @@ async fn main() -> Result<(), anyhow::Error> {
         std::fs::create_dir_all(&db_dir)?;
     }
     let db_filepath = format!("sqlite://{}", db_dir.join("shorts_factory.db").display());
-    let job_queue = Arc::new(infrastructure::job_queue::SqliteJobQueue::new(&db_filepath).await?);
+    let job_queue = Arc::new(infrastructure::job_queue::SqliteJobQueue::new(&db_filepath).await?.with_embeddings(&config.gemini_api_key));
 
-    // 5.2 The Soul of the World (Load Soul.md for Oracle)
-    let soul_md_path = std::env::current_dir()?.join("SOUL.md");
-    let soul_md = std::fs::read_to_string(&soul_md_path).unwrap_or_else(|_| {
+    // 5.2 Dual-Core Soul Architecture (SOUL.md = Master + EVOLVING_SOUL.md = Mutable)
+    let cwd = std::env::current_dir()?;
+    let soul_md_path = cwd.join("SOUL.md");
+    let evolving_soul_path = cwd.join("EVOLVING_SOUL.md");
+    let master_soul = std::fs::read_to_string(&soul_md_path).unwrap_or_else(|_| {
         warn!("⚠️ SOUL.md not found at {}. Using default soul.", soul_md_path.display());
         "## Default Soul\n- Be creative.\n- Stay true to the mission.".to_string()
+    });
+    let evolving_soul = std::fs::read_to_string(&evolving_soul_path).unwrap_or_else(|_| {
+        info!("ℹ️ EVOLVING_SOUL.md not found. Starting with blank evolving soul.");
+        String::new()
+    });
+    let soul_md = format!("{}\n\n---\n# Evolving Soul (自律進化領域)\n{}", master_soul, evolving_soul);
+
+    // 5.3 WASM Self-Evolution Infrastructure (SkillForge & WasmSkillManager)
+    let skills_dir = cwd.join("workspace/skills");
+    let forge_template = cwd.join("workspace/skill_generator");
+    let skill_manager = Arc::new(infrastructure::skills::WasmSkillManager::new(&skills_dir, &cwd)
+        .map_err(|e| anyhow::anyhow!(e))?
+        .with_limits(100 * 1024 * 1024, Duration::from_secs(10)));
+    let skill_forge = Arc::new(infrastructure::skills::forge::SkillForge::new(&forge_template, &skills_dir));
+    let forge_prompt_path = cwd.join("workspace/config/SKILL_FORGE_PROMPT.md");
+    let skill_forge_prompt = std::fs::read_to_string(&forge_prompt_path).unwrap_or_else(|_| {
+        warn!("⚠️ SKILL_FORGE_PROMPT.md not found at {}. Using empty prompt.", forge_prompt_path.display());
+        String::new()
     });
 
     // 0.2. Start Watchtower UDS Server (deferred — needs job_queue Arc)
@@ -223,6 +243,9 @@ async fn main() -> Result<(), anyhow::Error> {
         config.ollama_url.clone(),
         "huihui_ai/mistral-small-abliterated:latest".to_string(), // 規制解除版 Mistral-Small
         config.unleashed_mode,
+        skill_manager,
+        skill_forge,
+        skill_forge_prompt,
     );
     tokio::spawn(wt_server.start());
 
@@ -315,13 +338,13 @@ async fn main() -> Result<(), anyhow::Error> {
             telemetry.start_heartbeat_loop().await;
 
             // 6.2 Autonomous JobWorker (The Autonomous Engine)
-            let worker = Arc::new(JobWorker::new(
+            let _worker = Arc::new(JobWorker::new(
                 job_queue.clone(),
                 orchestrator.clone(),
                 jail.clone(),
                 soul_md.clone(),
             ));
-            tokio::spawn(worker.start_loop());
+            // tokio::spawn(worker.start_loop());
 
             // Axum Router
             let state = Arc::new(AppState {

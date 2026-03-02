@@ -9,7 +9,7 @@ members = [
     "libs/shared",
     "libs/tuning",
     "libs/bastion",
-    "libs/sidecar",
+    "libs/sidecar", "workspace/skill_generator",
 ]
 resolver = "2"
 

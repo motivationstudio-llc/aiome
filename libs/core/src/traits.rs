@@ -225,6 +225,12 @@ pub trait JobQueue: Send + Sync {
     async fn add_tech_exp(&self, amount: i32) -> Result<(), FactoryError>;
     /// 淫乱度を加算 (R18要素)
     async fn add_intimacy(&self, amount: i32) -> Result<(), FactoryError>;
+
+    /// 保留中（Pending）のジョブ数を取得する
+    async fn get_pending_job_count(&self) -> Result<i64, FactoryError>;
+
+    /// 指定した時刻以降に作成されたジョブ数を取得する
+    async fn get_job_count_since(&self, since: chrono::DateTime<chrono::Utc>) -> Result<i64, FactoryError>;
 }
 
 /// 評価台帳（sns_metrics_history）のレコード構造体

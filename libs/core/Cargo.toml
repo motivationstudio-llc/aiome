@@ -11,3 +11,4 @@ thiserror = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 bastion = { path = "../bastion", features = ["fs"] }
+chrono = { workspace = true }

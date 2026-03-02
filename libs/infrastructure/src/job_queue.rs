@@ -1,3 +1,5 @@
+use rig::providers::gemini;
+use rig::prelude::*;
 use async_trait::async_trait;
 use factory_core::traits::{Job, JobQueue, JobStatus, SnsMetricsRecord};
 use factory_core::contracts::OracleVerdict;
@@ -13,6 +15,7 @@ use chrono::Utc;
 #[derive(Clone)]
 pub struct SqliteJobQueue {
     pool: SqlitePool,
+    gemini_api_key: Option<String>,
 }
 
 impl SqliteJobQueue {
@@ -31,9 +34,15 @@ impl SqliteJobQueue {
             .await
             .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to connect to SQLite: {}", e) })?;
 
-        let queue = Self { pool };
+        let queue = Self { pool, gemini_api_key: None };
         queue.init_db().await?;
         Ok(queue)
+    }
+
+    /// Add embedding capability to the queue
+    pub fn with_embeddings(mut self, api_key: &str) -> Self {
+        self.gemini_api_key = Some(api_key.to_string());
+        self
     }
 
     /// Read-only reference to the connection pool (for advanced queries).
@@ -377,53 +386,94 @@ impl JobQueue for SqliteJobQueue {
     }
 
     async fn fetch_relevant_karma(&self, topic: &str, skill_id: &str, limit: i64, current_soul_hash: &str) -> Result<Vec<String>, FactoryError> {
-        // Boltzmann RAG: Time-Decay Karma Injection
-        // - effective_weight = max(0, weight - days_since_creation * 0.5)
-        // - Older karma naturally fades, preventing the Success Trap
-        // - Fresh insights are always prioritized
-        let topic_pattern = format!("%{}%", topic);
-
+        // --- Phase 1: Boltzmann SQL Candidate Search ---
+        // Fetch a larger candidate pool (limit * 5) using the existing weighted time-decay.
+        // We include global karma and skill-specific karma.
+        let candidate_limit = limit * 5;
         let rows = sqlx::query(
-            "SELECT id, lesson, soul_version_hash,
-              max(0, weight - (julianday('now') - julianday(created_at)) * 0.5) AS effective_weight
+            "SELECT id, lesson, soul_version_hash, 
+              max(0, weight - (julianday('now') - julianday(created_at)) * 0.5) AS sql_weight
              FROM karma_logs 
-             WHERE weight > 0 AND (related_skill = ? OR related_skill = 'global' OR lesson LIKE ?) 
-             ORDER BY effective_weight DESC, created_at DESC LIMIT ?"
+             WHERE weight > 0 AND (related_skill = ? OR related_skill = 'global') 
+             ORDER BY sql_weight DESC, created_at DESC LIMIT ?"
         )
         .bind(skill_id)
-        .bind(&topic_pattern)
-        .bind(limit)
+        .bind(candidate_limit)
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to fetch relevant karma: {}", e) })?;
+        .map_err(|e| FactoryError::Infrastructure { reason: format!("SQL Karma Query failed: {}", e) })?;
 
-        let mut karma = Vec::new();
-        for row in &rows {
-            let lesson: String = row.get("lesson");
-            let karma_hash: Option<String> = try_get_optional_string(row, "soul_version_hash");
-            
-            let mut processed_lesson = lesson;
-            if let Some(h) = karma_hash {
-                // The Cognitive Dissonance Trap Fix: Warn LLM if this karma is from a different era
-                if h != current_soul_hash {
-                    processed_lesson = format!("[LEGACY KARMA - from an older Soul version]\n{}", processed_lesson);
+        if rows.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        struct KarmaCandidate {
+            lesson: String,
+            hash: Option<String>,
+            sql_weight: f64,
+            semantic_score: f64,
+        }
+
+        let mut candidates: Vec<KarmaCandidate> = rows.iter().map(|r| KarmaCandidate {
+            lesson: r.get("lesson"),
+            hash: try_get_optional_string(r, "soul_version_hash"),
+            sql_weight: r.get("sql_weight"),
+            semantic_score: 0.0,
+        }).collect();
+
+        // --- Phase 2: Semantic Re-Ranking (The rig-core Injection) ---
+        if let Some(ref api_key) = self.gemini_api_key {
+            if let Ok(client) = gemini::Client::new(api_key) {
+                // 1. Embed current target topic
+                if let Ok(topic_builder) = client.embeddings::<String>("text-embedding-004").document(topic.to_string()) {
+                    if let Ok(topic_res) = topic_builder.build().await {
+                        if let Some((_, topic_many)) = topic_res.first() {
+                            let topic_vec = &topic_many.first().vec;
+
+                            // 2. Embed candidate lessons (batched)
+                            let lessons: Vec<String> = candidates.iter().map(|c| c.lesson.clone()).collect();
+                            if let Ok(builder) = client.embeddings::<String>("text-embedding-004").documents(lessons) {
+                                if let Ok(lessons_res) = builder.build().await {
+                                    // 3. Calculate Cosine Similarity & Hybrid Score
+                                    for (i, (_, emb_many)) in lessons_res.iter().enumerate() {
+                                        let emb_vec = &emb_many.first().vec;
+                                        let sim = cosine_similarity(topic_vec, emb_vec);
+                                        candidates[i].semantic_score = sim;
+                                    }
+
+                                    // Re-rank by Semantic Score (70%) + SQL Weight (30%)
+                                    candidates.sort_by(|a, b| {
+                                        let score_a = a.semantic_score * 0.7 + (a.sql_weight / 100.0) * 0.3;
+                                        let score_b = b.semantic_score * 0.7 + (b.sql_weight / 100.0) * 0.3;
+                                        score_b.partial_cmp(&score_a).unwrap_or(std::cmp::Ordering::Equal)
+                                    });
+                                }
+                            }
+                        }
+                    }
                 }
             }
-            karma.push(processed_lesson);
+        }
+        // --- Phase 3: Selection & Transgenerational Warning ---
+        let mut final_karma = Vec::new();
+        for candidate in candidates.into_iter().take(limit as usize) {
+            let mut lesson_text = candidate.lesson;
+            if let Some(h) = candidate.hash {
+                if h != current_soul_hash {
+                    lesson_text = format!("[LEGACY KARMA - from an older Soul version]\n{}", lesson_text);
+                }
+            }
+            final_karma.push(lesson_text);
         }
 
-        // Update last_applied_at for applied karma entries (Usage Tracking for TTL Decay)
+        // Usage tracking (Audit Log)
         let now = Utc::now().to_rfc3339();
-        for row in &rows {
-            let karma_id: String = row.get("id");
-            let _ = sqlx::query("UPDATE karma_logs SET last_applied_at = ? WHERE id = ?")
-                .bind(&now)
-                .bind(&karma_id)
-                .execute(&self.pool)
-                .await;
+        for r in &rows {
+            let id: String = r.get("id");
+            let _ = sqlx::query("UPDATE karma_logs SET last_applied_at = ? WHERE id = ?").bind(&now).bind(id).execute(&self.pool).await;
         }
 
-        Ok(karma)
+        Ok(final_karma)
     }
 
     async fn store_karma(&self, job_id: &str, skill_id: &str, lesson: &str, karma_type: &str, soul_hash: &str) -> Result<(), FactoryError> {
@@ -877,6 +927,25 @@ impl JobQueue for SqliteJobQueue {
             .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to update intimacy: {}", e) })?;
         Ok(())
     }
+
+    async fn get_pending_job_count(&self) -> Result<i64, FactoryError> {
+        let row = sqlx::query("SELECT COUNT(*) as count FROM jobs WHERE status = ?")
+            .bind(JobStatus::Pending.to_string())
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to count pending jobs: {}", e) })?;
+        Ok(row.get("count"))
+    }
+
+    async fn get_job_count_since(&self, since: chrono::DateTime<chrono::Utc>) -> Result<i64, FactoryError> {
+        let since_str = since.to_rfc3339();
+        let row = sqlx::query("SELECT COUNT(*) as count FROM jobs WHERE created_at >= ?")
+            .bind(since_str)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to count jobs since: {}", e) })?;
+        Ok(row.get("count"))
+    }
 }
 
 impl SqliteJobQueue {
@@ -1175,4 +1244,12 @@ impl SqliteJobQueue {
 fn try_get_optional_string(row: &sqlx::sqlite::SqliteRow, col: &str) -> Option<String> {
     use sqlx::Row;
     row.try_get(col).ok()
+}
+
+fn cosine_similarity(a: &[f64], b: &[f64]) -> f64 {
+    let dot_product: f64 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
+    let norm_a: f64 = a.iter().map(|x| x * x).sum::<f64>().sqrt();
+    let norm_b: f64 = b.iter().map(|x| x * x).sum::<f64>().sqrt();
+    if norm_a == 0.0 || norm_b == 0.0 { return 0.0; }
+    dot_product / (norm_a * norm_b)
 }

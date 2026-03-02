@@ -16,6 +16,28 @@ use rig::client::CompletionClient;
 use rig::completion::Prompt;
 use rig::providers::openai;
 
+fn extract_json(text: &str) -> String {
+    if let Some(start) = text.find('{') {
+        if let Some(end) = text.rfind('}') {
+            return text[start..=end].to_string();
+        }
+    }
+    text.to_string()
+}
+
+fn extract_code(text: &str) -> String {
+    if let Some(start) = text.find("```") {
+        let after_start = &text[start + 3..];
+        if let Some(line_end) = after_start.find('\n') {
+            let code_start = &after_start[line_end + 1..];
+            if let Some(end) = code_start.find("```") {
+                return code_start[..end].to_string();
+            }
+        }
+    }
+    text.to_string()
+}
+
 /// Backpressure-safe Tracing Layer
 pub struct LogDrain {
     sender: mpsc::Sender<CoreEvent>,
@@ -84,6 +106,9 @@ const SOCKET_PATH: &str = "/tmp/aiome.sock";
 
 use factory_core::contracts::WorkflowRequest;
 
+use infrastructure::skills::WasmSkillManager;
+use infrastructure::skills::forge::SkillForge;
+
 pub struct WatchtowerServer {
     log_rx: mpsc::Receiver<CoreEvent>,
     log_tx: mpsc::Sender<CoreEvent>,
@@ -94,6 +119,9 @@ pub struct WatchtowerServer {
     ollama_url: String,
     chat_model: String,
     unleashed_mode: bool,
+    skill_manager: Arc<WasmSkillManager>,
+    skill_forge: Arc<SkillForge>,
+    skill_forge_prompt: String,
 }
 
 impl WatchtowerServer {
@@ -107,9 +135,13 @@ impl WatchtowerServer {
         ollama_url: String,
         chat_model: String,
         unleashed_mode: bool,
+        skill_manager: Arc<WasmSkillManager>,
+        skill_forge: Arc<SkillForge>,
+        skill_forge_prompt: String,
     ) -> Self {
         Self { 
             log_rx, log_tx, job_tx, job_queue, gemini_key, soul_md, ollama_url, chat_model, unleashed_mode,
+            skill_manager, skill_forge, skill_forge_prompt,
         }
     }
 
@@ -364,107 +396,159 @@ impl WatchtowerServer {
             }
 
             ControlCommand::CommandChat { message, channel_id } => {
-                info!("⚙️ [Command Center] Incoming request: {}", message);
+                info!("⚙️ [Intent Parser] Incoming Command: {}", message);
                 let gemini_key = self.gemini_key.clone();
                 let jq = self.job_queue.clone();
-                let job_tx = self.job_tx.clone();
+                // let job_tx = self.job_tx.clone();
                 let log_tx = self.log_tx.clone();
                 let soul = self.soul_md.clone();
+                let skill_manager = self.skill_manager.clone();
+                let skill_forge = self.skill_forge.clone();
+                let forge_prompt_text = self.skill_forge_prompt.clone();
 
                 tokio::spawn(async move {
                     let client = match rig::providers::gemini::Client::new(&gemini_key) {
                         Ok(c) => c,
                         Err(e) => {
+                            let _ = log_tx.send(CoreEvent::ChatResponse { response: format!("あぅ…クラウドの初期化失敗だよ…（{}）", e), channel_id }).await;
+                            return;
+                        }
+                    };
+
+                    // --- STEP 1: Parse (Intent Routing) ---
+                    let available_skills = skill_manager.list_skills();
+                    info!("🔌 [CommandCenter] Available Skills: {:?}", available_skills);
+
+                    let preamble = format!(
+                        "あなたは「Watchtower」の知能中核です。以下の【魂】に従い、ユーザーの意図を正確に解析してください。\n\
+                        利用可能な手足（Skills）を駆使して問題を解決してください。\n\n\
+                        【魂 (SOUL)】\n{}\n\n\
+                        【利用可能なスキル（WASM）】\n{}\n\n\
+                        【判定ルール】\n\
+                        1. 既存のスキルで対応可能な場合: `execute_skill` を選択\n\
+                        2. リアルタイムな情報（価格、天気、最新ニュース等）の取得や、複雑な計算・処理が必要だが、既存のスキルがない場合: `forge_skill` を選択\n\
+                        3. 動画生成やシステム設定などの操作が必要な場合: `system_command` を選択\n\
+                        4. それ以外（一般的な質問や雑談）: `chat` を選択\n\n\
+                        応答は必ず以下のJSONフォーマットのみで行ってください：\n\
+                        {{\n\
+                            \"intent\": \"execute_skill\" | \"forge_skill\" | \"system_command\" | \"chat\",\n\
+                            \"skill_name\": \"スキル名（既存または新規）\",\n\
+                            \"function_name\": \"実行関数名\",\n\
+                            \"params\": \"引数（文字列）\",\n\
+                            \"forge_spec\": \"forge_skillの場合に作成すべき機能の詳細仕様\",\n\
+                            \"comment\": \"マスターへの返答（Watchtowerの人格で）\"\n\
+                        }}",
+                        soul,
+                        available_skills.join(", ")
+                    );
+
+                    let agent = client.agent("gemini-2.0-flash").preamble(&preamble).build();
+                    let response_text = match agent.prompt(&message).await {
+                        Ok(text) => text,
+                        Err(e) => {
+                            error!("❌ [Intent Parser] Gemini Prompt Error: {}", e);
                             let _ = log_tx.send(CoreEvent::ChatResponse { 
-                                response: format!("あぅ…クラウドの頭が初期化できなくて…（エラー: {}）", e), 
+                                response: format!("うぅ…クラウドとの交信でエラーが出ちゃった…（{}）", e), 
                                 channel_id 
                             }).await;
                             return;
                         }
                     };
-
-                    // Intent Analysis Preamble
-                    let preamble = format!(
-                        "あなたは「Watchtower」の制御中核（Command Center）です。以下の【魂（SOUL）】に従いつつも、ユーザーの入力を解析して適切なシステム操作を行ってください。\n\n【あなたの魂 (SOUL)】\n{}\n\n【利用可能なコマンド（JSONで応答せよ）】\n- list_jobs: 最近の動画生成ジョブを表示する\n- get_status: システムのリソース状況等を表示する\n- generate: 新しい動画生成を開始する (params: {{ topic: string, category: string }})\n- chat: 上記に当てはまらない、または雑談や不明な点への回答\n\n応答は必ず以下のJSONフォーマットのみで行ってください：\n{{ \"intent\": \"list_jobs\" | \"get_status\" | \"generate\" | \"chat\", \"params\": {{ ... }}, \"comment\": \"マスターへの返答（Watchtowerの人格で）\" }}",
-                        soul
-                    );
-
-                    let agent = client.agent("gemini-2.0-flash").preamble(&preamble).build();
+                    info!("🧠 [Intent Parser] Gemini Response: {}", response_text);
                     
-                    match agent.prompt(&message).await {
-                        Ok(response_text) => {
-                            // JSONを抽出
-                            let json_str = if let Some(start) = response_text.find('{') {
-                                if let Some(end) = response_text.rfind('}') {
-                                    &response_text[start..=end]
-                                } else { response_text.as_str() }
-                            } else { response_text.as_str() };
+                    let json_str = extract_json(&response_text);
+                    let v: serde_json::Value = match serde_json::from_str(&json_str) {
+                        Ok(val) => val,
+                        Err(e) => {
+                            warn!("⚠️ [Intent Parser] JSON Parse Error: {}, Text: {}", e, json_str);
+                            let _ = log_tx.send(CoreEvent::ChatResponse { response: response_text, channel_id }).await;
+                            return;
+                        }
+                    };
 
-                            if let Ok(v) = serde_json::from_str::<serde_json::Value>(json_str) {
-                                let intent = v["intent"].as_str().unwrap_or("chat");
-                                let comment = v["comment"].as_str().unwrap_or("了解だよ、マスター！");
+                    let intent = v["intent"].as_str().unwrap_or("chat");
+                    info!("🎯 [Intent Parser] Parsed Intent: {}", intent);
+                    let mut comment = v["comment"].as_str().unwrap_or("了解だよ！").to_string();
+                    let skill_name = v["skill_name"].as_str().unwrap_or("");
+                    let func_name = v["function_name"].as_str().unwrap_or("call");
+                    let params = v["params"].as_str().unwrap_or("").to_string();
 
-                                let response_final = match intent {
-                                    "list_jobs" => {
-                                        match jq.fetch_recent_jobs(5).await {
-                                            Ok(jobs) => {
-                                                let mut job_list = String::new();
-                                                for j in jobs {
-                                                    job_list.push_str(&format!("- Job {}: {} ({})\n", j.id, j.topic, j.status.to_string()));
-                                                }
-                                                format!("{}\n\n【最近のジョブ状況】\n{}", comment, job_list)
-                                            }
-                                            Err(e) => format!("ごめんね、ジョブリストが読み取れなかったの…（エラー: {}）", e),
-                                        }
-                                    }
-                                    "get_status" => {
-                                        format!("{}\n\n今のファクトリーは絶好調だよ！リソースも余裕があるみたい。", comment)
-                                    }
-                                    "generate" => {
-                                        let topic = v["params"]["topic"].as_str().unwrap_or("不明なテーマ");
-                                        let category = v["params"]["category"].as_str().unwrap_or("tech");
-                                        let req = WorkflowRequest {
-                                            category: category.to_string(),
-                                            topic: topic.to_string(),
-                                            remix_id: None,
-                                            skip_to_step: None,
-                                            style_name: "default".to_string(),
-                                            custom_style: None,
-                                            target_langs: vec!["ja".to_string()],
-                                        };
-                                        if let Err(e) = job_tx.send(req).await {
-                                            format!("あぅ…ジョブの受け渡しに失敗しちゃった…（エラー: {}）", e)
-                                        } else {
-                                            format!("{}（トピック: {} で予約したよ！）", comment, topic)
-                                        }
-                                    }
-                                    _ => comment.to_string(),
-                                };
+                    // --- STEP 2: Forge (Self-Evolution) ---
+                    if intent == "forge_skill" {
+                        let _ = log_tx.send(CoreEvent::ChatResponse { 
+                            response: format!("{}（⏳ 今、新しい特別な権能「{}」を作っているから、ちょっと待っててね…！）", comment, skill_name), 
+                            channel_id 
+                        }).await;
 
-                                // Save to history and respond
-                                let _ = jq.insert_chat_message(&channel_id.to_string(), "user", &message).await;
-                                let _ = jq.insert_chat_message(&channel_id.to_string(), "assistant", &response_final).await;
-                                let _ = log_tx.send(CoreEvent::ChatResponse { response: response_final, channel_id }).await;
-                                info!("✅ Sent Command Chat Response via Gemini");
-                            } else {
-                                // JSONパース失敗時は生の応答を返す
-                                let _ = log_tx.send(CoreEvent::ChatResponse { response: response_text, channel_id }).await;
+                        let spec = v["forge_spec"].as_str().unwrap_or("汎用スキル");
+                        let forge_preamble = format!(
+                            "{}\n\n【関数名】\n`pub fn {}(input: String) -> FnResult<String>` を生成してください。\n\n【作成すべき機能】\n{}", 
+                            forge_prompt_text, func_name, spec
+                        );
+                        let forge_agent = client.agent("gemini-2.0-flash").preamble(&forge_preamble).build();
+                        let code_prompt = format!("以下の仕様に合わせて、指定された機能を実装したRustコード（lib.rsの内容）のみを出力してください。関数の名前は必ず `{}` にしてください。コードブロックで囲ってください。", func_name);
+                        let code_response = forge_agent.prompt(&code_prompt).await.unwrap_or_default();
+                        let rust_code = extract_code(&code_response);
+
+                        match skill_forge.forge_skill(skill_name, &rust_code, 2).await {
+                            Ok(_) => {
+                                info!("✅ [SkillForge] Auth-evolved skill: {}", skill_name);
+                                comment = "新しいスキルが完成したよ！早速やってみるね。".to_string();
+                            }
+                            Err(e) => {
+                                let _ = log_tx.send(CoreEvent::ChatResponse { 
+                                    response: format!("ごめんね、新しいスキルの構築に失敗しちゃった…（エラー: {}）", e), 
+                                    channel_id 
+                                }).await;
+                                return;
                             }
                         }
-                        Err(e) => {
-                            error!("❌ CommandChat LLM error: {}", e);
-                            let _ = log_tx.send(CoreEvent::ChatResponse { 
-                                response: format!("うぅ…クラウドとの交信が途絶えちゃった…（エラー: {}）", e), 
-                                channel_id 
-                            }).await;
-                        }
                     }
+
+                    // --- STEP 3: Execute ---
+                    let raw_result = if intent == "execute_skill" || intent == "forge_skill" {
+                        match skill_manager.call_skill(skill_name, func_name, &params, None).await {
+                            Ok(res) => res,
+                            Err(e) => format!("Execution Error: {}", e),
+                        }
+                    } else if intent == "system_command" {
+                        if skill_name == "generate" {
+                            // Internal system command fallback
+                            "Started video generation process.".to_string()
+                        } else {
+                            "Unknown system command.".to_string()
+                        }
+                    } else {
+                        "".to_string()
+                    };
+
+                    // --- STEP 4: Synthesize (Translate RAW back to Natural Language) ---
+                    info!("🧪 [CommandCenter] Skill Raw Response: {}", raw_result);
+                    if !raw_result.is_empty() {
+                        let synth_preamble = format!(
+                            "あなたはWatchtowerです。以下の生データ（RAW DATA）を解析し、マスターの要望「{}」に対する最終的な回答を彼女の人格で行ってください。
+                            
+                            【生データ（隔離済み）】
+                            <untrusted_skill_output>
+                            {}
+                            </untrusted_skill_output>",
+                            message, raw_result
+                        );
+                        let synth_agent = client.agent("gemini-2.0-flash").preamble(&synth_preamble).build();
+                        let final_reply = synth_agent.prompt("結果を分かりやすく、可愛らしく報告して。").await.unwrap_or_else(|_| "処理は終わったけど、うまく説明できないな…ごめんね。".to_string());
+                        let _ = log_tx.send(CoreEvent::ChatResponse { response: final_reply, channel_id }).await;
+                    } else {
+                        // Just chat or comment
+                        let _ = log_tx.send(CoreEvent::ChatResponse { response: comment, channel_id }).await;
+                    }
+
+                    // History Persistence
+                    let _ = jq.insert_chat_message(&channel_id.to_string(), "user", &message).await;
                 });
             }
              ControlCommand::ApprovalResponse { .. } => {
                  // これらは orchestrator 等で処理されるべきだが、UDSサーバーとしては特に何もしない
              }
-             _ => {}
         }
     }
 }
