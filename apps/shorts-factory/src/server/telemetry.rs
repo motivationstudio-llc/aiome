@@ -65,6 +65,23 @@ impl TelemetryHub {
         let _ = self.tx_log.send(event); 
     }
 
+    /// 現在のシステム状態を即座に計測して返す (Real-Time Interoception用)
+    pub fn get_current_status(&self) -> SystemHeartbeat {
+        let (cpu, mem) = {
+            let mut s = self.system.lock().unwrap();
+            s.refresh_cpu();
+            s.refresh_memory();
+            (s.global_cpu_info().cpu_usage(), s.used_memory() / 1024 / 1024)
+        };
+
+        SystemHeartbeat {
+            cpu_usage: cpu,
+            memory_usage_mb: mem,
+            vram_usage_mb: mem / 2, // M4 Pro Unified Memory Mock
+            active_actor: None,
+        }
+    }
+
     /// 定期的にシステムリソースを計測して配信する
     pub async fn start_heartbeat_loop(&self) {
         let tx = self.tx_heartbeat.clone();

@@ -17,3 +17,5 @@ mod workspace_manager_tests;
 pub mod sns_watcher;
 pub mod oracle;
 pub mod skills;
+pub mod soul_mutator;
+pub mod dream_state;

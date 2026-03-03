@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use rig::providers::gemini;
 use rig::prelude::*;
 use rig::completion::Prompt;
-use tracing::{info, error};
+use tracing::info;
 
 /// 動画コンセプト生成機 (Director)
 /// 

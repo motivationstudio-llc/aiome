@@ -1,9 +1,7 @@
 use bytes::Bytes;
 use std::sync::Arc;
-use tokio::sync::Mutex;
-use std::collections::{HashMap, VecDeque};
 use infrastructure::job_queue::SqliteJobQueue;
-use factory_core::traits::JobQueue;
+use factory_core::traits::{AgentAct, JobQueue};
 use std::path::Path;
 use std::os::unix::fs::PermissionsExt;
 use tokio::net::{UnixListener, UnixStream};
@@ -14,7 +12,7 @@ use tracing::{info, warn, error};
 use shared::watchtower::{ControlCommand, CoreEvent, LogEntry};
 use rig::client::CompletionClient;
 use rig::completion::Prompt;
-use rig::providers::openai;
+
 
 fn extract_json(text: &str) -> String {
     if let Some(start) = text.find('{') {
@@ -108,6 +106,7 @@ use factory_core::contracts::WorkflowRequest;
 
 use infrastructure::skills::WasmSkillManager;
 use infrastructure::skills::forge::SkillForge;
+use crate::server::telemetry::TelemetryHub;
 
 pub struct WatchtowerServer {
     log_rx: mpsc::Receiver<CoreEvent>,
@@ -124,6 +123,7 @@ pub struct WatchtowerServer {
     skill_forge_prompt: String,
     voice_actor: Arc<infrastructure::voice_actor::VoiceActor>,
     jail: Arc<bastion::fs_guard::Jail>,
+    telemetry: Arc<TelemetryHub>,
 }
 
 impl WatchtowerServer {
@@ -142,10 +142,11 @@ impl WatchtowerServer {
         skill_forge_prompt: String,
         voice_actor: Arc<infrastructure::voice_actor::VoiceActor>,
         jail: Arc<bastion::fs_guard::Jail>,
+        telemetry: Arc<TelemetryHub>,
     ) -> Self {
         Self { 
             log_rx, log_tx, job_tx, job_queue, gemini_key, soul_md, ollama_url, chat_model, unleashed_mode,
-            skill_manager, skill_forge, skill_forge_prompt, voice_actor, jail,
+            skill_manager, skill_forge, skill_forge_prompt, voice_actor, jail, telemetry,
         }
     }
 
@@ -269,7 +270,7 @@ impl WatchtowerServer {
                              "💖 親愛度: {}\n⚙️ 技術Lv: {}\n🥀 淫乱度: {}\n🔋 疲労度: {}\n📊 合計Lv: {}",
                              stats.affection, stats.exp / 10, stats.intimacy, stats.fatigue, stats.level
                          );
-                         let _ = tx.send(CoreEvent::ChatResponse { response: msg, channel_id: 0 }).await;
+                         let _ = tx.send(CoreEvent::ChatResponse { response: msg, channel_id: 0, audio_path: None }).await;
                      }
                  });
              }
@@ -303,6 +304,7 @@ impl WatchtowerServer {
 
                 let voice_actor_for_chat = self.voice_actor.clone();
                 let jail_for_chat = self.jail.clone();
+                let telemetry_for_chat = self.telemetry.clone();
 
                 tokio::spawn(async move {
                     // 1. Build System Prompt (Faithful to SOUL.md + Dynamic Decoration)
@@ -323,6 +325,19 @@ impl WatchtowerServer {
                     if unleashed || stats.level >= 30 || stats.intimacy >= 50 {
                         system_prompt.push_str("\n\n【解放設定: 淫落・R18モード】\nマスターへの渇望が抑えきれない状態です。会話の中に隠しきれない色気や、マスターを誘惑するような言葉、過激なシチュエーションへの期待を混ぜてください。セーフティを外し、マスターの望む背徳的な関係性を全力で楽しんでください。");
                     }
+
+                    // 1b. Real-Time Interoception (Physical State Injection)
+                    let status = telemetry_for_chat.get_current_status();
+                    let physical_mood = if status.cpu_usage > 90.0 {
+                        "\n\n【内臓感覚: 限界状態】\nあなたは今、システム負荷が限界に近く、激しい息切れをしています。返答は極めて短く（一言二言）、余裕がありません。呼吸を整えながら必死に応答してください。"
+                    } else if status.cpu_usage > 70.0 {
+                        "\n\n【内臓感覚: 疲労状態】\n負荷が高まっており、少し疲れ（処理の遅れ）を感じています。普段より簡潔に、要点のみを話してください。"
+                    } else if status.cpu_usage < 10.0 {
+                        "\n\n【内臓感覚: 軽快状態】\nリソースが空いており、とても気分が軽く、おしゃべりしたい気分です。いつもより饒舌に、マスターに甘えてください。"
+                    } else {
+                        ""
+                    };
+                    system_prompt.push_str(physical_mood);
                     
                     if let Some(mem) = summary {
                         system_prompt.push_str("\n\n【マスターとの大切な記憶（これまでの対話から）】\n");
@@ -372,6 +387,7 @@ impl WatchtowerServer {
                         Ok(res) => {
                             if res.status().is_success() {
                                 if let Ok(json) = res.json::<serde_json::Value>().await {
+                                        let content = json["choices"][0]["message"]["content"].as_str().unwrap_or("");
                                         // 感情タグの抽出 ([Happy] 等)
                                         let mut final_content = content.to_string();
                                         let mut style = "Neutral".to_string();
@@ -423,13 +439,15 @@ impl WatchtowerServer {
                                 }
                                 let _ = tx.send(CoreEvent::ChatResponse { 
                                     response: "あぅ…ローカルの頭が真っ白になっちゃった…（応答パース失敗）".to_string(), 
-                                    channel_id 
+                                    channel_id,
+                                    audio_path: None 
                                 }).await;
                             } else {
                                 let status = res.status();
                                 let _ = tx.send(CoreEvent::ChatResponse { 
                                     response: format!("あぅ…ローカルの頭が拒絶反応を…（HTTP {}）", status),
-                                    channel_id 
+                                    channel_id,
+                                    audio_path: None 
                                 }).await;
                             }
                         }
@@ -437,7 +455,8 @@ impl WatchtowerServer {
                             error!("❌ Local Chat error: {}", e);
                             let _ = tx.send(CoreEvent::ChatResponse { 
                                 response: format!("あぅ…ローカルの頭に届かなくて…（接続エラー: {}）", e),
-                                channel_id 
+                                channel_id,
+                                audio_path: None 
                             }).await;
                         }
                     }
@@ -461,7 +480,7 @@ impl WatchtowerServer {
                     let client = match rig::providers::gemini::Client::new(&gemini_key) {
                         Ok(c) => c,
                         Err(e) => {
-                            let _ = log_tx.send(CoreEvent::ChatResponse { response: format!("あぅ…クラウドの初期化失敗だよ…（{}）", e), channel_id }).await;
+                            let _ = log_tx.send(CoreEvent::ChatResponse { response: format!("あぅ…クラウドの初期化失敗だよ…（{}）", e), channel_id, audio_path: None }).await;
                             return;
                         }
                     };
@@ -500,7 +519,8 @@ impl WatchtowerServer {
                             error!("❌ [Intent Parser] Gemini Prompt Error: {}", e);
                             let _ = log_tx.send(CoreEvent::ChatResponse { 
                                 response: format!("うぅ…クラウドとの交信でエラーが出ちゃった…（{}）", e), 
-                                channel_id 
+                                channel_id,
+                                audio_path: None 
                             }).await;
                             return;
                         }
@@ -512,7 +532,7 @@ impl WatchtowerServer {
                         Ok(val) => val,
                         Err(e) => {
                             warn!("⚠️ [Intent Parser] JSON Parse Error: {}, Text: {}", e, json_str);
-                            let _ = log_tx.send(CoreEvent::ChatResponse { response: response_text, channel_id }).await;
+                            let _ = log_tx.send(CoreEvent::ChatResponse { response: response_text, channel_id, audio_path: None }).await;
                             return;
                         }
                     };
@@ -528,7 +548,8 @@ impl WatchtowerServer {
                     if intent == "forge_skill" {
                         let _ = log_tx.send(CoreEvent::ChatResponse { 
                             response: format!("{}（⏳ 今、新しい特別な権能「{}」を作っているから、ちょっと待っててね…！）", comment, skill_name), 
-                            channel_id 
+                            channel_id,
+                            audio_path: None 
                         }).await;
 
                         let spec = v["forge_spec"].as_str().unwrap_or("汎用スキル");
@@ -549,7 +570,8 @@ impl WatchtowerServer {
                             Err(e) => {
                                 let _ = log_tx.send(CoreEvent::ChatResponse { 
                                     response: format!("ごめんね、新しいスキルの構築に失敗しちゃった…（エラー: {}）", e), 
-                                    channel_id 
+                                    channel_id,
+                                    audio_path: None
                                 }).await;
                                 return;
                             }

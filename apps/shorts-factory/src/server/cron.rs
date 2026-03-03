@@ -446,8 +446,50 @@ pub async fn start_cron_scheduler(
         })?
     ).await?;
 
+    // === Job 9: The Transmutation — Runs daily at 05:00 (Samsara Phase 5: Transmigration) ===
+    let jq_mutate = job_queue.clone();
+    let gem_key_mutate = gemini_api_key.clone();
+    let ws_dir_mutate = workspace_dir.clone();
+    sched.add(
+        Job::new_async("0 0 5 * * *", move |_uuid, mut _l| {
+            let jq = jq_mutate.clone();
+            let key = gem_key_mutate.clone();
+            let mutator = infrastructure::soul_mutator::SoulMutator::new(
+                &key, "gemini-2.5-flash", 
+                std::path::PathBuf::from(&ws_dir_mutate)
+            );
+            Box::pin(async move {
+                info!("🧬 [Transmutation] Waking up for Phase 5 of Samsara Protocol...");
+                match mutator.transmute(&*jq).await {
+                    Ok(true) => info!("✅ [Transmutation] I have evolved to a new state."),
+                    Ok(false) => info!("🧬 [Transmutation] Current state is already optimal."),
+                    Err(e) => error!("❌ [Transmutation] Failed to evolve: {}", e),
+                }
+            })
+        })?
+    ).await?;
+
+    // === Job 10: The Dreaming — Runs hourly, triggers only if idle (Dream State) ===
+    let jq_dream = job_queue.clone();
+    let gem_key_dream = gemini_api_key.clone();
+    let brave_key_dream = brave_api_key.clone();
+    sched.add(
+        Job::new_async("0 45 * * * *", move |_uuid, mut _l| {
+            let jq = jq_dream.clone();
+            let gem_key = gem_key_dream.clone();
+            let b_key = brave_key_dream.clone();
+            Box::pin(async move {
+                let dreamer = infrastructure::dream_state::DreamState::new(&gem_key, "gemini-2.5-flash");
+                let sonar = infrastructure::trend_sonar::BraveTrendSonar::new(b_key);
+                if let Err(e) = dreamer.dream(&*jq, &sonar).await {
+                    error!("❌ [Dreaming] The AI had a nightmare: {}", e);
+                }
+            })
+        })?
+    ).await?;
+
     sched.start().await?;
-    info!("⏰ Cron scheduler started. The Wheel of Samsara is turning. (Synthesis: 7:00/19:00, Zombie Hunter: 15m, Distiller: 5m, Scavengers: daily, Sentinel: 4h, Oracle: 1h)");
+    info!("⏰ Cron scheduler started. The Wheel of Samsara is turning. (Synthesis: 7:00/19:00, Zombie Hunter: 15m, Distiller: 5m, Scavengers: daily, Sentinel: 4h, Oracle: 1h, Transmutation: 5:00, Dreaming: hourly)");
 
     Ok(sched)
 }

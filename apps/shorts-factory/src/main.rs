@@ -15,7 +15,6 @@ mod server;
 mod simulator;
 mod job_worker;
 use job_worker::JobWorker;
-use server::telemetry::TelemetryHub;
 use server::router::{create_router, AppState};
 use supervisor::{Supervisor, SupervisorPolicy};
 use orchestrator::ProductionOrchestrator;
@@ -235,6 +234,10 @@ async fn main() -> Result<(), anyhow::Error> {
     // 5.4 Voice Architecture (Style-Bert-VITS2)
     let tts_url = "http://localhost:5001";
     let voice_actor = Arc::new(VoiceActor::new(tts_url, "jvnv-F1-jp"));
+
+    // 5.5 Telemetry & Interoception
+    let telemetry = Arc::new(crate::server::telemetry::TelemetryHub::new());
+    telemetry.start_heartbeat_loop().await;
     
     // 0.2. Start Watchtower UDS Server (deferred — needs job_queue Arc)
     let wt_server = server::watchtower::WatchtowerServer::new(
@@ -252,6 +255,7 @@ async fn main() -> Result<(), anyhow::Error> {
         skill_forge_prompt,
         voice_actor.clone(),
         jail.clone(),
+        telemetry.clone(),
     );
     tokio::spawn(wt_server.start());
 
@@ -306,7 +310,7 @@ async fn main() -> Result<(), anyhow::Error> {
         &config.comfyui_base_dir,
         config.comfyui_timeout_secs,
     );
-    let voice_actor_val: VoiceActor = (*voice_actor).clone();
+    let voice_actor_val = voice_actor.clone();
     let bgm_path = std::env::current_dir()?.join("resources/bgm");
     if !bgm_path.exists() {
         std::fs::create_dir_all(&bgm_path)?;
@@ -339,18 +343,14 @@ async fn main() -> Result<(), anyhow::Error> {
         Commands::Serve { port } => {
             info!("📡 Starting Command Center Server on port {}", port);
             
-            // Telemetry Hub
-            let telemetry = Arc::new(TelemetryHub::new());
-            telemetry.start_heartbeat_loop().await;
-
             // 6.2 Autonomous JobWorker (The Autonomous Engine)
-            let _worker = Arc::new(JobWorker::new(
+            let worker = Arc::new(JobWorker::new(
                 job_queue.clone(),
                 orchestrator.clone(),
                 jail.clone(),
                 soul_md.clone(),
             ));
-            // tokio::spawn(worker.start_loop());
+            tokio::spawn(worker.start_loop());
 
             // Axum Router
             let state = Arc::new(AppState {

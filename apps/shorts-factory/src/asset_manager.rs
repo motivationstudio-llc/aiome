@@ -61,6 +61,9 @@ impl AssetManager {
                  script_intro: concept.script_intro.clone(),
                  script_body: concept.script_body.clone(),
                  script_outro: concept.script_outro.clone(),
+                 style_intro: concept.style_intro.clone(),
+                 style_body: concept.style_body.clone(),
+                 style_outro: concept.style_outro.clone(),
              });
         }
 

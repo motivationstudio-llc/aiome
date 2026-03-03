@@ -25,7 +25,7 @@ use tracing::info;
 pub struct ProductionOrchestrator {
     pub trend_sonar: BraveTrendSonar,
     pub concept_manager: ConceptManager,
-    pub voice_actor: VoiceActor,
+    pub voice_actor: Arc<VoiceActor>,
     pub comfy_bridge: ComfyBridgeClient,
     pub media_forge: MediaForgeClient,
     pub sound_mixer: SoundMixer,
@@ -40,7 +40,7 @@ impl ProductionOrchestrator {
     pub fn new(
         trend_sonar: BraveTrendSonar,
         concept_manager: ConceptManager,
-        voice_actor: VoiceActor,
+        voice_actor: Arc<VoiceActor>,
         comfy_bridge: ComfyBridgeClient,
         media_forge: MediaForgeClient,
         sound_mixer: SoundMixer,
@@ -120,6 +120,9 @@ impl AgentAct for ProductionOrchestrator {
             if let Some(v) = custom.fade_duration { style.fade_duration = v; }
         }
 
+        // 保存: スナップショット (Phase 1.5)
+        self.asset_manager.save_metadata(&project_id, &style)?;
+
         // --- Phase 2: Asset Generation (Exclusive GPU Access) ---
         info!("💎 Phase 2: Asset Generation (GPU Exclusive)...");
         let mut audio_assets = std::collections::HashMap::new(); // lang -> Vec<PathBuf>
@@ -170,7 +173,7 @@ impl AgentAct for ProductionOrchestrator {
                                 style: if style_name.is_empty() { None } else { Some(style_name.clone()) },
                                 model_name: None, // Default in VoiceActor
                             };
-                            let v_res = self.supervisor.enforce_act(&self.voice_actor, voice_req).await?;
+                            let v_res = self.supervisor.enforce_act(&*self.voice_actor, voice_req).await?;
                             let temp_v = self.supervisor.jail().root().join(&v_res.audio_path);
                             std::fs::create_dir_all(audio_path.parent().unwrap()).ok();
                             std::fs::copy(&temp_v, &audio_path).map_err(|e| FactoryError::Infrastructure { reason: e.to_string() })?;

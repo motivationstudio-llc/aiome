@@ -9,6 +9,7 @@ use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
 use std::time::Duration;
 use uuid::Uuid;
 use chrono::Utc;
+use tracing::warn;
 
 /// Job Queue that utilizes SQLite in WAL Mode to allow multi-threaded queue operations.
 /// Implements **The Immortal Samsara Schema** — crash-resistant, self-healing, and eternal.
@@ -154,6 +155,7 @@ impl SqliteJobQueue {
             "ALTER TABLE sns_metrics_history ADD COLUMN is_finalized INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE sns_metrics_history ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE karma_logs ADD COLUMN soul_version_hash TEXT",
+            "ALTER TABLE karma_logs ADD COLUMN karma_embedding BLOB",
         ] {
             let _ = sqlx::query(migration).execute(&self.pool).await;
         }
@@ -219,6 +221,19 @@ impl SqliteJobQueue {
         )
         .execute(&self.pool).await
         .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to create chat_memory_summaries: {}", e) })?;
+
+        // --- Phase 5: Transmigration History ---
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS soul_mutation_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                old_hash TEXT NOT NULL,
+                new_hash TEXT NOT NULL,
+                mutation_reason TEXT NOT NULL,
+                created_at TEXT DEFAULT (datetime('now'))
+            );"
+        )
+        .execute(&self.pool).await
+        .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to create soul_mutation_history: {}", e) })?;
 
         Ok(())
     }
@@ -387,11 +402,9 @@ impl JobQueue for SqliteJobQueue {
 
     async fn fetch_relevant_karma(&self, topic: &str, skill_id: &str, limit: i64, current_soul_hash: &str) -> Result<Vec<String>, FactoryError> {
         // --- Phase 1: Boltzmann SQL Candidate Search ---
-        // Fetch a larger candidate pool (limit * 5) using the existing weighted time-decay.
-        // We include global karma and skill-specific karma.
         let candidate_limit = limit * 5;
         let rows = sqlx::query(
-            "SELECT id, lesson, soul_version_hash, 
+            "SELECT id, lesson, soul_version_hash, karma_embedding,
               max(0, weight - (julianday('now') - julianday(created_at)) * 0.5) AS sql_weight
              FROM karma_logs 
              WHERE weight > 0 AND (related_skill = ? OR related_skill = 'global') 
@@ -412,44 +425,50 @@ impl JobQueue for SqliteJobQueue {
             hash: Option<String>,
             sql_weight: f64,
             semantic_score: f64,
+            stored_embedding: Option<Vec<f64>>,
         }
 
-        let mut candidates: Vec<KarmaCandidate> = rows.iter().map(|r| KarmaCandidate {
-            lesson: r.get("lesson"),
-            hash: try_get_optional_string(r, "soul_version_hash"),
-            sql_weight: r.get("sql_weight"),
-            semantic_score: 0.0,
+        let mut candidates: Vec<KarmaCandidate> = rows.iter().map(|r| {
+            let embedding_bytes: Option<Vec<u8>> = r.try_get("karma_embedding").ok();
+            let stored_embedding = embedding_bytes.map(|b| {
+                b.chunks_exact(8)
+                    .map(|chunk| f64::from_le_bytes(chunk.try_into().unwrap()))
+                    .collect()
+            });
+
+            KarmaCandidate {
+                lesson: r.get("lesson"),
+                hash: try_get_optional_string(r, "soul_version_hash"),
+                sql_weight: r.get("sql_weight"),
+                semantic_score: 0.0,
+                stored_embedding,
+            }
         }).collect();
 
-        // --- Phase 2: Semantic Re-Ranking (The rig-core Injection) ---
+        // --- Phase 2: Semantic Re-Ranking (Optimized RAG) ---
         if let Some(ref api_key) = self.gemini_api_key {
             if let Ok(client) = gemini::Client::new(api_key) {
-                // 1. Embed current target topic
+                // Only embed current target topic (Candidates are already embedded in DB)
                 if let Ok(topic_builder) = client.embeddings::<String>("text-embedding-004").document(topic.to_string()) {
                     if let Ok(topic_res) = topic_builder.build().await {
                         if let Some((_, topic_many)) = topic_res.first() {
                             let topic_vec = &topic_many.first().vec;
 
-                            // 2. Embed candidate lessons (batched)
-                            let lessons: Vec<String> = candidates.iter().map(|c| c.lesson.clone()).collect();
-                            if let Ok(builder) = client.embeddings::<String>("text-embedding-004").documents(lessons) {
-                                if let Ok(lessons_res) = builder.build().await {
-                                    // 3. Calculate Cosine Similarity & Hybrid Score
-                                    for (i, (_, emb_many)) in lessons_res.iter().enumerate() {
-                                        let emb_vec = &emb_many.first().vec;
-                                        let sim = cosine_similarity(topic_vec, emb_vec);
-                                        candidates[i].semantic_score = sim;
-                                    }
-
-                                    // Re-rank by Semantic Score (70%) + SQL Weight (30%)
-                                    candidates.sort_by(|a, b| {
-                                        let score_a = a.semantic_score * 0.7 + (a.sql_weight / 100.0) * 0.3;
-                                        let score_b = b.semantic_score * 0.7 + (b.sql_weight / 100.0) * 0.3;
-                                        score_b.partial_cmp(&score_a).unwrap_or(std::cmp::Ordering::Equal)
-                                    });
+                            for candidate in candidates.iter_mut() {
+                                if let Some(ref emb_vec) = candidate.stored_embedding {
+                                    candidate.semantic_score = cosine_similarity(topic_vec, emb_vec);
                                 }
                             }
+
+                            // Re-rank by Semantic Score (70%) + SQL Weight (30%)
+                            candidates.sort_by(|a, b| {
+                                let score_a = a.semantic_score * 0.7 + (a.sql_weight / 100.0) * 0.3;
+                                let score_b = b.semantic_score * 0.7 + (b.sql_weight / 100.0) * 0.3;
+                                score_b.partial_cmp(&score_a).unwrap_or(std::cmp::Ordering::Equal)
+                            });
                         }
+                    } else {
+                        warn!("🧬 [KarmaRAG] Failed to embed topic for semantic ranking. Falling back to SQL weight.");
                     }
                 }
             }
@@ -479,8 +498,26 @@ impl JobQueue for SqliteJobQueue {
     async fn store_karma(&self, job_id: &str, skill_id: &str, lesson: &str, karma_type: &str, soul_hash: &str) -> Result<(), FactoryError> {
         let id = Uuid::new_v4().to_string();
         let now = Utc::now().to_rfc3339();
+
+        let mut embedding: Option<Vec<u8>> = None;
+        if let Some(ref api_key) = self.gemini_api_key {
+            if let Ok(client) = gemini::Client::new(api_key) {
+                if let Ok(builder) = client.embeddings::<String>("text-embedding-004").document(lesson.to_string()) {
+                    if let Ok(res) = builder.build().await {
+                        if let Some((_, many)) = res.first() {
+                            let emb = many.first();
+                            let bytes: Vec<u8> = emb.vec.iter().flat_map(|f| f.to_le_bytes()).collect();
+                            embedding = Some(bytes);
+                        }
+                    } else {
+                        warn!("🧬 [KarmaStore] Failed to generate embedding for lesson (ignoring)");
+                    }
+                }
+            }
+        }
+
         sqlx::query(
-            "INSERT INTO karma_logs (id, job_id, karma_type, related_skill, lesson, soul_version_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+            "INSERT INTO karma_logs (id, job_id, karma_type, related_skill, lesson, soul_version_hash, created_at, karma_embedding) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
         )
         .bind(&id)
         .bind(job_id)
@@ -489,6 +526,7 @@ impl JobQueue for SqliteJobQueue {
         .bind(lesson)
         .bind(soul_hash)
         .bind(&now)
+        .bind(embedding)
         .execute(&self.pool)
         .await
         .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to store karma for job {}: {}", job_id, e) })?;
@@ -946,158 +984,8 @@ impl JobQueue for SqliteJobQueue {
             .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to count jobs since: {}", e) })?;
         Ok(row.get("count"))
     }
-}
 
-impl SqliteJobQueue {
-    // --- Ultimate Production Audit: Karma Distillation ---
-    pub async fn fetch_skills_for_distillation(&self, threshold: i64) -> Result<Vec<String>, FactoryError> {
-        let rows = sqlx::query(
-            "SELECT related_skill FROM karma_logs GROUP BY related_skill HAVING COUNT(id) > ?"
-        )
-        .bind(threshold)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to fetch skills for distillation: {}", e) })?;
-
-        let mut skills = Vec::new();
-        for r in rows {
-            skills.push(r.try_get("related_skill").unwrap_or_else(|_| "".to_string()));
-        }
-        Ok(skills)
-    }
-
-    pub async fn fetch_raw_karma_for_skill(&self, skill: &str) -> Result<Vec<(String, String)>, FactoryError> {
-        let rows = sqlx::query(
-            "SELECT id, lesson FROM karma_logs WHERE related_skill = ?"
-        )
-        .bind(skill)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to fetch raw karma for skill: {}", e) })?;
-
-        let mut karma = Vec::new();
-        for r in rows {
-            let id: String = try_get_optional_string(&r, "id").unwrap_or_else(|| "".to_string());
-            let lesson: String = try_get_optional_string(&r, "lesson").unwrap_or_else(|| "".to_string());
-            karma.push((id, lesson));
-        }
-        Ok(karma)
-    }
-
-    pub async fn apply_distilled_karma(&self, skill: &str, distilled_lesson: &str, old_karma_ids: &[String], soul_hash: &str) -> Result<(), FactoryError> {
-        let mut tx = self.pool.begin().await
-            .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to start tx for distillation: {}", e) })?;
-
-        for id in old_karma_ids {
-            sqlx::query("DELETE FROM karma_logs WHERE id = ?").bind(id).execute(&mut *tx).await
-                .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to delete old karma {}: {}", id, e) })?;
-        }
-
-        let new_id = uuid::Uuid::new_v4().to_string();
-        sqlx::query(
-            "INSERT INTO karma_logs (id, karma_type, related_skill, lesson, weight, soul_version_hash)
-             VALUES (?, 'Synthesized', ?, ?, 100, ?)"
-        )
-            .bind(&new_id)
-            .bind(skill)
-            .bind(distilled_lesson)
-            .bind(soul_hash)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to insert synthesized karma: {}", e) })?;
-
-        tx.commit().await
-            .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to commit distlillation tx: {}", e) })?;
-
-        Ok(())
-    }
-
-    // --- Ultimate Production Audit: Poison Pill (Infinite Billing Loop Defense) ---
-    pub async fn increment_job_retry_count(&self, job_id: &str) -> Result<bool, FactoryError> {
-        let row = sqlx::query("UPDATE jobs SET retry_count = retry_count + 1 WHERE id = ? RETURNING retry_count")
-            .bind(job_id)
-            .fetch_one(&self.pool)
-            .await
-            .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to increment job retry count: {}", e) })?;
-            
-        let count: i64 = row.get("retry_count");
-        if count >= 3 {
-            sqlx::query("UPDATE jobs SET status = 'Failed', error_message = 'Poison Pill Activated: API continually fails.' WHERE id = ?")
-                .bind(job_id)
-                .execute(&self.pool).await.ok();
-            Ok(true) // Poison pill activated
-        } else {
-            Ok(false)
-        }
-    }
-
-    pub async fn increment_oracle_retry_count(&self, record_id: i64) -> Result<bool, FactoryError> {
-        let row = sqlx::query("UPDATE sns_metrics_history SET retry_count = retry_count + 1 WHERE id = ? RETURNING retry_count")
-            .bind(record_id)
-            .fetch_one(&self.pool)
-            .await
-            .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to increment oracle retry count: {}", e) })?;
-            
-        let count: i64 = row.get("retry_count");
-        if count >= 3 {
-            sqlx::query("UPDATE sns_metrics_history SET is_finalized = 1, oracle_reason = 'Poison Pill Activated: LLM Evaluation continually fails.' WHERE id = ?")
-                .bind(record_id)
-                .execute(&self.pool).await.ok();
-            Ok(true) // Poison pill activated
-        } else {
-            Ok(false)
-        }
-    }
-
-    // --- The Final Wire: Global Circuit Breaker (Mass Extinction Defense) ---
-    pub async fn get_global_api_failures(&self) -> Result<i64, FactoryError> {
-        let row = sqlx::query("SELECT value FROM system_state WHERE key = 'consecutive_api_failures'")
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to read system_state: {}", e) })?;
-        
-        if let Some(r) = row {
-            let val_str: String = r.try_get("value").unwrap_or_default();
-            Ok(val_str.parse().unwrap_or(0))
-        } else {
-            Ok(0)
-        }
-    }
-
-    pub async fn record_global_api_failure(&self) -> Result<i64, FactoryError> {
-        let current = self.get_global_api_failures().await?;
-        let next = current + 1;
-        
-        sqlx::query(
-            "INSERT INTO system_state (key, value, updated_at) 
-             VALUES ('consecutive_api_failures', ?, datetime('now'))
-             ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at"
-        )
-        .bind(next.to_string())
-        .execute(&self.pool)
-        .await
-        .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to update system_state: {}", e) })?;
-        
-        Ok(next)
-    }
-
-    pub async fn record_global_api_success(&self) -> Result<(), FactoryError> {
-        sqlx::query(
-            "INSERT INTO system_state (key, value, updated_at) 
-             VALUES ('consecutive_api_failures', '0', datetime('now'))
-             ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at"
-        )
-        .execute(&self.pool)
-        .await
-        .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to reset system_state: {}", e) })?;
-        
-        Ok(())
-    }
-}
-
-impl SqliteJobQueue {
-    pub async fn fetch_all_karma(&self, limit: i64) -> Result<Vec<serde_json::Value>, FactoryError> {
-        // (Existing fetch_all_karma code omitted for brevity; this block replaces the whole method)
+    async fn fetch_all_karma(&self, limit: i64) -> Result<Vec<serde_json::Value>, FactoryError> {
         let rows = sqlx::query(
             "SELECT * FROM karma_logs ORDER BY created_at DESC LIMIT ?"
         )
@@ -1124,6 +1012,70 @@ impl SqliteJobQueue {
         Ok(karmas)
     }
 
+    async fn fetch_top_performing_jobs(&self, limit: i64) -> Result<Vec<Job>, FactoryError> {
+        let rows = sqlx::query(
+            "SELECT j.* FROM jobs j 
+             JOIN sns_metrics_history s ON j.id = s.job_id 
+             WHERE s.is_finalized = 1 
+             ORDER BY s.views DESC 
+             LIMIT ?"
+        )
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| FactoryError::Infrastructure { reason: e.to_string() })?;
+
+        let mut jobs = Vec::new();
+        for r in rows {
+            let id: String = r.get("id");
+            let topic: String = r.get("topic");
+            let style: String = r.get("style_name");
+            let karma_directives: Option<String> = try_get_optional_string(&r, "karma_directives");
+            let tech_karma_extracted: i32 = r.get("tech_karma_extracted");
+            let creative_rating: Option<i32> = r.try_get("creative_rating").ok();
+            let execution_log: Option<String> = try_get_optional_string(&r, "execution_log");
+            let error_message: Option<String> = try_get_optional_string(&r, "error_message");
+            let sns_platform: Option<String> = try_get_optional_string(&r, "sns_platform");
+            let sns_video_id: Option<String> = try_get_optional_string(&r, "sns_video_id");
+            let published_at: Option<String> = try_get_optional_string(&r, "published_at");
+            let output_videos: Option<String> = try_get_optional_string(&r, "output_videos");
+            let status_str: String = r.get("status");
+            let status = JobStatus::from_string(&status_str);
+
+            jobs.push(Job {
+                id,
+                topic,
+                style,
+                karma_directives,
+                status,
+                started_at: r.get("started_at"),
+                last_heartbeat: r.get("last_heartbeat"),
+                tech_karma_extracted: tech_karma_extracted != 0,
+                creative_rating,
+                execution_log,
+                error_message,
+                sns_platform,
+                sns_video_id,
+                published_at,
+                output_videos,
+            });
+        }
+        Ok(jobs)
+    }
+
+    async fn record_soul_mutation(&self, old_hash: &str, new_hash: &str, reason: &str) -> Result<(), FactoryError> {
+        sqlx::query("INSERT INTO soul_mutation_history (old_hash, new_hash, mutation_reason) VALUES (?, ?, ?)")
+            .bind(old_hash)
+            .bind(new_hash)
+            .bind(reason)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| FactoryError::Infrastructure { reason: e.to_string() })?;
+        Ok(())
+    }
+}
+
+impl SqliteJobQueue {
     // --- Watchtower Memory Distillation Methods ---
 
     pub async fn insert_chat_message(&self, channel_id: &str, role: &str, content: &str) -> Result<(), FactoryError> {
@@ -1236,6 +1188,149 @@ impl SqliteJobQueue {
         .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to purge old distilled chats: {}", e) })?;
 
         Ok(result.rows_affected())
+    }
+
+    // --- Consolidated Inherent Methods ---
+    pub async fn fetch_skills_for_distillation(&self, threshold: i64) -> Result<Vec<String>, FactoryError> {
+        let rows = sqlx::query(
+            "SELECT related_skill FROM karma_logs GROUP BY related_skill HAVING COUNT(id) > ?"
+        )
+        .bind(threshold)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to fetch skills for distillation: {}", e) })?;
+
+        let mut skills = Vec::new();
+        for r in rows {
+            skills.push(r.try_get("related_skill").unwrap_or_else(|_| "".to_string()));
+        }
+        Ok(skills)
+    }
+
+    pub async fn fetch_raw_karma_for_skill(&self, skill: &str) -> Result<Vec<(String, String)>, FactoryError> {
+        let rows = sqlx::query(
+            "SELECT id, lesson FROM karma_logs WHERE related_skill = ?"
+        )
+        .bind(skill)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to fetch raw karma for skill: {}", e) })?;
+
+        let mut karma = Vec::new();
+        for r in rows {
+            let id: String = try_get_optional_string(&r, "id").unwrap_or_else(|| "".to_string());
+            let lesson: String = try_get_optional_string(&r, "lesson").unwrap_or_else(|| "".to_string());
+            karma.push((id, lesson));
+        }
+        Ok(karma)
+    }
+
+    pub async fn apply_distilled_karma(&self, skill: &str, distilled_lesson: &str, old_karma_ids: &[String], soul_hash: &str) -> Result<(), FactoryError> {
+        let mut tx = self.pool.begin().await
+            .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to start tx for distillation: {}", e) })?;
+
+        for id in old_karma_ids {
+            sqlx::query("DELETE FROM karma_logs WHERE id = ?").bind(id).execute(&mut *tx).await
+                .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to delete old karma {}: {}", id, e) })?;
+        }
+
+        let new_id = uuid::Uuid::new_v4().to_string();
+        sqlx::query(
+            "INSERT INTO karma_logs (id, karma_type, related_skill, lesson, weight, soul_version_hash)
+             VALUES (?, 'Synthesized', ?, ?, 100, ?)"
+        )
+            .bind(&new_id)
+            .bind(skill)
+            .bind(distilled_lesson)
+            .bind(soul_hash)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to insert synthesized karma: {}", e) })?;
+
+        tx.commit().await
+            .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to commit distlillation tx: {}", e) })?;
+
+        Ok(())
+    }
+
+    pub async fn increment_job_retry_count(&self, job_id: &str) -> Result<bool, FactoryError> {
+        let row = sqlx::query("UPDATE jobs SET retry_count = retry_count + 1 WHERE id = ? RETURNING retry_count")
+            .bind(job_id)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to increment job retry count: {}", e) })?;
+            
+        let count: i64 = row.get("retry_count");
+        if count >= 3 {
+            sqlx::query("UPDATE jobs SET status = 'Failed', error_message = 'Poison Pill Activated: API continually fails.' WHERE id = ?")
+                .bind(job_id)
+                .execute(&self.pool).await.ok();
+            Ok(true) 
+        } else {
+            Ok(false)
+        }
+    }
+
+    pub async fn increment_oracle_retry_count(&self, record_id: i64) -> Result<bool, FactoryError> {
+        let row = sqlx::query("UPDATE sns_metrics_history SET retry_count = retry_count + 1 WHERE id = ? RETURNING retry_count")
+            .bind(record_id)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to increment oracle retry count: {}", e) })?;
+            
+        let count: i64 = row.get("retry_count");
+        if count >= 3 {
+            sqlx::query("UPDATE sns_metrics_history SET is_finalized = 1, oracle_reason = 'Poison Pill Activated: LLM Evaluation continually fails.' WHERE id = ?")
+                .bind(record_id)
+                .execute(&self.pool).await.ok();
+            Ok(true) 
+        } else {
+            Ok(false)
+        }
+    }
+
+    pub async fn get_global_api_failures(&self) -> Result<i64, FactoryError> {
+        let row = sqlx::query("SELECT value FROM system_state WHERE key = 'consecutive_api_failures'")
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to read system_state: {}", e) })?;
+        
+        if let Some(r) = row {
+            let val_str: String = r.try_get("value").unwrap_or_default();
+            Ok(val_str.parse().unwrap_or(0))
+        } else {
+            Ok(0)
+        }
+    }
+
+    pub async fn record_global_api_failure(&self) -> Result<i64, FactoryError> {
+        let current = self.get_global_api_failures().await?;
+        let next = current + 1;
+        
+        sqlx::query(
+            "INSERT INTO system_state (key, value, updated_at) 
+             VALUES ('consecutive_api_failures', ?, datetime('now'))
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at"
+        )
+        .bind(next.to_string())
+        .execute(&self.pool)
+        .await
+        .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to update system_state: {}", e) })?;
+        
+        Ok(next)
+    }
+
+    pub async fn record_global_api_success(&self) -> Result<(), FactoryError> {
+        sqlx::query(
+            "INSERT INTO system_state (key, value, updated_at) 
+             VALUES ('consecutive_api_failures', '0', datetime('now'))
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at"
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to reset system_state: {}", e) })?;
+        
+        Ok(())
     }
 }
 

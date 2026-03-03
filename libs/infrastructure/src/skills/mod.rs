@@ -4,25 +4,22 @@ use std::time::Duration;
 use tracing::{info, error};
 use extism::{Manifest, Plugin};
 pub mod forge;
-use shared::sandbox::PathSandbox;
+
 
 pub struct WasmSkillManager {
     skills_dir: PathBuf,
-    sandbox: PathSandbox,
     memory_limit_bytes: u64,
     timeout: Duration,
 }
 
 impl WasmSkillManager {
-    pub fn new<P: AsRef<Path>>(skills_dir: P, allowed_root: P) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+    pub fn new<P: AsRef<Path>>(skills_dir: P, _allowed_root: P) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let skills_dir = skills_dir.as_ref().to_path_buf();
         if !skills_dir.exists() {
             std::fs::create_dir_all(&skills_dir)?;
         }
-        let sandbox = PathSandbox::new(allowed_root)?;
         Ok(Self { 
             skills_dir, 
-            sandbox,
             memory_limit_bytes: 10 * 1024 * 1024, // 10MB default
             timeout: Duration::from_millis(5000), // 5s default
         })

@@ -18,7 +18,6 @@ pub enum ResourceCategory {
 /// 資源の占有者
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResourceUser {
-    Voicing,    // TTS
     Generating, // ComfyUI
     Forging,    // FFmpeg
 }
@@ -26,7 +25,6 @@ pub enum ResourceUser {
 impl std::fmt::Display for ResourceUser {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ResourceUser::Voicing => write!(f, "Voicing (TTS)"),
             ResourceUser::Generating => write!(f, "Generating (Video)"),
             ResourceUser::Forging => write!(f, "Forging (FFmpeg)"),
         }

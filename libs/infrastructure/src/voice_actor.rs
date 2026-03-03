@@ -15,6 +15,7 @@ use std::time::Duration;
 /// テキストを句点（。）単位で分割し、各文を個別にTTS合成する。
 /// 合成された各音声ファイルを FFmpeg で結合し、文間に 0.15秒の無音を挿入する。
 /// TTS サーバー側で末尾トリミングを行い、ハルシネーション（余分な音声）を防止する。
+#[derive(Clone)]
 pub struct VoiceActor {
     server_url: String,
     default_voice: String,
@@ -73,34 +74,6 @@ impl VoiceActor {
         t.trim().to_string()
     }
 
-    /// テキストを文単位で分割する
-    fn split_into_sentences(text: &str) -> Vec<String> {
-        let mut sentences = Vec::new();
-        let mut current = String::new();
-
-        for c in text.chars() {
-            current.push(c);
-            if c == '。' || c == '？' || c == '！' {
-                let s = current.trim().to_string();
-                if !s.is_empty() {
-                    sentences.push(s);
-                }
-                current.clear();
-            }
-        }
-
-        let remaining = current.trim().to_string();
-        if !remaining.is_empty() {
-            sentences.push(remaining);
-        }
-
-        if sentences.is_empty() && !text.trim().is_empty() {
-            sentences.push(text.trim().to_string());
-        }
-
-        sentences
-    }
-
     /// 言語別のデフォルトスピード設定
     fn default_speed_for_lang(lang: &str) -> f32 {
         match lang {
@@ -145,7 +118,7 @@ impl AgentAct for VoiceActor {
         let speed = input.speed.unwrap_or_else(|| Self::default_speed_for_lang(lang));
 
         // Style-Bert-VITS2 特有のパラメータ
-        let model_name = input.model_name.as_deref().unwrap_or("amitaro");
+        let model_name = input.model_name.as_deref().unwrap_or(&voice);
         let style = input.style.as_deref().unwrap_or("Neutral");
 
         // Style-Bert-VITS2 では 'length' が時間軸の倍率
@@ -231,21 +204,5 @@ mod tests {
     fn test_sanitize_normalizes_punctuation() {
         let t = VoiceActor::sanitize_for_tts("テスト。。重複。");
         assert_eq!(t, "テスト。重複。");
-    }
-
-    #[test]
-    fn test_split_into_sentences() {
-        let sentences = VoiceActor::split_into_sentences("最初の文です。二番目の文です。最後です。");
-        assert_eq!(sentences.len(), 3);
-        assert_eq!(sentences[0], "最初の文です。");
-        assert_eq!(sentences[1], "二番目の文です。");
-        assert_eq!(sentences[2], "最後です。");
-    }
-
-    #[test]
-    fn test_split_question_marks() {
-        let sentences = VoiceActor::split_into_sentences("なぜですか？理由はこれです。");
-        assert_eq!(sentences.len(), 2);
-        assert_eq!(sentences[0], "なぜですか？");
     }
 }

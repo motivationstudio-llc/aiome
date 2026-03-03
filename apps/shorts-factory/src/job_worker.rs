@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{info, warn, error};
-use factory_core::traits::{JobQueue, JobStatus, AgentAct};
+use factory_core::traits::{JobQueue, AgentAct};
 use factory_core::contracts::WorkflowRequest;
 use factory_core::error::FactoryError;
 use chrono::Utc;

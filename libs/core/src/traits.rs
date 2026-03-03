@@ -231,6 +231,15 @@ pub trait JobQueue: Send + Sync {
 
     /// 指定した時刻以降に作成されたジョブ数を取得する
     async fn get_job_count_since(&self, since: chrono::DateTime<chrono::Utc>) -> Result<i64, FactoryError>;
+
+    /// すべての教訓（Karma）をN件取得する (分析用)
+    async fn fetch_all_karma(&self, limit: i64) -> Result<Vec<serde_json::Value>, FactoryError>;
+
+    /// SNSで再生数上位のジョブを取得する (成功パターンの分析用)
+    async fn fetch_top_performing_jobs(&self, limit: i64) -> Result<Vec<Job>, FactoryError>;
+
+    /// 魂の変異履歴を記録する (Phase 5: Transmigration)
+    async fn record_soul_mutation(&self, old_hash: &str, new_hash: &str, reason: &str) -> Result<(), FactoryError>;
 }
 
 /// 評価台帳（sns_metrics_history）のレコード構造体
