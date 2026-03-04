@@ -17,3 +17,5 @@
 *.db-wal
 *.log
 factory.log
+watchtower.log
+test.wav

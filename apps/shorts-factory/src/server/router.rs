@@ -3,9 +3,10 @@ use axum::{
     response::IntoResponse,
     routing::{get, post},
     Router, Json,
-    http::StatusCode,
+    http::{StatusCode, HeaderMap},
 };
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use parking_lot::Mutex;
 use crate::server::telemetry::TelemetryHub;
 use crate::orchestrator::ProductionOrchestrator;
 use factory_core::contracts::WorkflowRequest;
@@ -41,6 +42,7 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/api/jobs/:id", get(job_detail_handler))
         .route("/api/jobs/:id/rate", post(job_rate_handler))
         .route("/api/karma", get(karma_handler))
+        .route("/api/v1/federation/sync", post(federation_sync_handler))
         .nest_service("/assets", ServeDir::new("workspace")) // Serve static assets
         .layer(CorsLayer::permissive())
         .with_state(state)
@@ -64,11 +66,12 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<AppState>) {
             Ok(hb) = rx_hb.recv() => {
                 // Determine active actor based on busy state
                 let mut hb_with_state = hb.clone();
-                if let Ok(busy) = state.is_busy.lock() {
-                     if *busy {
-                         hb_with_state.active_actor = Some("ORCHESTRATOR".to_string());
-                     }
-                }
+                {
+                    let busy = state.is_busy.lock();
+                    if *busy {
+                        hb_with_state.active_actor = Some("ORCHESTRATOR".to_string());
+                    }
+                } // Drop lock here before await
 
                 if let Ok(msg) = serde_json::to_string(&hb_with_state) {
                     if socket.send(axum::extract::ws::Message::Text(msg)).await.is_err() {
@@ -95,7 +98,7 @@ async fn remix_handler(
 ) -> impl IntoResponse {
     // 1. Resource Locking (Overzealous Clicker Guard)
     {
-        let mut busy = state.is_busy.lock().unwrap();
+        let mut busy = state.is_busy.lock();
         if *busy {
              state.telemetry.broadcast_log("WARN", "Rejecting concurrent remix request.");
              return (StatusCode::TOO_MANY_REQUESTS, Json(serde_json::json!({
@@ -144,10 +147,9 @@ async fn remix_handler(
             *job_info = None;
         }
 
-        if let Ok(mut busy) = busy_lock.lock() {
-            *busy = false;
-            telemetry.broadcast_log("INFO", "System Ready");
-        }
+        let mut busy = busy_lock.lock();
+        *busy = false;
+        telemetry.broadcast_log("INFO", "System Ready");
     });
 
     // 3. Immediate Response (202 Accepted)
@@ -168,16 +170,6 @@ async fn styles_handler(
 async fn projects_handler(
     State(state): State<Arc<AppState>>,
 ) -> impl IntoResponse {
-    // AssetManager is inside Orchestrator, but Orchestrator fields are private?
-    // Wait, ProductionOrchestrator has asset_manager field but is it public? 
-    // Let's check orchestrator.rs. Use a getter or access it if public.
-    // If not public, I might need to add a getter to Orchestrator or put AssetManager in AppState directly.
-    // AppState doesn't have asset_manager.
-    // Let's assume for now I need to add it to AppState or make it accessible.
-    // Checking main.rs, I put style_manager in AppState. asset_manager is created in main.rs.
-    // I should add asset_manager to AppState in main.rs and router.rs.
-    
-    // For now, I will write the handler assuming state.asset_manager exists.
     let projects = state.asset_manager.list_projects();
     Json(projects)
 }
@@ -225,5 +217,41 @@ pub async fn job_rate_handler(
     match state.job_queue.set_creative_rating(&id, rating).await {
         Ok(_) => (StatusCode::OK, Json(serde_json::json!({"status": "success"}))).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": e.to_string()}))).into_response(),
+    }
+}
+
+// --- Federation Handler ---
+
+pub async fn federation_sync_handler(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(payload): Json<factory_core::contracts::FederationSyncRequest>,
+) -> impl IntoResponse {
+    // 1. Authentication (The Auth Wall)
+    let secret = std::env::var("FEDERATION_SECRET").unwrap_or_else(|_| "aiome_secret".to_string());
+    let auth_header = headers.get(axum::http::header::AUTHORIZATION)
+        .and_then(|h| h.to_str().ok());
+
+    match auth_header {
+        Some(h) if h == format!("Bearer {}", secret) => {
+            // Authorized
+            use factory_core::traits::JobQueue;
+            match state.job_queue.export_federated_data(payload.since.as_deref()).await {
+                Ok((karmas, rules, matches)) => {
+                    let response = factory_core::contracts::FederationSyncResponse {
+                        new_karmas: karmas,
+                        new_immune_rules: rules,
+                        new_arena_matches: matches,
+                        server_time: chrono::Utc::now().to_rfc3339(),
+                    };
+                    (StatusCode::OK, Json(response)).into_response()
+                }
+                Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": e.to_string()}))).into_response(),
+            }
+        }
+        _ => {
+            tracing::warn!("🔒 [Federation] Unauthorized sync attempt blocked");
+            (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Unauthorized"}))).into_response()
+        }
     }
 }

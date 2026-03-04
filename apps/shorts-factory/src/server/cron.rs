@@ -1,6 +1,7 @@
 use tokio_cron_scheduler::{Job, JobScheduler};
 use tracing::{info, warn, error};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use factory_core::traits::JobQueue;
 use infrastructure::job_queue::SqliteJobQueue;
 use rig::providers::gemini;
@@ -491,6 +492,78 @@ pub async fn start_cron_scheduler(
     sched.start().await?;
     info!("⏰ Cron scheduler started. The Wheel of Samsara is turning. (Synthesis: 7:00/19:00, Zombie Hunter: 15m, Distiller: 5m, Scavengers: daily, Sentinel: 4h, Oracle: 1h, Transmutation: 5:00, Dreaming: hourly)");
 
+    // === Job 12: Adaptive Immune Defense — Runs every 1 hour ===
+    let jq_immune = job_queue.clone();
+    let gem_key_immune = gemini_api_key.clone();
+    sched.add(
+        Job::new_async("0 0 * * * *", move |_uuid, mut _l| {
+            let jq = jq_immune.clone();
+            let gem_key = gem_key_immune.clone();
+            Box::pin(async move {
+                let immune = infrastructure::immune_system::AdaptiveImmuneSystem::new(gem_key);
+                match immune.analyze_threats(&*jq).await {
+                    Ok(count) if count > 0 => info!("🛡️ [Immune System] Generated {} new defense rule(s)", count),
+                    Err(e) => error!("❌ [Immune System] Threat analysis failed: {}", e),
+                    _ => {}
+                }
+            })
+        })?
+    ).await?;
+
+    // === Job 6: Karma Federation Sync — Runs every 5 minutes + Random Jitter ===
+    // Random Jitterによる Thundering Herd（全ノード同時発火による自確のDDoS）を防止する
+    // Circuit Breaker: 連続3回失敗で指数的バックオフ（Exponential Backoff） + HITL エスカレーションを実施する
+    let jq_fed = job_queue.clone();
+    let gem_key_fed = gemini_api_key.clone();
+    let soul_md_fed = soul_md.clone();
+    let log_tx_fed = log_tx.clone();
+    // Circuit Breakerのインメモリ状態 (スレッド安全なアトミック)
+    let fed_fail_count = Arc::new(AtomicU32::new(0));
+    let fed_backoff_until = Arc::new(AtomicU64::new(0)); // Unix秒（この時刻までスキップ）
+    sched.add(
+        Job::new_async("0 */5 * * * *", move |_uuid, mut _l| {
+            let jq = jq_fed.clone();
+            let gem_key = gem_key_fed.clone();
+            let soul_md = soul_md_fed.clone();
+            let log_tx = log_tx_fed.clone();
+            let fail_count = fed_fail_count.clone();
+            let backoff_until = fed_backoff_until.clone();
+            Box::pin(async move {
+                // --- Circuit Breaker: バックオフ期間中は完全スキップ ---
+                let now_secs = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+                let until = backoff_until.load(Ordering::Relaxed);
+                if now_secs < until {
+                    let remaining_mins = (until - now_secs) / 60;
+                    info!("🔴 [Federation CB] Circuit open. Skipping sync for ~{}min (backoff active).", remaining_mins);
+                    return;
+                }
+
+                // --- Jitter: 0〜59秒のランダム遅延 ---
+                let jitter_secs = (rand::random::<u8>() % 60) as u64;
+                tokio::time::sleep(tokio::time::Duration::from_secs(jitter_secs)).await;
+
+                // --- 実行 ---
+                match run_federation_sync(
+                    &*jq, &gem_key, &log_tx, &soul_md,
+                    &fail_count, &backoff_until
+                ).await {
+                    Ok(_) => {
+                        // 成功時はカウンターリセット
+                        if fail_count.load(Ordering::Relaxed) > 0 {
+                            info!("✅ [Federation CB] Sync recovered. Resetting failure counter.");
+                            fail_count.store(0, Ordering::Relaxed);
+                            backoff_until.store(0, Ordering::Relaxed);
+                        }
+                    },
+                    Err(e) => error!("🌐 [Federation] Sync process failed: {}", e),
+                }
+            })
+        })?
+    ).await?;
+
     Ok(sched)
 }
 
@@ -500,6 +573,16 @@ pub async fn synthesize_next_job(
     brave_api_key: &str,
     job_queue: &SqliteJobQueue,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    // --- The Global Circuit Breaker (Genesis Guard) ---
+    if let Ok(failures) = job_queue.get_global_api_failures().await {
+        if failures >= 5 {
+            return Err(Box::new(std::io::Error::new(
+                std::io::ErrorKind::Other, 
+                format!("GLOBAL SLEEP MODE OVERRIDE. Consecutive API failures ({}). Skipping Synthesis.", failures)
+            )));
+        }
+    }
+
     let root_dir = std::env::current_dir()?;
     
     // 1. Load the Dual-Core Soul (`SOUL.md` + `EVOLVING_SOUL.md`)
@@ -561,6 +644,7 @@ pub async fn synthesize_next_job(
             },
             Err(e) => {
                 error!("❌ Brave API Error: {}", e);
+                let _ = job_queue.record_global_api_failure().await;
             }
         }
     }
@@ -631,6 +715,7 @@ pub async fn synthesize_next_job(
 
     let task = match agent.prompt(user_prompt).await {
         Ok(response) => {
+            let _ = job_queue.record_global_api_success().await;
             match extract_json(&response) {
                 Ok(json_text) => {
                     serde_json::from_str::<LlmJobResponse>(&json_text).unwrap_or_else(|e| {
@@ -646,6 +731,7 @@ pub async fn synthesize_next_job(
         },
         Err(e) => {
             error!("❌ [Samsara Error] LLM synthesis failed: {}. Falling back to default task.", e);
+            let _ = job_queue.record_global_api_failure().await;
             fallback_task
         }
     };
@@ -901,4 +987,147 @@ pub async fn notify_master(
         }
         Err(e) => Err(format!("LLM notify failed: {}", e).into())
     }
+}
+
+pub async fn run_federation_sync(
+    job_queue: &SqliteJobQueue,
+    gemini_key: &str,
+    log_tx: &mpsc::Sender<CoreEvent>,
+    soul_md: &str,
+    fail_count: &AtomicU32,
+    backoff_until: &AtomicU64,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let peers_env = std::env::var("FEDERATION_PEERS").unwrap_or_default();
+    let secret = std::env::var("FEDERATION_SECRET").unwrap_or_else(|_| "aiome_secret".to_string());
+    
+    if peers_env.is_empty() {
+        return Ok(());
+    }
+
+    let peers: Vec<&str> = peers_env.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
+    let client = reqwest::Client::new();
+    let mut had_error = false;
+
+    for peer in peers {
+        // --- Phase 1: Push (Contribute local data to Hub) ---
+        if let Ok((unfed_karmas, unfed_rules)) = job_queue.fetch_unfederated_data().await {
+            if !unfed_karmas.is_empty() || !unfed_rules.is_empty() {
+                info!("📤 [Federation] Pushing {} Karmas, {} Rules to peer: {}", unfed_karmas.len(), unfed_rules.len(), peer);
+                let push_url = format!("{}/api/v1/federation/push", peer.trim_end_matches('/'));
+                let node_id = std::env::var("NODE_ID").unwrap_or_else(|_| "unknown_node".to_string());
+                
+                let push_request = factory_core::contracts::FederationPushRequest {
+                    node_id,
+                    karmas: unfed_karmas.clone(),
+                    rules: unfed_rules.clone(),
+                };
+
+                let push_response = client.post(&push_url)
+                    .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", secret))
+                    .json(&push_request)
+                    .send()
+                    .await;
+
+                match push_response {
+                    Ok(resp) if resp.status() == reqwest::StatusCode::OK => {
+                        let k_ids: Vec<String> = unfed_karmas.into_iter().map(|k| k.id).collect();
+                        let r_ids: Vec<String> = unfed_rules.into_iter().map(|r| r.id).collect();
+                        if let Err(e) = job_queue.mark_as_federated(k_ids, r_ids).await {
+                            error!("❌ [Federation] Failed to mark as federated: {}", e);
+                        } else {
+                            info!("✅ [Federation] Successfully pushed and marked data to {}", peer);
+                        }
+                    }
+                    Ok(resp) => {
+                        warn!("⚠️ [Federation] Push to {} failed with status: {}", peer, resp.status());
+                    }
+                    Err(e) => {
+                        warn!("⚠️ [Federation] Push to {} failed: {}", peer, e);
+                    }
+                }
+            }
+        }
+
+        // --- Phase 2: Pull (Fetch approved updates from Hub) ---
+        let last_sync = job_queue.get_peer_sync_time(peer).await.unwrap_or(None);
+        // ノードの一意識別IDを生成（起動毎回固定するためenvでキャッシュする）
+        let node_id = std::env::var("NODE_ID").unwrap_or_else(|_| {
+            let id = uuid::Uuid::new_v4().to_string();
+            // 起動時に一度生成したらenvにセット（プロセス内永続）
+            #[allow(unused_must_use)]
+            { std::env::set_var("NODE_ID", &id); }
+            id
+        });
+        let request = factory_core::contracts::FederationSyncRequest {
+            node_id,
+            since: last_sync,
+            protocol_version: "v1".to_string(),
+        };
+
+        info!("🌐 [Federation] Pulling from peer: {}", peer);
+        let url = format!("{}/api/v1/federation/sync", peer.trim_end_matches('/'));
+        
+        let response = client.post(&url)
+            .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", secret))
+            .json(&request)
+            .send()
+            .await;
+
+        match response {
+            Ok(resp) if resp.status() == reqwest::StatusCode::OK => {
+                let data: factory_core::contracts::FederationSyncResponse = resp.json().await?;
+                let count_k = data.new_karmas.len();
+                let count_r = data.new_immune_rules.len();
+                let count_m = data.new_arena_matches.len();
+
+                job_queue.import_federated_data(data.new_karmas, data.new_immune_rules, data.new_arena_matches).await?;
+                job_queue.update_peer_sync_time(peer, &data.server_time).await?;
+                
+                if count_k + count_r + count_m > 0 {
+                    info!("✅ [Federation] Pull complete from {}: {} Karmas, {} Rules, {} Matches imported.", peer, count_k, count_r, count_m);
+                }
+            }
+            Ok(resp) => {
+                error!("❌ [Federation] Pull from {} returned status {}", peer, resp.status());
+                had_error = true;
+            }
+            Err(e) => {
+                error!("❌ [Federation] Failed to pull from peer {}: {}", peer, e);
+                had_error = true;
+            }
+        }
+    }
+
+    // --- Circuit Breaker: 失敗カウンターと Exponential Backoff ---
+    if had_error {
+        let current_failures = fail_count.fetch_add(1, Ordering::Relaxed) + 1;
+        warn!("⚠️ [Federation CB] Consecutive failures: {}/3", current_failures);
+
+        if current_failures >= 3 {
+            // Exponential Backoff: 3600s(1h) × 2^(n-3). 上限は4時間。
+            let backoff_hours = 1u64 << (current_failures - 3).min(2); // 1h, 2h, 4h
+            let backoff_secs = backoff_hours * 3600;
+            let until = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs() + backoff_secs;
+            backoff_until.store(until, Ordering::Relaxed);
+
+            error!(
+                "🔴 [Federation CB] Circuit OPEN after {} failures. Backing off for {}h.",
+                current_failures, backoff_hours
+            );
+
+            // --- HITL エスカレーション (Human-in-the-Loop) ---
+            let sos_message = format!(
+                "🚨 Federation同期が{}'連続失敗しました。{}hバックオフ中です。\nピアURLやFEDERATION_SECRETの設定を確認するか、マニフェストのピアリストを解除してください。",
+                current_failures, backoff_hours
+            );
+            if let Err(e) = notify_master(gemini_key, log_tx, soul_md, &sos_message).await {
+                warn!("⚠️ [Federation CB] HITL escalation failed (Discord unreachable?): {}", e);
+            }
+        }
+    }
+
+    Ok(())
 }

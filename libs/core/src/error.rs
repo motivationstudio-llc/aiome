@@ -87,4 +87,7 @@ pub enum FactoryError {
 
     #[error("セキュリティ法規違反: {reason}")]
     SecurityViolation { reason: String },
+
+    #[error("名誉ある撤退 (Honorable Abort): {reason}")]
+    HonorableAbort { reason: String },
 }

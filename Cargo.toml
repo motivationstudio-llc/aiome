@@ -4,6 +4,7 @@ members = [
     "apps/shorts-factory",
     "apps/watchtower",
     "apps/command-center/src-tauri",
+    "apps/samsara-hub",
     "libs/core",
     "libs/infrastructure",
     "libs/shared",

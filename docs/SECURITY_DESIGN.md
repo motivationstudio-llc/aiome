@@ -1,11 +1,11 @@
 # ShortsFactory セキュリティ設計思想
 
-> 本ドキュメントは Modular OpenClaw (ShortsFactory) のセキュリティアーキテクチャを定義する。
+> 本ドキュメントは Aiome (ShortsFactory) のセキュリティアーキテクチャを定義する。
 > 商用化を見据えた設計判断の根拠と、各防御層の責務を記録する。
 
 ## 1. 基本思想: LLM を信頼しない
 
-従来のエージェントフレームワーク（OpenClaw, LangChain 等）は LLM に実行権限を与える。
+従来のエージェントフレームワーク（Aiome, LangChain 等）は LLM に実行権限を与える。
 ShortsFactory はその逆で、**LLM は「考えるだけ」、実行はすべて Rust の厳格な管理下**に置く。
 
 ```
@@ -35,6 +35,8 @@ ShortsFactory はその逆で、**LLM は「考えるだけ」、実行はすべ
 | 6 | ComfyUI ワークフロー改ざん | ワークフローJSON改変 | 🟡中 | ハッシュ検証 (Phase 2) |
 | 7 | モデル汚染 | 不正なOllamaモデル | 🟡中 | SHA256検証 (将来) |
 | 8 | ディスク枯渇 | 動画ファイル蓄積 | 🟢低 | ディスク監視 (Phase 3) |
+| 9 | **カルマ汚染 (Karma Poisoning)** | **悪意あるノードからのFederation経由バッドカルマ注入** | 🔴高 | **Rate Limiting + FEDERATION_SECRET Bearer認証 + node_id 管理** |
+| 10 | **Federation層のDDoS** | **外部ノードからの大量の同期リクエスト** | 🔴高 | **Rate Limiting (1ピア/10回/分) + Random Jitter** |
 
 ## 3. 防御アーキテクチャ: 多層防御
 
@@ -111,7 +113,7 @@ ShortsFactory はその逆で、**LLM は「考えるだけ」、実行はすべ
 
 ## 5. 従来システムとの比較
 
-| 評価軸 | OpenClaw / LangChain | ShortsFactory |
+| 評価軸 | Aiome / LangChain | ShortsFactory |
 |---|---|---|
 | LLMの実行権限 | フルアクセス | ホワイトリスト制限 |
 | 外部プラグイン | ZIP等で動的ロード | **非対応（原理的に排除）** |
@@ -141,6 +143,10 @@ ShortsFactory はその逆で、**LLM は「考えるだけ」、実行はすべ
 |---|---|---|
 | `127.0.0.1` / `localhost` | `11434` | Ollama (LLM) |
 | `127.0.0.1` / `localhost` | `8188` | ComfyUI (画像/動画生成) |
+| **Federation ピアノード** | **HTTPS/443** | **Karma Federation Sync (`POST /api/v1/federation/sync`)** |
+
+> [!CAUTION]
+> Federationエンドポイント（`/api/v1/federation/sync`）は外部インターネットに公開される問呃の実行エンドポイントです。認証（Bearer `FEDERATION_SECRET`）とRate Limiting（1ピアあたら10回/分）を必ず実施すること。
 
 **上記以外の外部通信は SecurityPolicy によりブロックされる。**
 
@@ -161,4 +167,4 @@ ShortsFactory はその逆で、**LLM は「考えるだけ」、実行はすべ
 ---
 
 *最終更新: 2026-02-20*
-*文書管理: Modular OpenClaw Security Team*
+*文書管理: Aiome Security Team*

@@ -1,6 +1,7 @@
 use tokio::sync::broadcast;
 use serde::{Serialize, Deserialize};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use parking_lot::Mutex;
 use sysinfo::{System, RefreshKind, CpuRefreshKind, MemoryRefreshKind};
 
 /// システム全体の稼働状況 (Heartbeat)
@@ -9,6 +10,7 @@ pub struct SystemHeartbeat {
     pub cpu_usage: f32,
     pub memory_usage_mb: u64,
     pub vram_usage_mb: u64, // Mock value for M4 Pro
+    pub storage_free_gb: u64,
     pub active_actor: Option<String>,
 }
 
@@ -67,17 +69,25 @@ impl TelemetryHub {
 
     /// 現在のシステム状態を即座に計測して返す (Real-Time Interoception用)
     pub fn get_current_status(&self) -> SystemHeartbeat {
-        let (cpu, mem) = {
-            let mut s = self.system.lock().unwrap();
+        let (cpu, mem, disk) = {
+            let mut s = self.system.lock();
             s.refresh_cpu();
             s.refresh_memory();
-            (s.global_cpu_info().cpu_usage(), s.used_memory() / 1024 / 1024)
+            
+            let disks = sysinfo::Disks::new_with_refreshed_list();
+            let disk_free = disks.iter()
+                .find(|d| d.mount_point() == std::path::Path::new("/"))
+                .map(|d| d.available_space() / 1024 / 1024 / 1024)
+                .unwrap_or(0);
+
+            (s.global_cpu_info().cpu_usage(), s.used_memory() / 1024 / 1024, disk_free)
         };
 
         SystemHeartbeat {
             cpu_usage: cpu,
             memory_usage_mb: mem,
             vram_usage_mb: mem / 2, // M4 Pro Unified Memory Mock
+            storage_free_gb: disk,
             active_actor: None,
         }
     }
@@ -92,11 +102,18 @@ impl TelemetryHub {
             loop {
                 interval.tick().await;
                 
-                let (cpu, mem) = {
-                    let mut s = sys.lock().unwrap();
+                let (cpu, mem, disk) = {
+                    let mut s = sys.lock();
                     s.refresh_cpu();
                     s.refresh_memory();
-                    (s.global_cpu_info().cpu_usage(), s.used_memory() / 1024 / 1024)
+                    
+                    let disks = sysinfo::Disks::new_with_refreshed_list();
+                    let disk_free = disks.iter()
+                        .find(|d| d.mount_point() == std::path::Path::new("/"))
+                        .map(|d| d.available_space() / 1024 / 1024 / 1024)
+                        .unwrap_or(0);
+                        
+                    (s.global_cpu_info().cpu_usage(), s.used_memory() / 1024 / 1024, disk_free)
                 };
 
                 // M4 Pro Unified Memory Mock
@@ -106,6 +123,7 @@ impl TelemetryHub {
                     cpu_usage: cpu,
                     memory_usage_mb: mem,
                     vram_usage_mb: vram_mock,
+                    storage_free_gb: disk,
                     active_actor: None, 
                 };
 

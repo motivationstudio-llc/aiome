@@ -240,6 +240,35 @@ pub trait JobQueue: Send + Sync {
 
     /// 魂の変異履歴を記録する (Phase 5: Transmigration)
     async fn record_soul_mutation(&self, old_hash: &str, new_hash: &str, reason: &str) -> Result<(), FactoryError>;
+
+    /// 魂の書き換え（Transmigration）に使用する未反映の教訓を取得する
+    async fn fetch_unincorporated_karma(&self, limit: i64, current_soul_hash: &str) -> Result<Vec<serde_json::Value>, FactoryError>;
+
+    /// 教訓が魂に反映されたことを記録し、新世代ハッシュを付与する
+    async fn mark_karma_as_incorporated(&self, karma_ids: Vec<String>, new_soul_hash: &str) -> Result<(), FactoryError>;
+
+    /// 現在のリトライ回数を取得
+    async fn fetch_job_retry_count(&self, job_id: &str) -> Result<i64, FactoryError>;
+    /// リトライ回数をインクリメント。毒薬発動(Failed移行)した場合は true を返す
+    async fn increment_job_retry_count(&self, job_id: &str) -> Result<bool, FactoryError>;
+    /// リトライ回数をリセット
+    async fn reset_job_retry_count(&self, job_id: &str) -> Result<(), FactoryError>;
+
+    // --- Phase 12-C: Immune & Arena ---
+    async fn store_immune_rule(&self, rule: &crate::contracts::ImmuneRule) -> Result<(), FactoryError>;
+    async fn fetch_active_immune_rules(&self) -> Result<Vec<crate::contracts::ImmuneRule>, FactoryError>;
+    async fn record_arena_match(&self, match_data: &crate::contracts::ArenaMatch) -> Result<(), FactoryError>;
+
+    // --- Phase 12-F: Karma Federation ---
+    /// Federation: 外部ノードへ提供するためのデータを取得
+    async fn export_federated_data(&self, since: Option<&str>) -> Result<(Vec<crate::contracts::FederatedKarma>, Vec<crate::contracts::ImmuneRule>, Vec<crate::contracts::ArenaMatch>), FactoryError>;
+    
+    /// Federation: 外部ノードから受け取ったデータをUPSERTで取り込む
+    async fn import_federated_data(&self, karmas: Vec<crate::contracts::FederatedKarma>, rules: Vec<crate::contracts::ImmuneRule>, matches: Vec<crate::contracts::ArenaMatch>) -> Result<(), FactoryError>;
+    
+    /// Federation: 宛先ノード(Peer)ごとの最終同期時刻を取得・更新
+    async fn get_peer_sync_time(&self, peer_url: &str) -> Result<Option<String>, FactoryError>;
+    async fn update_peer_sync_time(&self, peer_url: &str, sync_time: &str) -> Result<(), FactoryError>;
 }
 
 /// 評価台帳（sns_metrics_history）のレコード構造体
@@ -252,6 +281,8 @@ pub struct SnsMetricsRecord {
     pub likes: i64,
     pub comments_count: i64,
     pub raw_comments_json: Option<String>,
+    pub hard_metric_score: Option<f64>,
+    pub engagement_rate: Option<f64>,
 }
 
 

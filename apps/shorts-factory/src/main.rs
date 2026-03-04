@@ -26,7 +26,8 @@ use infrastructure::sound_mixer::SoundMixer;
 use shared::health::HealthMonitor;
 use tokio::signal;
 use tracing::{info, error, warn};
-use tokio::sync::Mutex;
+use parking_lot::Mutex as SyncMutex;
+use tokio::sync::Mutex as AsyncMutex;
 use sidecar::SidecarManager;
 use std::process::Command;
 
@@ -99,7 +100,7 @@ async fn main() -> Result<(), anyhow::Error> {
     let (job_tx, mut job_rx) = tokio::sync::mpsc::channel::<WorkflowRequest>(100);
     
     tracing_subscriber::registry()
-        .with(tracing_subscriber::fmt::layer())
+        .with(tracing_subscriber::fmt::layer().json())
         .with(log_layer)
         .init();
 
@@ -109,12 +110,12 @@ async fn main() -> Result<(), anyhow::Error> {
     //       log_rx and job_tx are passed later.
 
     // Status tracking for Heartbeat
-    let current_job = Arc::new(Mutex::new(Option::<String>::None));
+    let current_job = Arc::new(AsyncMutex::new(Option::<String>::None));
 
     // 0.3. Heartbeat Loop
     {
         let tx = log_tx.clone();
-        let health = Arc::new(Mutex::new(HealthMonitor::new()));
+        let health = Arc::new(AsyncMutex::new(HealthMonitor::new()));
         let current_job = current_job.clone();
         tokio::spawn(async move {
             loop {
@@ -144,7 +145,7 @@ async fn main() -> Result<(), anyhow::Error> {
     tracing::info!("🆔 Process Group Leader Established. PID: {}", pid);
 
     // 0.5. 運用監視 (Phase 3)
-    let health = Arc::new(Mutex::new(HealthMonitor::new()));
+    let health = Arc::new(AsyncMutex::new(HealthMonitor::new()));
     let status = health.lock().await.check();
     tracing::info!("📊 Initial Health Status: Memory {}MB, CPU {:.1}%", 
         status.memory_usage_mb, status.cpu_usage_percent);
@@ -303,7 +304,8 @@ async fn main() -> Result<(), anyhow::Error> {
 
     // Infrastructure Clients
     let trend_sonar = BraveTrendSonar::new(config.brave_api_key.clone());
-    let concept_manager = ConceptManager::new(&config.gemini_api_key, &config.script_model);
+    let concept_manager = ConceptManager::new(&config.gemini_api_key, &config.script_model)
+        .with_constitutional_layer(&soul_md, &config.ollama_url, "huihui_ai/mistral-small-abliterated:latest");
     let comfy_bridge = ComfyBridgeClient::new(
         shield.clone(),
         &config.comfyui_api_url,
@@ -354,12 +356,12 @@ async fn main() -> Result<(), anyhow::Error> {
 
             // Axum Router
             let state = Arc::new(AppState {
-                telemetry,
-                orchestrator,
-                style_manager,
-                jail,
-                is_busy: Arc::new(std::sync::Mutex::new(false)),
-                asset_manager,
+                telemetry: telemetry.clone(),
+                orchestrator: orchestrator.clone(),
+                style_manager: style_manager.clone(),
+                jail: jail.clone(),
+                is_busy: Arc::new(SyncMutex::new(false)),
+                asset_manager: asset_manager.clone(),
                 current_job: current_job.clone(),
                 job_queue: job_queue.clone(),
             });
@@ -370,13 +372,10 @@ async fn main() -> Result<(), anyhow::Error> {
                    
                    // 1. Try acquire lock
                    let acquired = {
-                       if let Ok(mut busy) = worker_state.is_busy.try_lock() {
-                           if !*busy {
-                               *busy = true;
-                               true
-                           } else {
-                               false
-                           }
+                       let mut busy = worker_state.is_busy.lock();
+                       if !*busy {
+                           *busy = true;
+                           true
                        } else {
                            false
                        }
@@ -402,13 +401,12 @@ async fn main() -> Result<(), anyhow::Error> {
                             *job_info = None;
                         }
                         
-                        if let Ok(mut busy) = worker_state.is_busy.lock() {
-                            *busy = false;
-                            worker_state.telemetry.broadcast_log("INFO", "System Ready (Watchtower Job Done)");
-                        }
-                    } else {
+                        let mut busy = worker_state.is_busy.lock();
+                        *busy = false;
+                        worker_state.telemetry.broadcast_log("INFO", "System Ready (Watchtower Job Done)");
+                   } else {
                         warn!("⚠️ System Busy. Dropping Watchtower Job.");
-                    }
+                   }
                 }
             });
 
@@ -456,6 +454,8 @@ async fn main() -> Result<(), anyhow::Error> {
                 style_name: String::new(), 
                 custom_style: None,
                 target_langs: vec!["ja".to_string(), "en".to_string()],
+                relevant_karma: Vec::new(),
+                previous_attempt_log: None,
             };
         
             info!("🚀 Launching Production Pipeline...");

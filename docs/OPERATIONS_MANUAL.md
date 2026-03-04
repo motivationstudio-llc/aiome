@@ -37,7 +37,7 @@
 
 ```bash
 # プロジェクトルートの .env ファイルを編集
-cd /path/to/modular-open-claw
+cd /path/to/aiome
 cp .env.example .env  # テンプレートがない場合は手動作成
 
 # .env の内容:
@@ -48,6 +48,9 @@ COMFYUI_API_URL=ws://127.0.0.1:8188/ws
 COMFYUI_BASE_DIR=/path/to/ComfyUI
 EXPORT_DIR=/path/to/exports
 WORKSPACE_DIR=./workspace
+# --- Karma Federation (任意, マルチノード展開時に設定) ---
+FEDERATION_SECRET=認証用のお好みの秘密キー
+FEDERATION_PEERS=https://peer1.example.com,https://peer2.example.com
 ```
 
 ### 2.2 ビルドと初期検証
@@ -111,7 +114,7 @@ cargo run -p shorts-factory -- serve
 
 | Job | Schedule | Function |
 |-----|----------|----------|
-| **Samsara** | Daily 19:00 | RAG駆動のジョブ自動生成 |
+| **Samsara** | Daily 07:00/19:00 | RAG駆動のジョブ自動生成 |
 | **Zombie Hunter** | Every 15min | ハングしたジョブの回収 |
 | **Tech Distiller** | Every 30min | 実行ログからの教訓抽出 |
 | **Creative Distiller** | Every 30min | 人間フィードバックの反映 |
@@ -120,6 +123,8 @@ cargo run -p shorts-factory -- serve
 | **Sentinel** | Every 4h | SNSメトリクス収集 |
 | **Oracle** | Every 1h | AI評価 (最終審判) |
 | **Karma Distiller** | Daily 04:00 | 記憶の圧縮 (Day-2防壁) |
+| **Adaptive Immune System** | Every 1h | 脆威ログ分析と新規防衛ルールの自動生成 |
+| **Karma Federation Sync** | Every 5min (+Jitter) | ピアノードへのKarma同期（`FEDERATION_PEERS`設定時） |
 
 ### 3.3 SNS リンク (手動)
 
@@ -233,3 +238,23 @@ npm run dev  # Tauri GUI の開発起動
 - [ ] `cargo run -p shorts-factory -- simulate-evolution` で接続テスト
 - [ ] `cargo run -p shorts-factory -- serve` で自律モード開始
 - [ ] (Optional) `apps/watchtower` で Discord 監視を有効化
+- [ ] (Optional) `.env` に `FEDERATION_SECRET` と `FEDERATION_PEERS` を設定してKarmaフェデレーションを有効化
+
+---
+
+## 9. Version Upgrade (バージョンアップ手順)
+
+### DBマイグレーションの安全性
+データベーススキーマの変更（テーブル追加等）はすべて `init_db()` 内の `CREATE TABLE IF NOT EXISTS` 構文で管理されています。起動時に自動反映されるため、マイグレーションツールは不要です。
+
+```bash
+# バージョンアップ手順
+# 1. 安全のため、先にDBをバックアップ
+cp workspace/aiome.db workspace/aiome.db.bak
+
+# 2. 最新のバイナリをビルド
+cargo build --release -p shorts-factory
+
+# 3. サービスを再起動 (スキーマは init_db() で自動適用)
+cargo run -p shorts-factory -- serve
+```

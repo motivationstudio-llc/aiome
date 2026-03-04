@@ -38,6 +38,8 @@ pub enum CoreEvent {
     },
     /// 自律的な話しかけ（プッシュ通知）
     ProactiveTalk { message: String, channel_id: u64 },
+    /// 育成ステータスの応答
+    AgentStatsResponse(AgentStats),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -54,7 +56,7 @@ pub enum ControlCommand {
     GetStatus,
     /// 育成ステータス取得
     GetAgentStats,
-    /// 彼女（OpenClaw）との対話 (一般チャット)
+    /// 彼女（Aiome）との対話 (一般チャット)
     Chat { message: String, channel_id: u64 },
     /// システム操作用の対話 (コマンドチャネル)
     CommandChat { message: String, channel_id: u64 },

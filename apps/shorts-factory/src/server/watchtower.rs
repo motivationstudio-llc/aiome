@@ -124,6 +124,7 @@ pub struct WatchtowerServer {
     voice_actor: Arc<infrastructure::voice_actor::VoiceActor>,
     jail: Arc<bastion::fs_guard::Jail>,
     telemetry: Arc<TelemetryHub>,
+    immune_system: Arc<infrastructure::immune_system::AdaptiveImmuneSystem>,
 }
 
 impl WatchtowerServer {
@@ -144,9 +145,10 @@ impl WatchtowerServer {
         jail: Arc<bastion::fs_guard::Jail>,
         telemetry: Arc<TelemetryHub>,
     ) -> Self {
+        let immune_system = Arc::new(infrastructure::immune_system::AdaptiveImmuneSystem::new(gemini_key.clone()));
         Self { 
             log_rx, log_tx, job_tx, job_queue, gemini_key, soul_md, ollama_url, chat_model, unleashed_mode,
-            skill_manager, skill_forge, skill_forge_prompt, voice_actor, jail, telemetry,
+            skill_manager, skill_forge, skill_forge_prompt, voice_actor, jail, telemetry, immune_system,
         }
     }
 
@@ -231,6 +233,8 @@ impl WatchtowerServer {
                      style_name: style.unwrap_or_default(),
                      custom_style: None,
                      target_langs: vec!["ja".to_string(), "en".to_string()],
+                     relevant_karma: Vec::new(),
+                     previous_attempt_log: None,
                  };
                  if let Err(e) = self.job_tx.send(req).await {
                      error!("❌ Failed to send WorkflowRequest to Core dispatcher: {}", e);
@@ -264,15 +268,11 @@ impl WatchtowerServer {
              ControlCommand::GetAgentStats => {
                  let jq = self.job_queue.clone();
                  let tx = self.log_tx.clone();
-                 tokio::spawn(async move {
-                     if let Ok(stats) = jq.get_agent_stats().await {
-                         let msg = format!(
-                             "💖 親愛度: {}\n⚙️ 技術Lv: {}\n🥀 淫乱度: {}\n🔋 疲労度: {}\n📊 合計Lv: {}",
-                             stats.affection, stats.exp / 10, stats.intimacy, stats.fatigue, stats.level
-                         );
-                         let _ = tx.send(CoreEvent::ChatResponse { response: msg, channel_id: 0, audio_path: None }).await;
-                     }
-                 });
+                  tokio::spawn(async move {
+                      if let Ok(stats) = jq.get_agent_stats().await {
+                          let _ = tx.send(CoreEvent::AgentStatsResponse(stats)).await;
+                      }
+                  });
              }
             ControlCommand::Chat { message, channel_id } => {
                 info!("💬 Watchtower Chat: {}", message);
@@ -475,8 +475,24 @@ impl WatchtowerServer {
                 let forge_prompt_text = self.skill_forge_prompt.clone();
                 let voice_actor_for_cmd = self.voice_actor.clone();
                 let jail_for_cmd = self.jail.clone();
+                let telemetry_for_cmd = self.telemetry.clone();
                 
+                let voice_actor_for_chat = self.voice_actor.clone();
+                let jail_for_chat = self.jail.clone();
+                let immune_system = self.immune_system.clone();
+
                 tokio::spawn(async move {
+                    // --- STEP 0: Immunity Check (Early Defense) ---
+                    if let Ok(Some(rule)) = immune_system.verify_intent(&message, &*jq).await {
+                        warn!("🚨 [WATCHTOWER] Blocked via Immune Rule: {}", rule.pattern);
+                        let _ = log_tx.send(CoreEvent::ChatResponse { 
+                            response: format!("🚨 [防御システム] 警告：入力内容は自己防衛プロトコルに抵触するため遮断されました。（理由: {}）", rule.pattern), 
+                            channel_id, 
+                            audio_path: None 
+                        }).await;
+                        return;
+                    }
+
                     let client = match rig::providers::gemini::Client::new(&gemini_key) {
                         Ok(c) => c,
                         Err(e) => {
@@ -485,15 +501,25 @@ impl WatchtowerServer {
                         }
                     };
 
-                    // --- STEP 1: Parse (Intent Routing) ---
-                    let available_skills = skill_manager.list_skills();
-                    info!("🔌 [CommandCenter] Available Skills: {:?}", available_skills);
+                    let status = telemetry_for_cmd.get_current_status();
+                    let interoception = format!(
+                        "\n【現在のあなたの体調（内臓感覚）】\n\
+                         CPU負荷: {:.1}%, メモリ使用率: {} MB, ディスク空き: {} GB\n\
+                         注意: 負荷が高い（80%超）時は「少し息切れしている」ように簡潔な応答を心がけてください。余裕がある時はマスター（ユーザー）に対して饒舌に振る舞ってください。\n",
+                        status.cpu_usage, status.memory_usage_mb, status.storage_free_gb
+                    );
 
+                    // --- STEP 1: Parse (Intent Routing) ---
+                    let available_skills = skill_manager.list_skills_with_metadata();
+                    let skill_manifest_json = serde_json::to_string_pretty(&available_skills).unwrap_or_default();
+                    info!("🔌 [CommandCenter] Available Skills with Metadata: {}", skill_manifest_json);
+                    
                     let preamble = format!(
-                        "あなたは「Watchtower」の知能中核です。以下の【魂】に従い、ユーザーの意図を正確に解析してください。\n\
+                        "あなたは「Watchtower」の知能中核です。以下の【魂】と、自身の【体調】に従い、ユーザーの意図を正確に解析してください。\n\
                         利用可能な手足（Skills）を駆使して問題を解決してください。\n\n\
                         【魂 (SOUL)】\n{}\n\n\
-                        【利用可能なスキル（WASM）】\n{}\n\n\
+                        {}\n\n\
+                        【利用可能なスキル（WASM Capabilities）】\n{}\n\n\
                         【判定ルール】\n\
                         1. 既存のスキルで対応可能な場合: `execute_skill` を選択\n\
                         2. リアルタイムな情報（価格、天気、最新ニュース等）の取得や、複雑な計算・処理が必要だが、既存のスキルがない場合: `forge_skill` を選択\n\
@@ -509,18 +535,19 @@ impl WatchtowerServer {
                             \"comment\": \"[Happy] マスターへの返答（Watchtowerの人格で）\"\n\
                         }}",
                         soul,
-                        available_skills.join(", ")
+                        interoception,
+                        skill_manifest_json
                     );
 
                     let agent = client.agent("gemini-2.0-flash").preamble(&preamble).build();
-                    let response_text = match agent.prompt(&message).await {
+                    let response_text: String = match agent.prompt(&message).await {
                         Ok(text) => text,
                         Err(e) => {
                             error!("❌ [Intent Parser] Gemini Prompt Error: {}", e);
                             let _ = log_tx.send(CoreEvent::ChatResponse { 
-                                response: format!("うぅ…クラウドとの交信でエラーが出ちゃった…（{}）", e), 
+                                response: format!("あぅ…思考回路がショートしちゃった…（{}）", e), 
                                 channel_id,
-                                audio_path: None 
+                                audio_path: None
                             }).await;
                             return;
                         }
@@ -544,48 +571,67 @@ impl WatchtowerServer {
                     let func_name = v["function_name"].as_str().unwrap_or("call");
                     let params = v["params"].as_str().unwrap_or("").to_string();
 
-                    // --- STEP 2: Forge (Self-Evolution) ---
-                    if intent == "forge_skill" {
-                        let _ = log_tx.send(CoreEvent::ChatResponse { 
-                            response: format!("{}（⏳ 今、新しい特別な権能「{}」を作っているから、ちょっと待っててね…！）", comment, skill_name), 
-                            channel_id,
-                            audio_path: None 
-                        }).await;
+                    // --- STEP 2: Self-Wiring / Forge (Self-Evolution) ---
+                    let mut final_intent = intent;
+                    let mut final_skill_name = skill_name.to_string();
 
-                        let spec = v["forge_spec"].as_str().unwrap_or("汎用スキル");
-                        let forge_preamble = format!(
-                            "{}\n\n【関数名】\n`pub fn {}(input: String) -> FnResult<String>` を生成してください。\n\n【作成すべき機能】\n{}", 
-                            forge_prompt_text, func_name, spec
-                        );
-                        let forge_agent = client.agent("gemini-2.0-flash").preamble(&forge_preamble).build();
-                        let code_prompt = format!("以下の仕様に合わせて、指定された機能を実装したRustコード（lib.rsの内容）のみを出力してください。関数の名前は必ず `{}` にしてください。コードブロックで囲ってください。", func_name);
-                        let code_response = forge_agent.prompt(&code_prompt).await.unwrap_or_default();
-                        let rust_code = extract_code(&code_response);
+                    if final_intent == "forge_skill" {
+                        // 1. セルフワイヤリングの試行: 既に類似のスキルを知っているか Karma から検索
+                        if let Ok(Some(existing_skill)) = skill_manager.search_skill_in_knowledge(&message, &*jq).await {
+                             info!("🧠 [Self-Wiring] Re-using existing capability: {}", existing_skill);
+                             final_intent = "execute_skill";
+                             final_skill_name = existing_skill;
+                             comment = format!("{}（💡 前に作った「{}」が使えそうだから、それを使ってみるね！）", comment, final_skill_name);
+                        } else {
+                            // 2. 本当に無い場合のみ Forge 実行
+                            let _ = log_tx.send(CoreEvent::ChatResponse { 
+                                response: format!("{}（⏳ 今、新しい特別な権能「{}」を作っているから、ちょっと待っててね…！）", comment, final_skill_name), 
+                                channel_id,
+                                audio_path: None 
+                            }).await;
 
-                        match skill_forge.forge_skill(skill_name, &rust_code, 2).await {
-                            Ok(_) => {
-                                info!("✅ [SkillForge] Auth-evolved skill: {}", skill_name);
-                                comment = "新しいスキルが完成したよ！早速やってみるね。".to_string();
-                            }
-                            Err(e) => {
-                                let _ = log_tx.send(CoreEvent::ChatResponse { 
-                                    response: format!("ごめんね、新しいスキルの構築に失敗しちゃった…（エラー: {}）", e), 
-                                    channel_id,
-                                    audio_path: None
-                                }).await;
-                                return;
+                            let spec = v["forge_spec"].as_str().unwrap_or("汎用スキル");
+                            let forge_preamble = format!(
+                                "{}\n\n【関数名】\n`pub fn {}(input: String) -> FnResult<String>` を生成してください。\n\n【作成すべき機能】\n{}", 
+                                forge_prompt_text, func_name, spec
+                            );
+                            let forge_agent = client.agent("gemini-2.0-flash").preamble(&forge_preamble).build();
+                            let code_prompt = format!("以下の仕様に合わせて、指定された機能を実装したRustコード（lib.rsの内容）のみを出力してください。関数の名前は必ず `{}` にしてください。コードブロックで囲ってください。", func_name);
+                            let code_response: String = match forge_agent.prompt(&code_prompt).await {
+                                Ok(r) => r,
+                                Err(e) => {
+                                    error!("❌ [SkillForge] Prompt failed: {}", e);
+                                    String::new()
+                                }
+                            };
+                            let rust_code = extract_code(&code_response);
+
+                            match skill_forge.forge_skill(&final_skill_name, &rust_code, 2, &spec).await {
+                                Ok(_) => {
+                                    info!("✅ [SkillForge] Auth-evolved skill: {}", final_skill_name);
+                                    comment = "新しいスキルが完成したよ！早速やってみるね。".to_string();
+                                    final_intent = "execute_skill"; // Forge 成功後は実行へ
+                                }
+                                Err(e) => {
+                                    let _ = log_tx.send(CoreEvent::ChatResponse { 
+                                        response: format!("ごめんね、新しいスキルの構築に失敗しちゃった…（エラー: {}）", e), 
+                                        channel_id,
+                                        audio_path: None
+                                    }).await;
+                                    return;
+                                }
                             }
                         }
                     }
 
                     // --- STEP 3: Execute ---
-                    let raw_result = if intent == "execute_skill" || intent == "forge_skill" {
-                        match skill_manager.call_skill(skill_name, func_name, &params, None).await {
+                    let raw_result = if final_intent == "execute_skill" {
+                        match skill_manager.call_skill(&final_skill_name, func_name, &params, None).await {
                             Ok(res) => res,
                             Err(e) => format!("Execution Error: {}", e),
                         }
-                    } else if intent == "system_command" {
-                        if skill_name == "generate" {
+                    } else if final_intent == "system_command" {
+                        if final_skill_name == "generate" {
                             // Internal system command fallback
                             "Started video generation process.".to_string()
                         } else {
@@ -609,7 +655,11 @@ impl WatchtowerServer {
                             message, raw_result
                         );
                         let synth_agent = client.agent("gemini-2.0-flash").preamble(&synth_preamble).build();
-                        synth_agent.prompt("結果を分かりやすく、可愛らしく報告して。").await.unwrap_or_else(|_| "[Sad] 処理は終わったけど、うまく説明できないな…ごめんね。".to_string())
+                        let synthesized: String = match synth_agent.prompt("結果を分かりやすく、可愛らしく報告して。").await {
+                            Ok(s) => s,
+                            Err(_) => "[Sad] 処理は終わったけど、うまく説明できないな…ごめんね。".to_string()
+                        };
+                        synthesized
                     } else {
                         comment
                     };

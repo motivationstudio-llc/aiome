@@ -102,11 +102,27 @@ impl AgentAct for ProductionOrchestrator {
                 category: input.category.clone(),
                 trend_items: trend_res.items,
                 available_styles: self.style_manager.list_available_styles(),
+                relevant_karma: input.relevant_karma.clone(),
+                previous_attempt_log: input.previous_attempt_log.clone(),
             };
             let res = self.supervisor.enforce_act(&self.concept_manager, concept_req).await?;
             self.asset_manager.save_concept(&project_id, &res)?;
             res
         };
+
+        // --- Phase 1.2: Honorable Abort (Pre-flight Strategic Scan) ---
+        if concept_res.title.trim().is_empty() || concept_res.display_intro.chars().count() < 10 {
+            return Err(FactoryError::HonorableAbort { 
+                reason: "Concept density too low for production. Aborting to save resources.".into() 
+            });
+        }
+
+        // Logic check for non-sensical titles or placeholder contamination
+        if concept_res.title.to_lowercase().contains("placeholder") || concept_res.title.to_lowercase().contains("tbd") {
+            return Err(FactoryError::HonorableAbort { 
+                reason: "Placeholder content detected in generated concept.".into() 
+            });
+        }
 
         // スタイル決定
         let base_style_name = if !input.style_name.is_empty() { &input.style_name } else { &concept_res.style_profile };

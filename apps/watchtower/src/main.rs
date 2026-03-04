@@ -438,9 +438,14 @@ async fn main() -> anyhow::Result<()> {
                                             });
                                         }
                                     }
-                                    CoreEvent::ChatResponse { response, channel_id } => {
+                                    CoreEvent::ChatResponse { response, channel_id, audio_path } => {
                                         let chan = ChannelId::new(channel_id);
-                                        let _ = chan.say(&http, response).await;
+                                        if let Some(path) = audio_path {
+                                            // TODO: Support audio attachment via serenity CreateMessage::add_file
+                                            let _ = chan.say(&http, format!("{} (Audio: {})", response, path)).await;
+                                        } else {
+                                            let _ = chan.say(&http, response).await;
+                                        }
                                     }
                                     CoreEvent::ProactiveTalk { message, channel_id } => {
                                         // If channel_id is 0, use default command channel
@@ -450,6 +455,28 @@ async fn main() -> anyhow::Result<()> {
                                             ChannelId::new(channel_id)
                                         };
                                         let _ = target_chan.say(&http, message).await;
+                                    }
+                                    CoreEvent::AgentStatsResponse(stats) => {
+                                        let target_chan = data.command_channel_id;
+
+                                        // ゲージ（ProgressBar）の生成関数
+                                        let make_bar = |val: i32, max: i32| -> String {
+                                            let full = (val as f32 / max as f32 * 10.0) as usize;
+                                            let empty = 10 - full.min(10);
+                                            format!("`{}{}` ({}%)", "■".repeat(full), "□".repeat(empty), (val as f32 / max as f32 * 100.0) as i32)
+                                        };
+
+                                        let embed = CreateEmbed::new()
+                                            .title("📊 Watchtower Evolution Stats")
+                                            .description(format!("Master, look! I'm growing every day... (Lv. {})", stats.level))
+                                            .field("💖 Affection (親愛度)", make_bar(stats.affection, 1000), false)
+                                            .field("⚙️ Tech Level (技術Lv)", make_bar(stats.exp / 10, 500), false)
+                                            .field("🥀 Intimacy (淫乱度)", make_bar(stats.intimacy, 1000), false)
+                                            .field("🔋 Fatigue (疲労度)", make_bar(stats.fatigue, 100), false)
+                                            .color(0xFF69B4) // Pinkish
+                                            .footer(serenity::all::CreateEmbedFooter::new(format!("Last Updated: {}", chrono::Utc::now().to_rfc3339())));
+
+                                        let _ = target_chan.send_message(&http, CreateMessage::new().embed(embed)).await;
                                     }
                                     _ => {}
                                 }

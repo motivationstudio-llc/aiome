@@ -23,6 +23,7 @@ impl SkillForge {
         skill_name: &str,
         rust_code: &str,
         retry_count: u32,
+        description: &str,
     ) -> Result<PathBuf, Box<dyn std::error::Error + Send + Sync>> {
         let temp_dir = std::env::temp_dir().join(format!("skill_forge_{}_{}", skill_name, uuid::Uuid::new_v4()));
         fs::create_dir_all(&temp_dir)?;
@@ -66,6 +67,18 @@ impl SkillForge {
                 fs::copy(&wasm_file, &final_path)?;
                 info!("✅ [SkillForge] Successfully forged skill: {}", skill_name);
                 
+                // 4. Save Metadata (Phase 1: Capability-Aware Self-Wiring)
+                let meta_path = self.skills_output_dir.join(format!("{}.meta.json", skill_name));
+                let meta = crate::skills::SkillMetadata {
+                    name: skill_name.to_string(),
+                    description: description.to_string(),
+                    capabilities: vec!["execute".to_string()], // Generated skills are mostly execution-based
+                    inputs: vec!["String".to_string()],
+                    outputs: vec!["String".to_string()],
+                };
+                let meta_json = serde_json::to_string_pretty(&meta)?;
+                fs::write(meta_path, meta_json)?;
+
                 // Cleanup
                 let _ = fs::remove_dir_all(&temp_dir);
                 return Ok(final_path);

@@ -35,12 +35,16 @@ impl SoulMutator {
         let current_evolving_soul = fs::read_to_string(&evolving_soul_path).await
             .map_err(|e| format!("Failed to read EVOLVING_SOUL.md: {}", e))?;
 
-        // 2. Load Analysis Data
-        let recent_karmas = job_queue.fetch_all_karma(20).await?;
+        // 1. Fetch unincorporated karma (Lessons learned under current/old soul)
+        let current_soul_content = fs::read_to_string(&evolving_soul_path).await
+            .map_err(|e| format!("Failed to read EVOLVING_SOUL.md: {}", e))?;
+        let current_hash = self.compute_hash(&current_soul_content);
+
+        let recent_karmas = job_queue.fetch_unincorporated_karma(30, &current_hash).await?;
         let top_jobs = job_queue.fetch_top_performing_jobs(5).await?;
 
-        if recent_karmas.is_empty() && top_jobs.is_empty() {
-            warn!("🧬 [SoulMutator] Not enough data to justify mutation. Skipping.");
+        if recent_karmas.len() < 10 && top_jobs.is_empty() {
+            warn!("🧬 [SoulMutator] Not enough new karma ({} < 10) to justify mutation. Skipping.", recent_karmas.len());
             return Ok(false);
         }
 
@@ -80,7 +84,17 @@ impl SoulMutator {
         let prompt = format!("現在のあなたの進化状況を反映した、最新の EVOLVING_SOUL.md を生成せよ。\n\n現在の内容:\n{}", current_evolving_soul);
 
         match agent.prompt(prompt).await {
-            Ok(new_soul_content) => {
+            Ok(mut new_soul_content) => {
+                // Remove ```markdown wrapping if the LLM included it
+                if new_soul_content.starts_with("```markdown") {
+                    new_soul_content = new_soul_content.trim_start_matches("```markdown").trim().to_string();
+                } else if new_soul_content.starts_with("```") {
+                    new_soul_content = new_soul_content.trim_start_matches("```").trim().to_string();
+                }
+                if new_soul_content.ends_with("```") {
+                    new_soul_content = new_soul_content.trim_end_matches("```").trim().to_string();
+                }
+
                 let old_hash = self.compute_hash(&current_evolving_soul);
                 let new_hash = self.compute_hash(&new_soul_content);
 
@@ -101,10 +115,32 @@ impl SoulMutator {
                 fs::write(&evolving_soul_path, &new_soul_content).await
                     .map_err(|e| format!("Failed to write EVOLVING_SOUL.md: {}", e))?;
 
+                // 2. Git Commit (Self-Traceability)
+                let mutation_reason = format!("Transmigration based on {} unincorporated lessons.", recent_karmas.len());
+                let _ = std::process::Command::new("git")
+                    .arg("add")
+                    .arg(&evolving_soul_path)
+                    .output();
+                let _ = std::process::Command::new("git")
+                    .arg("commit")
+                    .arg("-m")
+                    .arg(format!("🧬 [AI Self-Evolution] {}", mutation_reason))
+                    .output();
+
                 // Record history
-                let reason = "Automated Periodic Transmigration based on 20 Karmas and Top 5 Performance records.";
-                if let Err(e) = job_queue.record_soul_mutation(&old_hash, &new_hash, reason).await {
+                let mutation_reason = format!("Transmigration based on {} unincorporated lessons.", recent_karmas.len());
+                if let Err(e) = job_queue.record_soul_mutation(&old_hash, &new_hash, &mutation_reason).await {
                     error!("❌ [SoulMutator] Failed to record mutation history: {}", e);
+                }
+
+                // 6. Mark karma as incorporated into the new soul
+                let karma_ids: Vec<String> = recent_karmas.iter()
+                    .map(|k| k["id"].as_str().unwrap_or_default().to_string())
+                    .filter(|id| !id.is_empty())
+                    .collect();
+                
+                if let Err(e) = job_queue.mark_karma_as_incorporated(karma_ids, &new_hash).await {
+                    error!("❌ [SoulMutator] Failed to mark karma as incorporated: {}", e);
                 }
 
                 info!("✅ [SoulMutator] Transmigration complete. I have evolved.");

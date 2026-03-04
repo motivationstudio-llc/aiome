@@ -17,6 +17,27 @@ pub struct JobWorker {
     soul_md: String,
 }
 
+/// 実行中のビジー状態を管理するRAIIガード
+struct ScopedBusyGuard {
+    is_busy: Arc<Mutex<bool>>,
+}
+
+impl ScopedBusyGuard {
+    fn new(is_busy: Arc<Mutex<bool>>) -> Self {
+        Self { is_busy }
+    }
+}
+
+impl Drop for ScopedBusyGuard {
+    fn drop(&mut self) {
+        let is_busy = self.is_busy.clone();
+        tokio::spawn(async move {
+            let mut busy = is_busy.lock().await;
+            *busy = false;
+        });
+    }
+}
+
 impl JobWorker {
     pub fn new(
         job_queue: Arc<SqliteJobQueue>,
@@ -69,11 +90,12 @@ impl JobWorker {
     }
 
     async fn process_job(&self, job: factory_core::traits::Job) {
-        // Set busy
-        {
+        // Set busy (RAII)
+        let _guard = {
             let mut busy = self.is_busy.lock().await;
             *busy = true;
-        }
+            ScopedBusyGuard::new(self.is_busy.clone())
+        };
 
         let job_id = job.id.clone();
         let queue = self.job_queue.clone();
@@ -97,15 +119,44 @@ impl JobWorker {
             }
         });
 
+        // --- Phase 12-B: Karmic Supervision (Dynamic Retry Control) ---
+        let retry_count = self.job_queue.fetch_job_retry_count(&job_id).await.unwrap_or(0);
+        
+        // Fetch relevant Karma for this topic/job
+        let relevant_karma = self.job_queue.fetch_relevant_karma(&job.topic, "workflow_orchestrator", 5, &soul_hash).await.unwrap_or_default();
+        
+        let previous_attempt_log = if retry_count > 0 {
+            job.execution_log.clone()
+        } else {
+            None
+        };
+
+        if retry_count >= 3 {
+             error!("💀 JobWorker: Poison Pill Activated for {}. Permanent Failure recorded.", job_id);
+             let _ = self.job_queue.fail_job(&job_id, "Poison Pill: Consecutive failures detected. Aborting to save resources.").await;
+             return;
+        }
+
+        let style_to_use = match retry_count {
+            0 => job.style.clone(),
+            _ => {
+                info!("⚠️ JobWorker: Retry attempt {} for {}. Injecting Karma for self-correction.", retry_count, job_id);
+                // リトライ時は Karma に基づいて賢く振る舞うため、基本スタイルを維持しつつ LLM に修正を任せる
+                job.style.clone() 
+            },
+        };
+
         // Map Job to WorkflowRequest
         let req = WorkflowRequest {
             category: "tech".to_string(), 
             topic: job.topic.clone(),
             remix_id: None,
             skip_to_step: None,
-            style_name: job.style.clone(),
+            style_name: style_to_use,
             custom_style: None,
             target_langs: vec!["ja".to_string(), "en".to_string()],
+            relevant_karma,
+            previous_attempt_log,
         };
 
         match self.orchestrator.execute(req, &self.jail).await {
@@ -125,6 +176,8 @@ impl JobWorker {
                 if let Err(e) = self.job_queue.complete_job(&job_id, Some(&output_json)).await {
                     error!("❌ JobWorker: Failed to mark job as completed: {}", e);
                 } else {
+                    // Success! Reset retry counter
+                    let _ = self.job_queue.reset_job_retry_count(&job_id).await;
                     // Phase 12: The Agent Evolution (Technical Advancement)
                     let _ = self.job_queue.add_tech_exp(10).await;
                 }
@@ -138,7 +191,14 @@ impl JobWorker {
 
                 // --- Honorable Abort & Internal Karma Backpropagation ---
                 match e {
+                    FactoryError::HonorableAbort { reason } => {
+                        warn!("🏳️ JobWorker: HONORABLE ABORT for {}: {}", job_id, reason);
+                        let _ = self.job_queue.fail_job(&job_id, &format!("STRATEGIC_ABORT: {}", reason)).await;
+                        let lesson = format!("STRATEGIC_DECISION: このジョブは以下の理由で中止されました: {}。同様の低密度なコンセプト生成を避けてください。", reason);
+                        let _ = self.job_queue.store_karma(&job_id, "strategic_arbiter", &lesson, "Synthesized", &soul_hash).await;
+                    }
                     FactoryError::TtsFailure { reason } => {
+                        let _ = self.job_queue.increment_job_retry_count(&job_id).await;
                         warn!("💀 JobWorker: TTS FAILURE detected. Executing Honorable Abort for Job {}", job_id);
                         let _ = self.job_queue.fail_job(&job_id, &format!("TTS_ABORT: {}", reason)).await;
                         
@@ -149,9 +209,13 @@ impl JobWorker {
                         let _ = self.job_queue.store_karma(&job_id, "voicing_failure_system", &lesson, "failure", &soul_hash).await;
                     }
                     _ => {
+                        let _ = self.job_queue.increment_job_retry_count(&job_id).await;
                         let lesson = format!("SYSTEM_ALERT: ジョブが {} により失敗しました。", e);
                         let _ = self.job_queue.store_karma(&job_id, "system_infrastructure", &lesson, "failure", &soul_hash).await;
-                        let _ = self.job_queue.fail_job(&job_id, &e.to_string()).await;
+
+                        sqlx::query("UPDATE jobs SET status = 'Pending', updated_at = datetime('now') WHERE id = ?")
+                            .bind(&job_id)
+                            .execute(self.job_queue.pool_ref()).await.ok();
                     }
                 }
             }
@@ -159,12 +223,6 @@ impl JobWorker {
 
         // Stop Heartbeat Pulse
         let _ = hb_tx.send(());
-
-        // Release busy
-        {
-            let mut busy = self.is_busy.lock().await;
-            *busy = false;
-        }
     }
 }
 

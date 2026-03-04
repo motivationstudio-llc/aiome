@@ -142,6 +142,8 @@ mod tests {
         writeln!(file, "youtube_api_key = \"\"").unwrap();
         writeln!(file, "gemini_api_key = \"\"").unwrap();
         writeln!(file, "tiktok_api_key = \"\"").unwrap();
+        writeln!(file, "script_model = \"gemini-2.0-flash\"").unwrap();
+        writeln!(file, "unleashed_mode = false").unwrap();
         
         // config::File::from(path) を使って明示的なファイルを読み込む
         // 拡張子があるためフォーマットは自動判別される

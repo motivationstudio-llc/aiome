@@ -138,6 +138,8 @@ impl SqliteJobQueue {
                 oracle_score_visual REAL,
                 oracle_score_soul REAL,
                 oracle_reason TEXT,
+                hard_metric_score REAL,
+                engagement_rate REAL,
                 is_finalized INTEGER NOT NULL DEFAULT 0,
                 recorded_at TEXT DEFAULT (datetime('now')),
                 FOREIGN KEY(job_id) REFERENCES jobs(id) ON DELETE CASCADE
@@ -154,8 +156,12 @@ impl SqliteJobQueue {
             "ALTER TABLE sns_metrics_history ADD COLUMN raw_comments_json TEXT",
             "ALTER TABLE sns_metrics_history ADD COLUMN is_finalized INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE sns_metrics_history ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE sns_metrics_history ADD COLUMN hard_metric_score REAL",
+            "ALTER TABLE sns_metrics_history ADD COLUMN engagement_rate REAL",
             "ALTER TABLE karma_logs ADD COLUMN soul_version_hash TEXT",
             "ALTER TABLE karma_logs ADD COLUMN karma_embedding BLOB",
+            "ALTER TABLE karma_logs ADD COLUMN is_federated INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE immune_rules ADD COLUMN is_federated INTEGER NOT NULL DEFAULT 0",
         ] {
             let _ = sqlx::query(migration).execute(&self.pool).await;
         }
@@ -234,6 +240,16 @@ impl SqliteJobQueue {
         )
         .execute(&self.pool).await
         .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to create soul_mutation_history: {}", e) })?;
+
+        // --- Phase 12-F: Karma Federation ---
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS federation_peers (
+                peer_url TEXT PRIMARY KEY,
+                last_sync_at TEXT NOT NULL
+            );"
+        )
+        .execute(&self.pool).await
+        .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to create federation_peers: {}", e) })?;
 
         Ok(())
     }
@@ -754,9 +770,26 @@ impl JobQueue for SqliteJobQueue {
         comments_count: i64,
         raw_comments: Option<&str>,
     ) -> Result<(), FactoryError> {
+        // --- #11 Statistical Pre-processing (Hard Metrics) ---
+        let engagement_rate = if views > 0 {
+            (likes as f64 / views as f64) * 100.0
+        } else {
+            0.0
+        };
+
+        let hard_metric_score = if engagement_rate >= 10.0 {
+            1.0
+        } else if engagement_rate >= 5.0 {
+            0.5
+        } else if engagement_rate >= 1.0 {
+            0.0
+        } else {
+            -0.5
+        };
+
         sqlx::query(
-            "INSERT INTO sns_metrics_history (job_id, milestone_days, views, likes, comments_count, raw_comments_json)
-             VALUES (?, ?, ?, ?, ?, ?)"
+            "INSERT INTO sns_metrics_history (job_id, milestone_days, views, likes, comments_count, raw_comments_json, hard_metric_score, engagement_rate)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
         )
         .bind(job_id)
         .bind(milestone_days)
@@ -764,6 +797,8 @@ impl JobQueue for SqliteJobQueue {
         .bind(likes)
         .bind(comments_count)
         .bind(raw_comments)
+        .bind(hard_metric_score)
+        .bind(engagement_rate)
         .execute(&self.pool)
         .await
         .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to record SNS metrics: {}", e) })?;
@@ -771,7 +806,7 @@ impl JobQueue for SqliteJobQueue {
     }
     async fn fetch_pending_evaluations(&self, limit: i64) -> Result<Vec<SnsMetricsRecord>, FactoryError> {
         let rows = sqlx::query(
-            "SELECT id, job_id, milestone_days, views, likes, comments_count, raw_comments_json
+            "SELECT id, job_id, milestone_days, views, likes, comments_count, raw_comments_json, hard_metric_score, engagement_rate
              FROM sns_metrics_history
              WHERE is_finalized = 0
              LIMIT ?"
@@ -791,6 +826,8 @@ impl JobQueue for SqliteJobQueue {
                 likes: row.get("likes"),
                 comments_count: row.get("comments_count"),
                 raw_comments_json: row.get("raw_comments_json"),
+                hard_metric_score: row.try_get("hard_metric_score").ok(),
+                engagement_rate: row.try_get("engagement_rate").ok(),
             });
         }
         Ok(out)
@@ -1073,6 +1110,251 @@ impl JobQueue for SqliteJobQueue {
             .map_err(|e| FactoryError::Infrastructure { reason: e.to_string() })?;
         Ok(())
     }
+
+    async fn fetch_job_retry_count(&self, job_id: &str) -> Result<i64, FactoryError> {
+        let row = sqlx::query("SELECT retry_count FROM jobs WHERE id = ?")
+            .bind(job_id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to fetch retry count: {}", e) })?;
+        
+        if let Some(r) = row {
+            Ok(r.get("retry_count"))
+        } else {
+            Ok(0)
+        }
+    }
+
+    async fn reset_job_retry_count(&self, job_id: &str) -> Result<(), FactoryError> {
+        sqlx::query("UPDATE jobs SET retry_count = 0 WHERE id = ?")
+            .bind(job_id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to reset retry count: {}", e) })?;
+        Ok(())
+    }
+
+    async fn increment_job_retry_count(&self, job_id: &str) -> Result<bool, FactoryError> {
+        let row = sqlx::query("UPDATE jobs SET retry_count = retry_count + 1 WHERE id = ? RETURNING retry_count")
+            .bind(job_id)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to increment job retry count: {}", e) })?;
+            
+        let count: i64 = row.get("retry_count");
+        if count >= 3 {
+            sqlx::query("UPDATE jobs SET status = 'Failed', error_message = 'Poison Pill Activated: API continually fails.' WHERE id = ?")
+                .bind(job_id)
+                .execute(&self.pool).await.ok();
+            Ok(true) 
+        } else {
+            Ok(false)
+        }
+    }
+
+    async fn fetch_unincorporated_karma(&self, limit: i64, current_soul_hash: &str) -> Result<Vec<serde_json::Value>, FactoryError> {
+        let rows = sqlx::query(
+            "SELECT id, lesson, related_skill, karma_type, weight FROM karma_logs 
+             WHERE soul_version_hash IS NULL OR soul_version_hash != ? 
+             ORDER BY created_at DESC LIMIT ?"
+        )
+        .bind(current_soul_hash)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to fetch unincorporated karma: {}", e) })?;
+
+        let mut results = Vec::new();
+        for row in rows {
+            results.push(serde_json::json!({
+                "id": row.get::<String, _>("id"),
+                "lesson": row.get::<String, _>("lesson"),
+                "skill": row.get::<String, _>("related_skill"),
+                "type": row.get::<String, _>("karma_type"),
+                "weight": row.get::<i64, _>("weight"),
+            }));
+        }
+        Ok(results)
+    }
+
+    async fn mark_karma_as_incorporated(&self, karma_ids: Vec<String>, new_soul_hash: &str) -> Result<(), FactoryError> {
+        if karma_ids.is_empty() { return Ok(()); }
+        
+        // SQLite supports `IN (...)` with many parameters, but here we build it manually or use QueryBuilder
+        let mut query_builder = sqlx::QueryBuilder::new("UPDATE karma_logs SET soul_version_hash = ");
+        query_builder.push_bind(new_soul_hash);
+        query_builder.push(", last_applied_at = datetime('now') WHERE id IN ( ");
+        
+        let mut separated = query_builder.separated(", ");
+        for id in karma_ids {
+            separated.push_bind(id);
+        }
+        query_builder.push(" )");
+        
+        query_builder.build()
+            .execute(&self.pool)
+            .await
+            .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to mark karma as incorporated: {}", e) })?;
+        
+        Ok(())
+    }
+
+    async fn store_immune_rule(&self, rule: &factory_core::contracts::ImmuneRule) -> Result<(), FactoryError> {
+        sqlx::query("INSERT INTO immune_rules (id, pattern, severity, action, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING")
+            .bind(&rule.id)
+            .bind(&rule.pattern)
+            .bind(rule.severity as i64)
+            .bind(&rule.action)
+            .bind(&rule.created_at)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to store immune rule: {}", e) })?;
+        Ok(())
+    }
+
+    async fn fetch_active_immune_rules(&self) -> Result<Vec<factory_core::contracts::ImmuneRule>, FactoryError> {
+        let rows = sqlx::query("SELECT id, pattern, severity, action, created_at FROM immune_rules ORDER BY created_at DESC")
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to fetch immune rules: {}", e) })?;
+
+        let mut rules = Vec::new();
+        for r in rows {
+            rules.push(factory_core::contracts::ImmuneRule {
+                id: r.try_get("id").unwrap_or_else(|_| "".to_string()),
+                pattern: r.try_get("pattern").unwrap_or_else(|_| "".to_string()),
+                severity: r.try_get::<i64, _>("severity").unwrap_or(50) as u8,
+                action: r.try_get("action").unwrap_or_else(|_| "Block".to_string()),
+                created_at: r.try_get("created_at").unwrap_or_else(|_| "".to_string()),
+            });
+        }
+        Ok(rules)
+    }
+
+    async fn record_arena_match(&self, match_data: &factory_core::contracts::ArenaMatch) -> Result<(), FactoryError> {
+        sqlx::query("INSERT INTO arena_history (id, skill_a, skill_b, topic, winner, reasoning, created_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING")
+            .bind(&match_data.id)
+            .bind(&match_data.skill_a)
+            .bind(&match_data.skill_b)
+            .bind(&match_data.topic)
+            .bind(&match_data.winner)
+            .bind(&match_data.reasoning)
+            .bind(&match_data.created_at)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to record arena match: {}", e) })?;
+        Ok(())
+    }
+
+    // --- Phase 12-F: Karma Federation ---
+
+    async fn export_federated_data(&self, since: Option<&str>) -> Result<(Vec<factory_core::contracts::FederatedKarma>, Vec<factory_core::contracts::ImmuneRule>, Vec<factory_core::contracts::ArenaMatch>), FactoryError> {
+        let since_ts = since.unwrap_or("1970-01-01T00:00:00");
+
+        let karmas = sqlx::query("SELECT id, job_id, karma_type, related_skill, lesson, weight, soul_version_hash, created_at FROM karma_logs WHERE created_at > ?")
+            .bind(since_ts)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| FactoryError::Infrastructure { reason: format!("Export Karma failed: {}", e) })?;
+
+        let rules = sqlx::query("SELECT id, pattern, severity, action, created_at FROM immune_rules WHERE created_at > ?")
+            .bind(since_ts)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| FactoryError::Infrastructure { reason: format!("Export Rules failed: {}", e) })?;
+
+        let matches = sqlx::query("SELECT id, skill_a, skill_b, topic, winner, reasoning, created_at FROM arena_history WHERE created_at > ?")
+            .bind(since_ts)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| FactoryError::Infrastructure { reason: format!("Export Matches failed: {}", e) })?;
+
+        let mut fed_karmas = Vec::new();
+        for r in karmas {
+            fed_karmas.push(factory_core::contracts::FederatedKarma {
+                id: r.get("id"),
+                job_id: try_get_optional_string(&r, "job_id"),
+                karma_type: r.get("karma_type"),
+                related_skill: r.get("related_skill"),
+                lesson: r.get("lesson"),
+                weight: r.get::<i64, _>("weight") as i32,
+                soul_version_hash: try_get_optional_string(&r, "soul_version_hash"),
+                created_at: r.get("created_at"),
+            });
+        }
+
+        let mut fed_rules = Vec::new();
+        for r in rules {
+            fed_rules.push(factory_core::contracts::ImmuneRule {
+                id: r.get("id"),
+                pattern: r.get("pattern"),
+                severity: r.get::<i64, _>("severity") as u8,
+                action: r.get("action"),
+                created_at: r.get("created_at"),
+            });
+        }
+
+        let mut fed_matches = Vec::new();
+        for r in matches {
+            fed_matches.push(factory_core::contracts::ArenaMatch {
+                id: r.get("id"),
+                skill_a: r.get("skill_a"),
+                skill_b: r.get("skill_b"),
+                topic: r.get("topic"),
+                winner: try_get_optional_string(&r, "winner"),
+                reasoning: r.get("reasoning"),
+                created_at: r.get("created_at"),
+            });
+        }
+
+        Ok((fed_karmas, fed_rules, fed_matches))
+    }
+
+    async fn import_federated_data(&self, karmas: Vec<factory_core::contracts::FederatedKarma>, rules: Vec<factory_core::contracts::ImmuneRule>, matches: Vec<factory_core::contracts::ArenaMatch>) -> Result<(), FactoryError> {
+        let mut tx = self.pool.begin().await
+            .map_err(|e| FactoryError::Infrastructure { reason: format!("Import Tx start failed: {}", e) })?;
+
+        for k in karmas {
+            sqlx::query("INSERT INTO karma_logs (id, job_id, karma_type, related_skill, lesson, weight, soul_version_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING")
+                .bind(&k.id).bind(&k.job_id).bind(&k.karma_type).bind(&k.related_skill).bind(&k.lesson).bind(k.weight as i64).bind(&k.soul_version_hash).bind(&k.created_at)
+                .execute(&mut *tx).await.map_err(|e| FactoryError::Infrastructure { reason: format!("Import Karma failed: {}", e) })?;
+        }
+
+        for r in rules {
+            sqlx::query("INSERT INTO immune_rules (id, pattern, severity, action, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING")
+                .bind(&r.id).bind(&r.pattern).bind(r.severity as i64).bind(&r.action).bind(&r.created_at)
+                .execute(&mut *tx).await.map_err(|e| FactoryError::Infrastructure { reason: format!("Import Rule failed: {}", e) })?;
+        }
+
+        for m in matches {
+            sqlx::query("INSERT INTO arena_history (id, skill_a, skill_b, topic, winner, reasoning, created_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING")
+                .bind(&m.id).bind(&m.skill_a).bind(&m.skill_b).bind(&m.topic).bind(&m.winner).bind(&m.reasoning).bind(&m.created_at)
+                .execute(&mut *tx).await.map_err(|e| FactoryError::Infrastructure { reason: format!("Import Match failed: {}", e) })?;
+        }
+
+        tx.commit().await.map_err(|e| FactoryError::Infrastructure { reason: format!("Import Tx commit failed: {}", e) })?;
+        Ok(())
+    }
+
+    async fn get_peer_sync_time(&self, peer_url: &str) -> Result<Option<String>, FactoryError> {
+        let row = sqlx::query("SELECT last_sync_at FROM federation_peers WHERE peer_url = ?")
+            .bind(peer_url)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| FactoryError::Infrastructure { reason: format!("Get Peer sync time failed: {}", e) })?;
+        
+        Ok(row.map(|r| r.get("last_sync_at")))
+    }
+
+    async fn update_peer_sync_time(&self, peer_url: &str, sync_time: &str) -> Result<(), FactoryError> {
+        sqlx::query("INSERT INTO federation_peers (peer_url, last_sync_at) VALUES (?, ?) ON CONFLICT(peer_url) DO UPDATE SET last_sync_at = excluded.last_sync_at")
+            .bind(peer_url)
+            .bind(sync_time)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| FactoryError::Infrastructure { reason: format!("Update Peer sync time failed: {}", e) })?;
+        Ok(())
+    }
 }
 
 impl SqliteJobQueue {
@@ -1225,6 +1507,7 @@ impl SqliteJobQueue {
         Ok(karma)
     }
 
+
     pub async fn apply_distilled_karma(&self, skill: &str, distilled_lesson: &str, old_karma_ids: &[String], soul_hash: &str) -> Result<(), FactoryError> {
         let mut tx = self.pool.begin().await
             .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to start tx for distillation: {}", e) })?;
@@ -1253,23 +1536,7 @@ impl SqliteJobQueue {
         Ok(())
     }
 
-    pub async fn increment_job_retry_count(&self, job_id: &str) -> Result<bool, FactoryError> {
-        let row = sqlx::query("UPDATE jobs SET retry_count = retry_count + 1 WHERE id = ? RETURNING retry_count")
-            .bind(job_id)
-            .fetch_one(&self.pool)
-            .await
-            .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to increment job retry count: {}", e) })?;
-            
-        let count: i64 = row.get("retry_count");
-        if count >= 3 {
-            sqlx::query("UPDATE jobs SET status = 'Failed', error_message = 'Poison Pill Activated: API continually fails.' WHERE id = ?")
-                .bind(job_id)
-                .execute(&self.pool).await.ok();
-            Ok(true) 
-        } else {
-            Ok(false)
-        }
-    }
+
 
     pub async fn increment_oracle_retry_count(&self, record_id: i64) -> Result<bool, FactoryError> {
         let row = sqlx::query("UPDATE sns_metrics_history SET retry_count = retry_count + 1 WHERE id = ? RETURNING retry_count")
@@ -1332,7 +1599,64 @@ impl SqliteJobQueue {
         
         Ok(())
     }
+
+    pub async fn fetch_unfederated_data(&self) -> Result<(Vec<factory_core::contracts::FederatedKarma>, Vec<factory_core::contracts::ImmuneRule>), FactoryError> {
+        let karmas = sqlx::query("SELECT id, job_id, karma_type, related_skill, lesson, weight, soul_version_hash, created_at FROM karma_logs WHERE is_federated = 0")
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| FactoryError::Infrastructure { reason: format!("Fetch unfederated karma failed: {}", e) })?;
+
+        let rules = sqlx::query("SELECT id, pattern, severity, action, created_at FROM immune_rules WHERE is_federated = 0")
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| FactoryError::Infrastructure { reason: format!("Fetch unfederated rules failed: {}", e) })?;
+
+        let mut fed_karmas = Vec::new();
+        for r in karmas {
+            use sqlx::Row;
+            fed_karmas.push(factory_core::contracts::FederatedKarma {
+                id: r.get("id"),
+                job_id: try_get_optional_string(&r, "job_id"),
+                karma_type: r.get("karma_type"),
+                related_skill: r.get("related_skill"),
+                lesson: r.get("lesson"),
+                weight: r.get::<i64, _>("weight") as i32,
+                soul_version_hash: try_get_optional_string(&r, "soul_version_hash"),
+                created_at: r.get("created_at"),
+            });
+        }
+
+        let mut fed_rules = Vec::new();
+        for r in rules {
+            use sqlx::Row;
+            fed_rules.push(factory_core::contracts::ImmuneRule {
+                id: r.get("id"),
+                pattern: r.get("pattern"),
+                severity: r.get::<i64, _>("severity") as u8,
+                action: r.get("action"),
+                created_at: r.get("created_at"),
+            });
+        }
+
+        Ok((fed_karmas, fed_rules))
+    }
+
+    pub async fn mark_as_federated(&self, karma_ids: Vec<String>, rule_ids: Vec<String>) -> Result<(), FactoryError> {
+        let mut tx = self.pool.begin().await
+            .map_err(|e| FactoryError::Infrastructure { reason: format!("Mark federated Tx failed: {}", e) })?;
+
+        for id in karma_ids {
+            sqlx::query("UPDATE karma_logs SET is_federated = 1 WHERE id = ?").bind(id).execute(&mut *tx).await.ok();
+        }
+        for id in rule_ids {
+            sqlx::query("UPDATE immune_rules SET is_federated = 1 WHERE id = ?").bind(id).execute(&mut *tx).await.ok();
+        }
+
+        tx.commit().await.map_err(|e| FactoryError::Infrastructure { reason: format!("Mark federated commit failed: {}", e) })?;
+        Ok(())
+    }
 }
+
 
 // Helper function because `get` on Option panics if type is unexpected, 
 // using try_get is safer if column can be NULL.

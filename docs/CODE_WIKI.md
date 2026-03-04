@@ -5,8 +5,14 @@ Welcome to the Antigravity project documentation. This wiki is automatically gen
 ## 🏗️ Architecture & Constitution
 
 - **[Lex AI Constitution](./ARCHITECTURE_LAW.md)**: AI 都市建築基準法。アクターの境界、契約、統治を規定。
-- **[Apps](./api-server.md)**: `api-server` (Dashboard), `shorts-factory` (Industrial Core).
-- **[Libs](./core.md)**: `core` (Traits/Contracts), `shared` (Utils/Health), `infrastructure` (Tools).
+- **Apps**: 
+    - `shorts-factory`: 工場の中枢。動画生成、SNS連携、エージェント人格を統括。
+    - `watchtower`: Discord 監視ボット。
+    - `samsara-hub`: 連邦ネットワークの中央バリデーター。
+- **Libs**: 
+    - `core`: 基本コントラクト、トレイト定義。
+    - `infrastructure`: I/O（DB、API、ツール）の具体的実装。
+    - `shared`: ユーティリティ、共通型定義。
 
 ## 🛡️ Iron Principles
 

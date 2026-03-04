@@ -40,6 +40,13 @@ pub struct ConceptRequest {
     pub trend_items: Vec<TrendItem>,
     /// 利用可能な演出スタイルの一覧
     pub available_styles: Vec<String>,
+    
+    // --- Phase 12-B: Karmic Supervision ---
+    /// 過去の教訓 (Karma) のリスト
+    #[serde(default)]
+    pub relevant_karma: Vec<String>,
+    /// 前回の試行で失敗した際の実行ログ
+    pub previous_attempt_log: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -193,6 +200,13 @@ pub struct WorkflowRequest {
     /// 生成対象言語 (例: ["ja", "en"])
     #[serde(default)]
     pub target_langs: Vec<String>,
+
+    // --- Phase 12-B: Karmic Supervision ---
+    /// 過去の教訓 (Karma) のリスト
+    #[serde(default)]
+    pub relevant_karma: Vec<String>,
+    /// 前回の試行で失敗した際の実行ログ
+    pub previous_attempt_log: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -277,4 +291,78 @@ pub struct OracleVerdict {
     pub soul_score: f64,
     /// 次元分解に基づく分析とインサイト
     pub reasoning: String,
+}
+
+// --- Phase 12-C: Adaptive Immune System & Skill Arena ---
+
+/// 自己防衛のための免疫ルール
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImmuneRule {
+    pub id: String,
+    /// 検知パターンの記述 (自然言語または正規表現)
+    pub pattern: String,
+    /// ルールの重要度 (1-100)
+    pub severity: u8,
+    /// 適用するアクション (Block, Warn, Quarantine)
+    pub action: String,
+    pub created_at: String,
+}
+
+/// 競争的淘汰アリーナの対戦記録
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArenaMatch {
+    pub id: String,
+    pub skill_a: String,
+    pub skill_b: String,
+    pub topic: String,
+    /// 勝利したスキル名
+    pub winner: Option<String>,
+    pub reasoning: String,
+    pub created_at: String,
+}
+
+// --- Phase 12-F: Karma Federation ---
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FederationSyncRequest {
+    /// このノードの一意識別子 (起動時に生成されたUUID)。Sybil攻撃対策。
+    pub node_id: String,
+    /// 前回の同期日時 (ISO8601等)。初回は None
+    pub since: Option<String>,
+    /// プロトコルバージョン。後方互換性のために使用。
+    pub protocol_version: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FederationSyncResponse {
+    pub new_karmas: Vec<FederatedKarma>,
+    pub new_immune_rules: Vec<ImmuneRule>,
+    pub new_arena_matches: Vec<ArenaMatch>,
+    /// 同期時点のレスポンス側サーバー時刻
+    pub server_time: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FederatedKarma {
+    pub id: String,
+    pub job_id: Option<String>,
+    pub karma_type: String,
+    pub related_skill: String,
+    pub lesson: String,
+    pub weight: i32,
+    pub created_at: String,
+    pub soul_version_hash: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FederationPushRequest {
+    pub node_id: String,
+    pub karmas: Vec<FederatedKarma>,
+    pub rules: Vec<ImmuneRule>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FederationPushResponse {
+    pub accepted_count: usize,
+    pub message: String,
 }

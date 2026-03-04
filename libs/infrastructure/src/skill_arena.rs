@@ -1,0 +1,111 @@
+use factory_core::error::FactoryError;
+use factory_core::contracts::ArenaMatch;
+use factory_core::traits::JobQueue;
+use rig::providers::gemini;
+use rig::completion::Prompt;
+use rig::client::CompletionClient;
+use tracing::{info, warn};
+use uuid::Uuid;
+use chrono::Utc;
+
+pub struct SkillArena {
+    gemini_api_key: String,
+}
+
+impl SkillArena {
+    pub fn new(api_key: String) -> Self {
+        Self { gemini_api_key: api_key }
+    }
+
+    /// 二つの異なるスキル（WASM）の出力を比較し、勝利スキルを決定する
+    pub async fn match_skill(&self, skill_a: &str, skill_b: &str, input: &str, jq: &impl JobQueue, 
+        sm: &crate::skills::WasmSkillManager) -> Result<Option<String>, FactoryError> {
+        
+        info!("⚔️  Arena Match: {} vs {} (topic: {})", skill_a, skill_b, input);
+
+        // 両方のスキルを実行
+        let res_a = sm.call_skill(skill_a, "call", input, None).await;
+        let res_b = sm.call_skill(skill_b, "call", input, None).await;
+
+        let (out_a, out_b) = match (res_a, res_b) {
+            (Ok(a), Ok(b)) => (a, b),
+            (Err(e), _) => {
+                warn!("❌ Skill A ({}) failed: {}", skill_a, e);
+                return Ok(Some(skill_b.to_string())); // Aが落ちたのでBの勝利
+            },
+            (_, Err(e)) => {
+                warn!("❌ Skill B ({}) failed: {}", skill_b, e);
+                return Ok(Some(skill_a.to_string())); // Bが落ちたのでAの勝利
+            }
+        };
+
+        // LLMに審判を依頼
+        let client = gemini::Client::new(&self.gemini_api_key)
+            .map_err(|e| FactoryError::Infrastructure { reason: e.to_string() })?;
+            
+        let judge_preamble = "あなたは『AI進化アリーナ』の公正な審判です。
+二つのスキルの出力を比較し、どちらがよりユーザーの意図に忠実で、品質が高いかを判定してください。
+
+【評価基準】
+1. 内容の正確性と具体性
+2. フォーマットの適切さ
+3. エラーが含まれていないか
+
+必ず以下のJSON形式で応答してください：
+{
+  \"winner\": \"スキル名A または スキル名B\",
+  \"reasoning\": \"なぜそのスキルが勝ったのか（一言で）\"
+}";
+
+        let judge_prompt = format!(
+            "input: {}\n\n--- OUTPUT A ({}): ---\n{}\n\n--- OUTPUT B ({}): ---\n{}", 
+            input, skill_a, out_a, skill_b, out_b
+        );
+
+        let agent = client.agent("gemini-2.0-flash").preamble(judge_preamble).build();
+        let judge_res: String = agent.prompt(&judge_prompt).await
+            .map_err(|e: rig::completion::PromptError| FactoryError::Infrastructure { reason: e.to_string() })?;
+
+        let json_str = crate::concept_manager::extract_json(&judge_res)?;
+        let v: serde_json::Value = serde_json::from_str(json_str.as_str())
+            .map_err(|e| FactoryError::Infrastructure { reason: format!("Judge JSON error: {}", e) })?;
+
+        let winner_raw = v["winner"].as_str().unwrap_or("");
+        let final_winner = if winner_raw.contains(skill_a) {
+            Some(skill_a.to_string())
+        } else if winner_raw.contains(skill_b) {
+            Some(skill_b.to_string())
+        } else {
+            None
+        };
+
+        let match_record = ArenaMatch {
+            id: Uuid::new_v4().to_string(),
+            skill_a: skill_a.to_string(),
+            skill_b: skill_b.to_string(),
+            topic: input.to_string(),
+            winner: final_winner.clone(),
+            reasoning: v["reasoning"].as_str().unwrap_or("Decision made by autonomous judge.").to_string(),
+            created_at: Utc::now().to_rfc3339(),
+        };
+
+        if let Some(ref w) = final_winner {
+            info!("🏆 Match Winner: {} (Reason: {})", w, match_record.reasoning);
+        } else {
+            warn!("🤝 Match result: Draw");
+        }
+
+        jq.record_arena_match(&match_record).await?;
+
+        Ok(final_winner)
+    }
+
+    /// アリーナの歴史から統計的に弱いスキルを特定し、淘汰（アンインストール）の準備をする
+    pub async fn analyze_and_cull(&self, _jq: &impl JobQueue, _sm: &crate::skills::WasmSkillManager) -> Result<Vec<String>, FactoryError> {
+        info!("🧬 淘汰アルゴリズム（淘汰プロセス）を実行中...");
+        
+        // 現状は簡易的な淘汰ロジック：同じ能力セットを持つスキルのうち、最新の敗北記録を持つものを抽出
+        // ※ 実際には統計的な累積勝率（Eelo等）で計算すべきだが、ここでは最小実装に留める
+        Ok(Vec::new()) 
+    }
+}

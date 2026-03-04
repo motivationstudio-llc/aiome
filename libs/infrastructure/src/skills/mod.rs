@@ -6,6 +6,15 @@ use extism::{Manifest, Plugin};
 pub mod forge;
 
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SkillMetadata {
+    pub name: String,
+    pub description: String,
+    pub capabilities: Vec<String>,
+    pub inputs: Vec<String>,
+    pub outputs: Vec<String>,
+}
+
 pub struct WasmSkillManager {
     skills_dir: PathBuf,
     memory_limit_bytes: u64,
@@ -29,6 +38,38 @@ impl WasmSkillManager {
         self.memory_limit_bytes = memory_bytes;
         self.timeout = timeout;
         self
+    }
+
+    /// 全スキルのメタデータを一覧取得する (Self-Wiring 用)
+    pub fn list_skills_with_metadata(&self) -> Vec<SkillMetadata> {
+        let mut list = Vec::new();
+        if let Ok(entries) = std::fs::read_dir(&self.skills_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|s| s.to_str()) == Some("meta.json") {
+                    if let Ok(data) = std::fs::read_to_string(&path) {
+                        if let Ok(meta) = serde_json::from_str::<SkillMetadata>(&data) {
+                            list.push(meta);
+                        }
+                    }
+                }
+            }
+        }
+        
+        // メタデータがないスキルについては、ファイル名から最小限のものを生成
+        let all_wasm = self.list_skills();
+        for name in all_wasm {
+            if !list.iter().any(|m| m.name == name) {
+                list.push(SkillMetadata {
+                    name: name.clone(),
+                    description: "No metadata provided".to_string(),
+                    capabilities: vec!["execute".to_string()],
+                    inputs: vec!["String".to_string()],
+                    outputs: vec!["String".to_string()],
+                });
+            }
+        }
+        list
     }
 
     /// 利用可能なスキル名を一覧表示する
@@ -101,6 +142,34 @@ impl WasmSkillManager {
 
         info!("✅ [WasmSkillManager] Skill execution successful: {}", skill_name);
         Ok(result)
+    }
+
+    /// 知識ベース（Karma）から最適なスキルを意味的に探索する (Self-Wiring Capability)
+    pub async fn search_skill_in_knowledge(
+        &self,
+        query: &str,
+        jq: &impl factory_core::traits::JobQueue,
+    ) -> Result<Option<String>, Box<dyn std::error::Error + Send + Sync>> {
+        // 現在のスキル一覧を取得
+        let available_skills = self.list_skills();
+        if available_skills.is_empty() {
+            return Ok(None);
+        }
+
+        // Karmaから類似したレッスンを検索 (Top 5)
+        let entries = jq.fetch_relevant_karma(query, "global", 5, "current").await?;
+        
+        for entry in entries {
+            // エントリ内にスキル名が含まれているか、あるいはスキル名そのものが関連しているかチェック
+            for skill in &available_skills {
+                if entry.to_lowercase().contains(&skill.to_lowercase()) {
+                    info!("🧠 [Self-Wiring] Found relevant skill '{}' via knowledge: {}", skill, entry);
+                    return Ok(Some(skill.clone()));
+                }
+            }
+        }
+
+        Ok(None)
     }
 }
 
