@@ -218,22 +218,22 @@ async fn main() -> Result<(), anyhow::Error> {
     // 5.2 Dual-Core Soul Architecture (SOUL.md = Master + EVOLVING_SOUL.md = Mutable)
     let cwd = std::env::current_dir()?;
     let soul_md_path = cwd.join("SOUL.md");
+    let watchtower_md_path = cwd.join("WATCHTOWER_MANIFEST.md");
     let evolving_soul_path = cwd.join("EVOLVING_SOUL.md");
     let master_soul = std::fs::read_to_string(&soul_md_path).unwrap_or_else(|_| {
         warn!("⚠️ SOUL.md not found at {}. Using default soul.", soul_md_path.display());
-        "## Default Soul
-- Be creative.
-- Stay true to the mission.".to_string()
+        "## Default Soul\n- Be creative.\n- Stay true to the mission.".to_string()
+    });
+    let watchtower_soul = std::fs::read_to_string(&watchtower_md_path).unwrap_or_else(|_| {
+        warn!("⚠️ WATCHTOWER_MANIFEST.md not found. Falling back to SOUL.md context.");
+        master_soul.clone()
     });
     let evolving_soul = std::fs::read_to_string(&evolving_soul_path).unwrap_or_else(|_| {
         info!("ℹ️ EVOLVING_SOUL.md not found. Starting with blank evolving soul.");
         String::new()
     });
-    let soul_md = format!("{}
-
----
-# Evolving Soul (自律進化領域)
-{}", master_soul, evolving_soul);
+    let soul_md = format!("{}\n\n---\n# Evolving Soul (自律進化領域)\n{}", master_soul, evolving_soul);
+    let watchtower_md = format!("{}\n\n---\n# Evolving Soul (自律進化領域)\n{}", watchtower_soul, evolving_soul);
 
     // 5.3 WASM Self-Evolution Infrastructure (SkillForge & WasmSkillManager)
     let skills_dir = cwd.join("workspace/skills");
@@ -263,7 +263,7 @@ async fn main() -> Result<(), anyhow::Error> {
         job_tx, 
         job_queue.clone(),
         config.gemini_api_key.clone(),
-        soul_md.clone(),
+        watchtower_md.clone(),
         config.ollama_url.clone(),
         "huihui_ai/mistral-small-abliterated:latest".to_string(), // 規制解除版 Mistral-Small
         config.unleashed_mode,
@@ -284,7 +284,7 @@ async fn main() -> Result<(), anyhow::Error> {
         config.brave_api_key.clone(),
         config.youtube_api_key.clone(),
         config.gemini_api_key.clone(),
-        soul_md.clone(),
+        watchtower_md.clone(),
         config.workspace_dir.clone(),
         config.comfyui_base_dir.clone(),
         config.clean_after_hours,
@@ -321,7 +321,7 @@ async fn main() -> Result<(), anyhow::Error> {
     // Infrastructure Clients
     let trend_sonar = BraveTrendSonar::new(config.brave_api_key.clone());
     let concept_manager = ConceptManager::new(&config.gemini_api_key, &config.script_model)
-        .with_constitutional_layer(&soul_md, &config.ollama_url, "huihui_ai/mistral-small-abliterated:latest");
+        .with_constitutional_layer(&watchtower_md, &config.ollama_url, "huihui_ai/mistral-small-abliterated:latest");
     let comfy_bridge = ComfyBridgeClient::new(
         shield.clone(),
         &config.comfyui_api_url,

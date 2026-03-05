@@ -74,7 +74,7 @@ libs/shared          ← 共通型, Guardrails (Open)
 Watchtower は、Aiome の「人格」がマスターと触れ合うための窓口です。Discord を通じて、システムの稼働状態を報告したり、マスターの指示を待機したり、自律的な提案を行います。
 
 - **詳細**: [docs/WATCHTOWER_USER_GUIDE.md](docs/WATCHTOWER_USER_GUIDE.md)
-- **人格定義**: [SOUL.md](SOUL.md)
+- **人格定義**: [WATCHTOWER_MANIFEST.md](WATCHTOWER_MANIFEST.md) 🐾
 
 ### 2. 工場 / スキル (Skills & Modules)
 Aiome Core 上で動作する具体的なアプリケーションです。
