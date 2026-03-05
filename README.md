@@ -118,6 +118,7 @@ cargo run -p watchtower
 - **[AI憲法 (Architecture Law)](docs/ARCHITECTURE_LAW.md)**: 知的誠実性と安全性を担保する基本原則。
 - **[運用マニュアル (Operations Guide)](docs/OPERATIONS_MANUAL.md)**: 詳細な環境構築と運用手順。
 - **[進化戦略 (Evolution Strategy)](docs/EVOLUTION_STRATEGY.md)**: 自己進化と育成システムの設計思想。
+- **[人格のカスタマイズ (Soul Customization)](docs/CUSTOMIZING_SOUL.md)**: AIの性格や反応の調整方法。
 - **[セキュリティ設計 (Security Design)](docs/SECURITY_DESIGN.md)**: 多層防御の詳細。
 
 ---

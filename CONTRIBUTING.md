@@ -65,6 +65,12 @@ We follow a strict **Modular Workspace** architecture. (厳格なモジュール
     - **CRITICAL**: `core` MUST NOT depend on `infrastructure` (Dependency Inversion Principle). (`core`が`infrastructure`に依存してはいけません - 依存性逆転の原則)
 - **libs/shared**: Common utils and types. MUST NOT depend on any other layers. (共通定義。他レイヤに依存してはいけません)
 
+#### Iron Principles (鉄の掟):
+- **Result Type Mandatory**: No `unwrap()` or `expect()` outside of tests. (`unwrap()` などの禁止)
+- **Type Safety**: Use NewType patterns and Enums for data flow. (型安全性の徹底)
+- **Async First**: All I/O must be non-blocking using `tokio`. (非同期処理の徹底)
+- **Error Handling**: Use `anyhow` for apps and `thiserror` for library layers. (エラー処理の使い分け)
+
 ---
 
 ## ⚖️ License & CLA (ライセンスとCLA)

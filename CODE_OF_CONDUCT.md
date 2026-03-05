@@ -52,7 +52,7 @@ Instances of abusive, harassing, or otherwise unacceptable behavior may be repor
 The project team will follow these guidelines in determining the consequences for any action they deem in violation of this Code of Conduct:
 1. **Correction**: A private, written warning. (修正：非公開の警告)
 2. **Warning**: A warning with consequences for continued behavior. (警告：再発時の措置を含む)
-3. **Internal Subversion**: A temporary ban. (一時的な禁止)
+3. **Temporary Ban**: A temporary ban. (一時的な禁止)
 4. **Permanent Ban**: A permanent ban from the project and community. (永久的な禁止)
 
 ---
