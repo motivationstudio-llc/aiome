@@ -1,3 +1,7 @@
+<div align="right">
+  <strong>日本語</strong> | <a href="README_en.md">English</a>
+</div>
+
 <p align="center">
   <img src="docs/assets/logo.png" alt="Aiome Logo" width="300">
 </p>
