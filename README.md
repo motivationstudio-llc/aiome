@@ -131,9 +131,14 @@ Aiome Core 上で動作する具体的なアプリケーションです。
 ## 🚀 クイックスタート (Quick Start)
 
 ### 1. 準備 (Prerequisites)
-以下のバックエンドサービスが起動していることを確認してください：
-- **Ollama**: `ollama serve` (推奨モデル: `qwen2.5-coder`)
-- **ComfyUI**: Web UI (`http://localhost:8188`)
+以下の要件が満たされていることを確認してください：
+- **System**: `ffmpeg` (動画・音声処理用) がパスに通っていること。
+- **Ollama**: `ollama serve` が実行中。
+  - 推奨構成: `qwen2.5-coder` (生成用) & `huihui_ai/mistral-small-abliterated` (Watchtower人格/検閲用)
+- **Sidecars**:
+  - **ComfyUI**: 生成エンジン (`http://localhost:8188`)
+  - **Style-Bert-VITS2**: 音声合成サーバー。`Python 3.10+` 環境が必要です。
+- **External API**: 企画とトレンド取得のために `Gemini API Key` および `Brave Search API Key` が必要です。
 
 ### 2. セットアップ・実行
 ```bash
@@ -146,12 +151,17 @@ cp .env.example .env
 
 # 3. Aiome Core の起動 (Samsara Protocol)
 cargo run -p shorts-factory -- serve
+
+# 4. Watchtower (Discord Client) の起動 (別ターミナル)
+cargo run -p watchtower
 ```
 
-> **Note**: Discord 連携（Watchtower）を使用する場合は、別ターミナルで `cargo run -p watchtower` を実行してください。
+> **Note**: `shorts-factory` は UDS ソケットを通じて `watchtower` と通信します。対話機能（Discord連携）を有効にするには、両方のプロセスを同時に実行してください。
 
 #### 🔑 主な環境変数 (.env)
 - `DISCORD_TOKEN`: Watchtower 用。
+- `GEMINI_API_KEY`: コンテンツの自律企画 (Samsara Protocol) 用。
+- `BRAVE_API_KEY`: トレンド監視 (Sonar Ping) 用。
 - `OLLAMA_BASE_URL`: LLM接続用 (デフォルト: http://localhost:11434)。
 - `COMFYUI_URL`: 生成エンジン用 (デフォルト: http://localhost:8188)。
 

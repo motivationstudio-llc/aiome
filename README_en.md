@@ -131,9 +131,14 @@ Specific applications running on Aiome Core.
 ## 🚀 Quick Start
 
 ### 1. Prerequisites
-Ensure the following backend services are running:
-- **Ollama**: `ollama serve` (Recommended model: `qwen2.5-coder`)
-- **ComfyUI**: Web UI (`http://localhost:8188`)
+Ensure the following requirements are met:
+- **System**: `ffmpeg` (for video/audio processing) must be in your PATH.
+- **Ollama**: `ollama serve` is running.
+  - Recommended models: `qwen2.5-coder` (Generation) & `huihui_ai/mistral-small-abliterated` (Watchtower Personality/Constitutional)
+- **Sidecars**:
+  - **ComfyUI**: Generative engine (`http://localhost:8188`)
+  - **Style-Bert-VITS2**: TTS server. Requires a `Python 3.10+` environment.
+- **External API**: `Gemini API Key` and `Brave Search API Key` are required for autonomous planning and trend analysis.
 
 ### 2. Setup & Run
 ```bash
@@ -146,12 +151,17 @@ cp .env.example .env
 
 # 3. Start Aiome Core (Samsara Protocol)
 cargo run -p shorts-factory -- serve
+
+# 4. Start Watchtower (Discord Client) in a separate terminal
+cargo run -p watchtower
 ```
 
-> **Note**: To use the Discord integration (Watchtower), run `cargo run -p watchtower` in a separate terminal.
+> **Note**: `shorts-factory` communicates with `watchtower` via a UDS socket. To enable interaction (Discord integration), both processes must be running simultaneously.
 
 #### 🔑 Key Environment Variables (.env)
 - `DISCORD_TOKEN`: For Watchtower.
+- `GEMINI_API_KEY`: For autonomous planning (Samsara Protocol).
+- `BRAVE_API_KEY`: For trend monitoring (Sonar Ping).
 - `OLLAMA_BASE_URL`: For LLM connections (Default: http://localhost:11434).
 - `COMFYUI_URL`: For the generative engine (Default: http://localhost:8188).
 
