@@ -118,7 +118,7 @@ async fn stats(ctx: PoiseContext<'_>) -> Result<(), Error> {
     Ok(())
 }
 
-/// Start a new video generation task
+/// Start a new generation task
 #[poise::command(slash_command)]
 async fn generate(
     ctx: PoiseContext<'_>,

@@ -23,42 +23,42 @@ pub struct SnsMetrics {
 
 /// SNSプラットフォームの観測を担当する
 pub struct SnsWatcher {
-    youtube_api_key: String,
+    api_key: String,
 }
 
 const MAX_COMMENTS_TO_FETCH: i64 = 100; // Ultimate Production Audit: Top-K Truncation
 
 impl SnsWatcher {
-    pub fn new(youtube_api_key: String) -> Self {
-        Self { youtube_api_key }
+    pub fn new(api_key: String) -> Self {
+        Self { api_key }
     }
 
-    /// 動画のメトリクスとコメントを取得する (現在はモック実装、YouTube API等に差し替え可能)
+    /// 公開されたコンテンツのメトリクスとコメントを取得する (現在はモック実装、YouTube API等に差し替え可能)
     /// Soft-Fail Resilience: 個別の取得失敗は呼び出し側でハンドルする
-    pub async fn fetch_metrics(&self, platform: &str, video_id: &str) -> Result<SnsMetrics, FactoryError> {
-        if self.youtube_api_key.is_empty() {
+    pub async fn fetch_metrics(&self, platform: &str, content_id: &str) -> Result<SnsMetrics, FactoryError> {
+        if self.api_key.is_empty() {
              return Err(FactoryError::Infrastructure { 
-                 reason: "YouTube API Key is missing".to_string() 
+                 reason: "API Key is missing".to_string() 
              });
         }
 
         match platform.to_lowercase().as_str() {
-            "youtube" => self.fetch_youtube_metrics(video_id).await,
+            "youtube" => self.fetch_youtube_metrics(content_id).await,
             _ => Err(FactoryError::Infrastructure { 
                 reason: format!("Unsupported platform: {}", platform) 
             }),
         }
     }
 
-    async fn fetch_youtube_metrics(&self, video_id: &str) -> Result<SnsMetrics, FactoryError> {
-        info!("📺 [SnsWatcher] Fetching YouTube metrics for {}", video_id);
+    async fn fetch_youtube_metrics(&self, content_id: &str) -> Result<SnsMetrics, FactoryError> {
+        info!("📺 [SnsWatcher] Fetching YouTube metrics for {}", content_id);
         
         let client = reqwest::Client::new();
 
         // 1. Fetch Video Statistics
         let video_url = format!(
             "https://www.googleapis.com/youtube/v3/videos?part=statistics&id={}&key={}",
-            video_id, self.youtube_api_key
+            content_id, self.api_key
         );
 
         let vid_resp = client.get(&video_url).send().await
@@ -80,7 +80,7 @@ impl SnsWatcher {
             .ok_or_else(|| FactoryError::Infrastructure { reason: "Missing items in YouTube response".to_string() })?;
 
         if items.is_empty() {
-            return Err(FactoryError::Infrastructure { reason: format!("YouTube video {} not found", video_id) });
+            return Err(FactoryError::Infrastructure { reason: format!("YouTube content {} not found", content_id) });
         }
 
         let stats = items[0].get("statistics")
@@ -94,7 +94,7 @@ impl SnsWatcher {
         // Fetches top MAX_COMMENTS_TO_FETCH by relevance, ignoring nextPageToken entirely.
         let comments_url = format!(
             "https://www.googleapis.com/youtube/v3/commentThreads?part=snippet&videoId={}&maxResults={}&order=relevance&key={}",
-            video_id, MAX_COMMENTS_TO_FETCH, self.youtube_api_key
+            content_id, MAX_COMMENTS_TO_FETCH, self.api_key
         );
 
         let mut comments = Vec::new();
@@ -114,13 +114,13 @@ impl SnsWatcher {
             }
         } else if comm_resp.status() == 403 {
              // 403 means comments disabled or quota exceeded for the day
-             tracing::warn!("⚠️ [SnsWatcher] Comments disabled or Quota Exceeded for video {}", video_id);
+             tracing::warn!("⚠️ [SnsWatcher] Comments disabled or Quota Exceeded for content {}", content_id);
              // We do not fail the whole metric fetch just because comments are disabled, the watcher proceeds with views/likes.
         } else {
              tracing::warn!("⚠️ [SnsWatcher] Failed to fetch comments: status {}", comm_resp.status());
         }
 
-        info!("✅ [SnsWatcher] Fetched for {}: {} views, {} likes, {} comments extracted.", video_id, views, likes, comments.len());
+        info!("✅ [SnsWatcher] Fetched for {}: {} views, {} likes, {} comments extracted.", content_id, views, likes, comments.len());
 
         Ok(SnsMetrics {
             views,

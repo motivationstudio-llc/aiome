@@ -52,8 +52,8 @@ impl AssetManager {
     /// コンセプトを読み込み (自動マイグレーション対応)
     pub fn load_concept(&self, project_id: &str) -> Result<ConceptResponse, FactoryError> {
         let path = self.base_dir.join(project_id).join("concept.json");
-        let content = std::fs::read_to_string(path).map_err(|e| FactoryError::MediaNotFound {
-            path: format!("concept.json for {}: {}", project_id, e),
+        let content = std::fs::read_to_string(&path).map_err(|_| FactoryError::ArtifactNotFound {
+            path: path.to_string_lossy().to_string(),
         })?;
         
         let mut concept: ConceptResponse = serde_json::from_str(&content).map_err(|e| FactoryError::Infrastructure {

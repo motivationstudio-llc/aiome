@@ -35,14 +35,16 @@ pub struct FactoryConfig {
     pub workspace_dir: String,
     /// ファイル清掃までの経過時間(時間) (Phase 10-D)
     pub clean_after_hours: u64,
-    /// YouTube Data API Key for Phase 11 Sentinel
-    pub youtube_api_key: String,
+    /// SNS API Key (e.g. YouTube Data API Key)
+    pub sns_api_key: String,
     /// Gemini API Key for The Oracle (Phase 11-D)
     pub gemini_api_key: String,
     /// TikTok API Key for Phase 11 Sentinel (Placeholder)
     pub tiktok_api_key: String,
     /// Unleashed Mode (Platinum Edition): Bypass all level requirements
     pub unleashed_mode: bool,
+    /// Primary Artifact Extension (e.g. .mp4, .png)
+    pub artifact_extension: String,
 }
 
 impl std::fmt::Debug for FactoryConfig {
@@ -58,10 +60,11 @@ impl std::fmt::Debug for FactoryConfig {
             .field("export_dir", &self.export_dir)
             .field("workspace_dir", &self.workspace_dir)
             .field("clean_after_hours", &self.clean_after_hours)
-            .field("youtube_api_key", if self.youtube_api_key.is_empty() { &"" } else { &"***" })
+            .field("sns_api_key", if self.sns_api_key.is_empty() { &"" } else { &"***" })
             .field("gemini_api_key", if self.gemini_api_key.is_empty() { &"" } else { &"***" })
             .field("tiktok_api_key", if self.tiktok_api_key.is_empty() { &"" } else { &"***" })
             .field("unleashed_mode", &self.unleashed_mode)
+            .field("artifact_extension", &self.artifact_extension)
             .finish()
     }
 }
@@ -82,10 +85,11 @@ impl FactoryConfig {
             .set_default("export_dir", std::env::var("EXPORT_DIR").unwrap_or_else(|_| "/Users/motista/Library/Mobile Documents/com~apple~CloudDocs/Aiome_Exports".to_string()))?
             .set_default("workspace_dir", std::env::var("WORKSPACE_DIR").unwrap_or_else(|_| "./workspace".to_string()))?
             .set_default("clean_after_hours", 24)?
-            .set_default("youtube_api_key", std::env::var("YOUTUBE_API_KEY").unwrap_or_else(|_| "".to_string()))?
+            .set_default("sns_api_key", std::env::var("SNS_API_KEY").or_else(|_| std::env::var("YOUTUBE_API_KEY")).unwrap_or_else(|_| "".to_string()))?
             .set_default("gemini_api_key", std::env::var("GEMINI_API_KEY").unwrap_or_else(|_| "".to_string()))?
             .set_default("tiktok_api_key", std::env::var("TIKTOK_API_KEY").unwrap_or_else(|_| "".to_string()))?
             .set_default("unleashed_mode", std::env::var("UNLEASHED_MODE").map(|v| v.to_lowercase() == "true").unwrap_or(false))?
+            .set_default("artifact_extension", ".mp4")?
             // config.toml があれば読み込む
             .add_source(config::File::with_name("config").required(false))
             // 環境変数 (SHORTS_FACTORY_*) があれば上書き
@@ -111,10 +115,11 @@ impl Default for FactoryConfig {
                 export_dir: std::env::var("EXPORT_DIR").unwrap_or_else(|_| "/Users/motista/Library/Mobile Documents/com~apple~CloudDocs/Aiome_Exports".to_string()),
                 workspace_dir: std::env::var("WORKSPACE_DIR").unwrap_or_else(|_| "./workspace".to_string()),
                 clean_after_hours: 24,
-                youtube_api_key: std::env::var("YOUTUBE_API_KEY").unwrap_or_else(|_| "".to_string()),
+                sns_api_key: std::env::var("SNS_API_KEY").or_else(|_| std::env::var("YOUTUBE_API_KEY")).unwrap_or_else(|_| "".to_string()),
                 gemini_api_key: std::env::var("GEMINI_API_KEY").unwrap_or_else(|_| "".to_string()),
                 tiktok_api_key: std::env::var("TIKTOK_API_KEY").unwrap_or_else(|_| "".to_string()),
                 unleashed_mode: std::env::var("UNLEASHED_MODE").map(|v| v.to_lowercase() == "true").unwrap_or(false),
+                artifact_extension: ".mp4".to_string(),
             }
         })
     }
@@ -149,11 +154,12 @@ mod tests {
         writeln!(file, "export_dir = \"/tmp/exports\"").unwrap();
         writeln!(file, "workspace_dir = \"./workspace\"").unwrap();
         writeln!(file, "clean_after_hours = 24").unwrap();
-        writeln!(file, "youtube_api_key = \"\"").unwrap();
+        writeln!(file, "sns_api_key = \"\"").unwrap();
         writeln!(file, "gemini_api_key = \"\"").unwrap();
         writeln!(file, "tiktok_api_key = \"\"").unwrap();
         writeln!(file, "script_model = \"gemini-2.0-flash\"").unwrap();
         writeln!(file, "unleashed_mode = false").unwrap();
+        writeln!(file, "artifact_extension = \".mp4\"").unwrap();
         
         // config::File::from(path) を使って明示的なファイルを読み込む
         // 拡張子があるためフォーマットは自動判別される

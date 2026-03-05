@@ -82,7 +82,7 @@ impl SoundMixer {
             if default_bgm.exists() {
                 Ok(default_bgm)
             } else {
-                Err(FactoryError::MediaNotFound { path: "default.mp3".into() })
+                Err(FactoryError::ArtifactNotFound { path: "default.mp3".into() })
             }
         }
     }

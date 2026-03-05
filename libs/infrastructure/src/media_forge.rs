@@ -10,9 +10,9 @@
 
 use async_trait::async_trait;
 use bastion::fs_guard::Jail;
-use factory_core::contracts::{MediaRequest, MediaResponse};
+use factory_core::contracts::{MediaProcessingRequest, MediaProcessingResponse};
 use factory_core::error::FactoryError;
-use factory_core::traits::{AgentAct, MediaEditor};
+use factory_core::traits::{AgentAct, MediaProcessor};
 use rig::tool::Tool;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -27,32 +27,34 @@ use tracing::info;
 pub struct MediaForgeClient {
     /// 作業用の Jail
     pub jail: Arc<Jail>,
+    /// 成果物の拡張子
+    pub artifact_extension: String,
 }
 
 impl MediaForgeClient {
-    pub fn new(jail: Arc<Jail>) -> Self {
-        Self { jail }
+    pub fn new(jail: Arc<Jail>, artifact_extension: String) -> Self {
+        Self { jail, artifact_extension }
     }
 }
 
 #[async_trait]
-impl MediaEditor for MediaForgeClient {
+impl MediaProcessor for MediaForgeClient {
     async fn combine_assets(
         &self,
-        video: &std::path::PathBuf,
-        audio: &std::path::PathBuf,
-        subtitle: Option<&std::path::PathBuf>,
+        input: &std::path::PathBuf,
+        context: &std::path::PathBuf,
+        metadata: Option<&std::path::PathBuf>,
         force_style: Option<String>,
     ) -> Result<std::path::PathBuf, FactoryError> {
-        let output = self.jail.root().join("final_output.mp4");
+        let output = self.jail.root().join(format!("final_output{}", self.artifact_extension));
         
         let mut cmd = Command::new("ffmpeg");
         cmd.arg("-y")
-           .arg("-i").arg(video)
-           .arg("-i").arg(audio);
+           .arg("-i").arg(input)
+           .arg("-i").arg(context);
         
-        // 字幕の焼き込み (Hard-burn) - Grade S Design
-        if let Some(sub) = subtitle {
+        // デフォルトスタイル (Subtitles)
+        if let Some(sub) = metadata {
             let sub_path = sub.to_string_lossy()
                 .replace("'", "'\\''")
                 .replace(":", "\\:");
@@ -87,7 +89,7 @@ impl MediaEditor for MediaForgeClient {
         
         let output_res = cmd.output()
            .await
-           .map_err(|e| FactoryError::Infrastructure {
+           .map_err(|e| FactoryError::SubprocessFailed {
             reason: format!("Failed to spawn ffmpeg: {}", e),
         })?;
 
@@ -95,14 +97,14 @@ impl MediaEditor for MediaForgeClient {
             Ok(output)
         } else {
             let err = String::from_utf8_lossy(&output_res.stderr);
-            Err(FactoryError::Infrastructure {
+            Err(FactoryError::SubprocessFailed {
                 reason: format!("FFmpeg execution failed: {}", err),
             })
         }
     }
 
-    async fn resize_for_shorts(&self, input: &std::path::PathBuf) -> Result<std::path::PathBuf, FactoryError> {
-        let output = self.jail.root().join("resized_shorts.mp4");
+    async fn standardize_media(&self, input: &std::path::PathBuf) -> Result<std::path::PathBuf, FactoryError> {
+        let output = self.jail.root().join(format!("standardized_artifact{}", self.artifact_extension));
         
         let mut cmd = Command::new("ffmpeg");
         cmd.arg("-y")
@@ -118,7 +120,7 @@ impl MediaEditor for MediaForgeClient {
         tracing::info!("MediaForge: Resizing video (Hardware Accelerated)...");
         let output_res = cmd.output()
            .await
-           .map_err(|e| FactoryError::Infrastructure {
+           .map_err(|e| FactoryError::SubprocessFailed {
             reason: format!("Failed to spawn ffmpeg: {}", e),
         })?;
 
@@ -126,7 +128,7 @@ impl MediaEditor for MediaForgeClient {
             Ok(output)
         } else {
             let err = String::from_utf8_lossy(&output_res.stderr);
-            Err(FactoryError::Infrastructure {
+            Err(FactoryError::SubprocessFailed {
                 reason: format!("FFmpeg resize failed: {}", err),
             })
         }
@@ -143,8 +145,8 @@ impl MediaEditor for MediaForgeClient {
         }
 
         let list_path = self.jail.root().join("concat_list.txt");
-        std::fs::write(&list_path, concat_list).map_err(|e| FactoryError::Infrastructure {
-            reason: format!("Failed to write concat list: {}", e),
+        std::fs::write(&list_path, concat_list).map_err(|e| FactoryError::OsError {
+            source: anyhow::anyhow!("Failed to write concat list: {}", e),
         })?;
 
         let status = Command::new("ffmpeg")
@@ -158,12 +160,12 @@ impl MediaEditor for MediaForgeClient {
             .stderr(Stdio::null())
             .status()
             .await
-            .map_err(|e| FactoryError::Infrastructure { reason: format!("FFmpeg concat failed: {}", e) })?;
+            .map_err(|e| FactoryError::SubprocessFailed { reason: format!("FFmpeg concat failed: {}", e) })?;
 
         if status.success() {
             Ok(output.to_string_lossy().to_string())
         } else {
-            Err(FactoryError::Infrastructure { reason: "FFmpeg concat execution failed".into() })
+            Err(FactoryError::SubprocessFailed { reason: "FFmpeg concat execution failed".into() })
         }
     }
 
@@ -176,7 +178,7 @@ impl MediaEditor for MediaForgeClient {
             .stderr(Stdio::null())
             .output()
             .await
-            .map_err(|e| FactoryError::Infrastructure { reason: format!("ffprobe duration failed: {}", e) })?;
+            .map_err(|e| FactoryError::SubprocessFailed { reason: format!("ffprobe duration failed: {}", e) })?;
 
         let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
         s.parse::<f32>().map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to parse duration '{}': {}", s, e) })
@@ -206,8 +208,8 @@ pub struct MediaForgeOutput {
 
 #[async_trait]
 impl AgentAct for MediaForgeClient {
-    type Input = MediaRequest;
-    type Output = MediaResponse;
+    type Input = MediaProcessingRequest;
+    type Output = MediaProcessingResponse;
 
     async fn execute(
         &self,
@@ -215,19 +217,19 @@ impl AgentAct for MediaForgeClient {
         _jail: &bastion::fs_guard::Jail,
     ) -> Result<Self::Output, FactoryError> {
         let path = self.combine_assets(
-            &PathBuf::from(input.video_path),
-            &PathBuf::from(input.audio_path),
-            input.subtitle_path.as_ref().map(PathBuf::from).as_ref(),
+            &PathBuf::from(input.input_path),
+            &PathBuf::from(input.context_path.unwrap_or_else(|| "default_audio.mp3".into())),
+            input.metadata_path.as_ref().map(PathBuf::from).as_ref(),
             input.force_style,
         ).await?;
-        Ok(MediaResponse {
+        Ok(MediaProcessingResponse {
             final_path: path.to_string_lossy().to_string(),
         })
     }
 }
 
 impl Tool for MediaForgeClient {
-    const NAME: &'static str = "media_forge";
+    const NAME: &'static str = "media_processor";
     type Args = MediaForgeArgs;
     type Output = MediaForgeOutput;
     type Error = FactoryError;
@@ -235,7 +237,7 @@ impl Tool for MediaForgeClient {
     async fn definition(&self, _prompt: String) -> rig::completion::ToolDefinition {
         rig::completion::ToolDefinition {
             name: Self::NAME.to_string(),
-            description: "FFmpeg を使用して、動画の合成や YouTube Shorts 向けのリサイズを行います。".to_string(),
+            description: "FFmpeg を使用して、メディアの合成や標準化（リサイズ等）を行います。".to_string(),
             parameters: serde_json::to_value(schemars::schema_for!(MediaForgeArgs)).unwrap(),
         }
     }
@@ -251,7 +253,7 @@ impl Tool for MediaForgeClient {
                 ).await?
             }
             MediaForgeArgs::Resize { input_path } => {
-                self.resize_for_shorts(&PathBuf::from(input_path)).await?
+                self.standardize_media(&PathBuf::from(input_path)).await?
             }
         };
 

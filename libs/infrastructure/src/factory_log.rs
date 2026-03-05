@@ -10,7 +10,7 @@
 
 //! # FactoryLog — 実行ログ・監査証跡システム
 //!
-//! SQLite を使用して動画生成の履歴、エラー、およびセキュリティイベント（ブロック記録）を保存する。
+//! SQLite を使用して成果物生成の履歴、エラー、およびセキュリティイベント（ブロック記録）を保存する。
 
 use async_trait::async_trait;
 use factory_core::error::FactoryError;
@@ -37,7 +37,7 @@ impl FactoryLogClient {
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
                 event_type TEXT NOT NULL,
-                video_id TEXT,
+                artifact_id TEXT,
                 output_path TEXT,
                 detail TEXT
             )"
@@ -54,10 +54,10 @@ impl FactoryLogClient {
 
 #[async_trait]
 impl FactoryLogger for FactoryLogClient {
-    async fn log_success(&self, video_id: &str, output_path: &PathBuf) -> Result<(), FactoryError> {
-        sqlx::query::<sqlx::Sqlite>("INSERT INTO logs (event_type, video_id, output_path) VALUES (?, ?, ?)")
+    async fn log_success(&self, artifact_id: &str, output_path: &PathBuf) -> Result<(), FactoryError> {
+        sqlx::query::<sqlx::Sqlite>("INSERT INTO logs (event_type, artifact_id, output_path) VALUES (?, ?, ?)")
             .bind("SUCCESS")
-            .bind(video_id)
+            .bind(artifact_id)
             .bind(output_path.to_string_lossy().to_string())
             .execute(&self.db)
             .await
@@ -90,6 +90,6 @@ impl FactoryLogger for FactoryLogClient {
                 reason: format!("Summary failed: {}", e),
             })?;
         
-        Ok(format!("本日の動画生成成功数: {} 本", count.0))
+        Ok(format!("本日の成果物生成成功数: {} 本", count.0))
     }
 }

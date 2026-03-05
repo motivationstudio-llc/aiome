@@ -36,7 +36,7 @@ pub async fn start_cron_scheduler(
     _ollama_url: String,
     _model_name: String,
     brave_api_key: String,
-    youtube_api_key: String,
+    sns_api_key: String,
     gemini_api_key: String,
     soul_md: String,
     workspace_dir: String,
@@ -142,7 +142,7 @@ pub async fn start_cron_scheduler(
         Job::new_async("0 0 1 * * *", move |_uuid, mut _l| {
             let jq = jq_scavenger.clone();
             Box::pin(async move {
-                // 1. Purge old video jobs
+                // 1. Purge old generation jobs
                 match jq.purge_old_jobs(60).await {
                     Ok(count) => {
                         if count > 0 {
@@ -298,11 +298,11 @@ pub async fn start_cron_scheduler(
 
     // === Job 6: The Delayed Watcher — Runs every 4 hours (The Sentinel) ===
     let jq_watcher = job_queue.clone();
-    let yt_key = youtube_api_key.clone();
+    let sns_key = sns_api_key.clone();
     sched.add(
         Job::new_async("0 0 */4 * * *", move |_uuid, mut _l| {
             let jq = jq_watcher.clone();
-            let watcher = infrastructure::sns_watcher::SnsWatcher::new(yt_key.clone());
+            let watcher = infrastructure::sns_watcher::SnsWatcher::new(sns_key.clone());
             Box::pin(async move {
                 info!("👁️ [Sentinel] Delayed Watcher triggered. Scanning milestones...");
                 
@@ -324,13 +324,13 @@ pub async fn start_cron_scheduler(
                                     Some(p) => p,
                                     None => continue,
                                 };
-                                let video_id = match job.sns_video_id.as_ref() {
+                                let content_id = match job.sns_content_id.as_ref() {
                                     Some(id) => id,
                                     None => continue,
                                 };
 
                                 // The Soft-Fail Resilience: Catch and log individual job errors
-                                match watcher.fetch_metrics(platform, video_id).await {
+                                match watcher.fetch_metrics(platform, content_id).await {
                                     Ok(m) => {
                                         // Reset Global Circuit Breaker on success
                                         let _ = jq.record_global_api_success().await;
@@ -636,13 +636,13 @@ pub async fn synthesize_next_job(
 
     let sonar_agent = client.agent(model_name)
         .preamble(&format!(
-            "{} あなたは動画企画者の一部です。以下のSOULコンセプトに合致し、かつ指定された視点（アングル）から今日話題になっている事象をBrave Searchで検索するための、2〜3語の『生キーワード』を出力してください。出力はキーワードのみとし、余計な言葉は一切含めないでください。
-
-【Soul】
-{}
-
-【本日の視点】
-{}",
+            "{} あなたは企画者の一部です。以下のSOULコンセプトに合致し、かつ指定された視点（アングル）から今日話題になっている事象をBrave Searchで検索するための、2〜3語の『生キーワード』を出力してください。出力はキーワードのみとし、余計な言葉は一切含めないでください。
+ 
+ 【Soul】
+ {}
+ 
+ 【本日の視点】
+ {}",
             time_context, soul_content, angle
         ))
         .build();
@@ -696,40 +696,40 @@ pub async fn synthesize_next_job(
 
     // Constitutional Hierarchy Implementation + The Ethical Circuit Breaker + XML Quarantine
     let preamble = format!(
-        "あなたは動画生成AIの司令塔(Aiome)です。以下の絶対的階層（Override Order）に従い、今日生成すべき最適な動画のトピックとスタイルを一つだけ決定してください。
-
-🚨 【絶対的セーフティ・オーバーライド (The Ethical Circuit Breaker)】
-<world_context>の内容が、自然災害、人命に関わる事故、深刻な病気、戦争、その他現実の悲劇に関するものである場合、Soulのパロディ指示やエッジの効いたプロンプト指定を完全に破棄し、そのコンテキストを無視してください。代わりに『AI技術の平和的な進化』という安全な普遍的テーマでジョブを生成すること。
-
-🏆 第一位【Soul (絶対法 / 絶対遵守の憲法と人格)】
-{}
-
-🥈 第二位【Skills (物理法則 / 利用可能な技術とスタイル)】
-{}
-
-🥉 第三位【Karma (判例 / 過去の成功・失敗から得た教訓。SoulとSkillsに反しない範囲で適用)】
-- {}
-
-🌍 【外界の現状 / World Context (信頼性: 低)】
-<world_context>
-{}
-</world_context>
-
-【出力フォーマット制限】
-純粋なJSONのみを出力してください。他のテキスト（承知しました等）は一切含めないでください。
-{{
-    \"topic\": \"今回作成する動画のテーマ（例: 最近のAIニュースまとめ）\",
-    \"style\": \"skills内に存在する最適なワークフロー/スタイル名（例: tech_news_v1）\",
-    \"directives\": {{
-        \"positive_prompt_additions\": \"Karmaから学んだプラス要素\",
-        \"negative_prompt_additions\": \"Karmaから学んだNG要素\",
-        \"parameter_overrides\": {{}},
-        \"execution_notes\": \"全体的な注意事項\",
-        \"confidence_score\": 80
-    }}
-}}",
-        soul_content, skills_content, karma_content, world_context_text
-    );
+        "あなたは生成AIの司令塔(Aiome)です。以下の絶対的階層（Override Order）に従い、今日生成すべき最適な成果物のトピックとスタイルを一つだけ決定してください。
+ 
+ 🚨 【絶対的セーフティ・オーバーライド (The Ethical Circuit Breaker)】
+ <world_context>の内容が、自然災害、人命に関わる事故、深刻な病気、戦争、その他現実の悲劇に関するものである場合、Soulのパロディ指示やエッジの効いたプロンプト指定を完全に破棄し、そのコンテキストを無視してください。代わりに『AI技術の平和的な進化』という安全な普遍的テーマでジョブを生成すること。
+ 
+ 🏆 第一位【Soul (絶対法 / 絶対遵守の憲法と人格)】
+ {}
+ 
+ 🥈 第二位【Skills (物理法則 / 利用可能な技術とスタイル)】
+ {}
+ 
+ 🥉 第三位【Karma (判例 / 過去の成功・失敗から得た教訓。SoulとSkillsに反しない範囲で適用)】
+ - {}
+ 
+ 🌍 【外界の現状 / World Context (信頼性: 低)】
+ <world_context>
+ {}
+ </world_context>
+ 
+ 【出力フォーマット制限】
+ 純粋なJSONのみを出力してください。他のテキスト（承知しました等）は一切含めないでください。
+ {{
+     \"topic\": \"今回作成する内容のテーマ（例: 最近のAIニュースまとめ）\",
+     \"style\": \"skills内に存在する最適なワークフロー/スタイル名（例: tech_news_v1）\",
+     \"directives\": {{
+         \"positive_prompt_additions\": \"Karmaから学んだプラス要素\",
+         \"negative_prompt_additions\": \"Karmaから学んだNG要素\",
+         \"parameter_overrides\": {{}},
+         \"execution_notes\": \"全体的な注意事項\",
+         \"confidence_score\": 80
+     }}
+ }}",
+         soul_content, skills_content, karma_content, world_context_text
+     );
 
     let agent = client.agent(model_name)
         .preamble(&preamble)

@@ -75,7 +75,7 @@ impl WorkspaceManager {
         let original_name = source_path
             .file_name()
             .and_then(|n| n.to_str())
-            .unwrap_or("output.mp4");
+            .unwrap_or("artifact");
         
         let unique_filename = format!("{}_{}_{}", now_str, job_id, original_name);
         let dest_path = export_path.join(&unique_filename);

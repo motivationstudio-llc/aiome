@@ -116,17 +116,17 @@ pub struct ConceptResponse {
     pub metadata: std::collections::HashMap<String, String>,
 }
 
-// --- Video クラスター ---
+// --- Generative Engine クラスター (旧 Video) ---
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VideoRequest {
+pub struct GenerativeRequest {
     pub prompt: String,
     pub workflow_id: String,
-    pub input_image: Option<String>,
+    pub input_artifact: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VideoResponse {
+pub struct ArtifactResponse {
     pub output_path: String,
     pub job_id: String,
 }
@@ -158,15 +158,15 @@ pub struct VoiceResponse {
 // --- Media クラスター ---
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MediaRequest {
-    pub video_path: String,
-    pub audio_path: String,
-    pub subtitle_path: Option<String>,
+pub struct MediaProcessingRequest {
+    pub input_path: String,
+    pub context_path: Option<String>,
+    pub metadata_path: Option<String>,
     pub force_style: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MediaResponse {
+pub struct MediaProcessingResponse {
     pub final_path: String,
 }
 
@@ -186,8 +186,8 @@ pub struct CustomStyle {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OutputVideo {
-    pub lang: String,
+pub struct OutputArtifact {
+    pub tag: String,
     pub path: String,
 }
 
@@ -195,7 +195,7 @@ pub struct OutputVideo {
 pub struct WorkflowRequest {
     pub category: String,
     pub topic: String,
-    /// Remix 対象の動画ID (None の場合は新規作成)
+    /// Remix 対象のコンテンツID (None の場合は新規作成)
     pub remix_id: Option<String>,
     /// スキップ先のステップ (None の場合はフル実行)
     pub skip_to_step: Option<String>,
@@ -221,10 +221,10 @@ pub struct WorkflowRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkflowResponse {
-    pub final_video_path: String,
-    /// 多言語出力された動画のリスト
+    pub final_artifact_path: String,
+    /// 生成された成果物のリスト
     #[serde(default)]
-    pub output_videos: Vec<OutputVideo>,
+    pub output_artifacts: Vec<OutputArtifact>,
     pub concept: ConceptResponse,
 }
 
@@ -235,7 +235,7 @@ pub struct WorkflowResponse {
 /// (The Split Payload — データの二重化防止)
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct LlmJobResponse {
-    /// 動画の具体的なテーマ (DB `jobs.topic` カラムへ直接マッピング)
+    /// コンテンツの具体的なテーマ (DB `jobs.topic` カラムへ直接マッピング)
     pub topic: String,
 
     /// 使用するワークフロー (DB `jobs.style_name` カラムへ直接マッピング)
@@ -289,7 +289,7 @@ impl KarmaDirectives {
 
 // --- Phase 11: The Absolute Contract v3 (神託の契約) ---
 
-/// LLM（The Oracle）による動画の最終審判。
+/// LLM（The Oracle）によるコンテンツの最終審判。
 /// 大衆の反応（Engagement）と設計者の美学（Soul）を統合し、次世代への「業（Karma）」を導き出す。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OracleVerdict {

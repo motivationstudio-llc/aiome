@@ -87,7 +87,7 @@ impl SqliteJobQueue {
                 execution_log TEXT,
                 error_message TEXT,
                 sns_platform TEXT,
-                sns_video_id TEXT,
+                sns_content_id TEXT,
                 published_at TEXT,
                 created_at TEXT DEFAULT (datetime('now')),
                 updated_at TEXT DEFAULT (datetime('now'))
@@ -103,10 +103,10 @@ impl SqliteJobQueue {
             "ALTER TABLE jobs ADD COLUMN last_heartbeat TEXT",
             "ALTER TABLE jobs ADD COLUMN execution_log TEXT",
             "ALTER TABLE jobs ADD COLUMN sns_platform TEXT",
-            "ALTER TABLE jobs ADD COLUMN sns_video_id TEXT",
+            "ALTER TABLE jobs ADD COLUMN sns_content_id TEXT",
             "ALTER TABLE jobs ADD COLUMN published_at TEXT",
             "ALTER TABLE jobs ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0",
-            "ALTER TABLE jobs ADD COLUMN output_videos TEXT",
+            "ALTER TABLE jobs ADD COLUMN output_artifacts TEXT",
         ] {
             let _ = sqlx::query(migration).execute(&self.pool).await;
         }
@@ -296,7 +296,7 @@ impl JobQueue for SqliteJobQueue {
 
     async fn fetch_job(&self, job_id: &str) -> Result<Option<Job>, FactoryError> {
         let row = sqlx::query(
-            "SELECT id, topic, style_name, karma_directives, status, started_at, last_heartbeat, tech_karma_extracted, creative_rating, execution_log, error_message, sns_platform, sns_video_id, published_at, output_videos FROM jobs WHERE id = ?"
+            "SELECT id, topic, style_name, karma_directives, status, started_at, last_heartbeat, tech_karma_extracted, creative_rating, execution_log, error_message, sns_platform, sns_content_id, published_at, output_artifacts FROM jobs WHERE id = ?"
         )
         .bind(job_id)
         .fetch_optional(&self.pool)
@@ -313,9 +313,9 @@ impl JobQueue for SqliteJobQueue {
             let execution_log: Option<String> = try_get_optional_string(&r, "execution_log");
             let error_message: Option<String> = try_get_optional_string(&r, "error_message");
             let sns_platform: Option<String> = try_get_optional_string(&r, "sns_platform");
-            let sns_video_id: Option<String> = try_get_optional_string(&r, "sns_video_id");
+            let sns_content_id: Option<String> = try_get_optional_string(&r, "sns_content_id");
             let published_at: Option<String> = try_get_optional_string(&r, "published_at");
-            let output_videos: Option<String> = try_get_optional_string(&r, "output_videos");
+            let output_artifacts: Option<String> = try_get_optional_string(&r, "output_artifacts");
             let status_str: String = r.get("status");
             let status = JobStatus::from_string(&status_str);
 
@@ -332,9 +332,9 @@ impl JobQueue for SqliteJobQueue {
                 execution_log,
                 error_message,
                 sns_platform,
-                sns_video_id,
+                sns_content_id,
                 published_at,
-                output_videos,
+                output_artifacts,
             }))
         } else {
             Ok(None)
@@ -346,7 +346,7 @@ impl JobQueue for SqliteJobQueue {
             .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to start transaction: {}", e) })?;
 
         let row = sqlx::query(
-            "SELECT id, topic, style_name, karma_directives, status, started_at, last_heartbeat, tech_karma_extracted, creative_rating, execution_log, error_message, sns_platform, sns_video_id, published_at, output_videos FROM jobs WHERE status = ? ORDER BY created_at ASC LIMIT 1"
+            "SELECT id, topic, style_name, karma_directives, status, started_at, last_heartbeat, tech_karma_extracted, creative_rating, execution_log, error_message, sns_platform, sns_content_id, published_at, output_artifacts FROM jobs WHERE status = ? ORDER BY created_at ASC LIMIT 1"
         )
         .bind(JobStatus::Pending.to_string())
         .fetch_optional(&mut *tx)
@@ -363,9 +363,9 @@ impl JobQueue for SqliteJobQueue {
             let execution_log: Option<String> = try_get_optional_string(&r, "execution_log");
             let error_message: Option<String> = try_get_optional_string(&r, "error_message");
             let sns_platform: Option<String> = try_get_optional_string(&r, "sns_platform");
-            let sns_video_id: Option<String> = try_get_optional_string(&r, "sns_video_id");
+            let sns_content_id: Option<String> = try_get_optional_string(&r, "sns_content_id");
             let published_at: Option<String> = try_get_optional_string(&r, "published_at");
-            let output_videos: Option<String> = try_get_optional_string(&r, "output_videos");
+            let output_artifacts: Option<String> = try_get_optional_string(&r, "output_artifacts");
 
             let now = Utc::now().to_rfc3339();
             // Set status to Processing, record started_at AND first heartbeat
@@ -395,20 +395,20 @@ impl JobQueue for SqliteJobQueue {
                 execution_log,
                 error_message,
                 sns_platform,
-                sns_video_id,
+                sns_content_id,
                 published_at,
-                output_videos,
+                output_artifacts,
             }))
         } else {
             Ok(None)
         }
     }
 
-    async fn complete_job(&self, job_id: &str, output_videos: Option<&str>) -> Result<(), FactoryError> {
+    async fn complete_job(&self, job_id: &str, output_artifacts: Option<&str>) -> Result<(), FactoryError> {
         let now = Utc::now().to_rfc3339();
-        sqlx::query("UPDATE jobs SET status = ?, output_videos = ?, updated_at = ? WHERE id = ?")
+        sqlx::query("UPDATE jobs SET status = ?, output_artifacts = ?, updated_at = ? WHERE id = ?")
             .bind(JobStatus::Completed.to_string())
-            .bind(output_videos)
+            .bind(output_artifacts)
             .bind(&now)
             .bind(job_id)
             .execute(&self.pool)
@@ -640,7 +640,7 @@ impl JobQueue for SqliteJobQueue {
         let rows = sqlx::query(
             "SELECT id, topic, style_name, karma_directives, status, started_at, last_heartbeat, 
                      tech_karma_extracted, creative_rating, execution_log, error_message,
-                     sns_platform, sns_video_id, published_at, output_videos 
+                     sns_platform, sns_content_id, published_at, output_artifacts 
               FROM jobs 
               WHERE execution_log IS NOT NULL 
               AND tech_karma_extracted = 0 
@@ -672,9 +672,9 @@ impl JobQueue for SqliteJobQueue {
                 execution_log: try_get_optional_string(&r, "execution_log"),
                 error_message: try_get_optional_string(&r, "error_message"),
                 sns_platform: try_get_optional_string(&r, "sns_platform"),
-                sns_video_id: try_get_optional_string(&r, "sns_video_id"),
+                sns_content_id: try_get_optional_string(&r, "sns_content_id"),
                 published_at: try_get_optional_string(&r, "published_at"),
-                output_videos: try_get_optional_string(&r, "output_videos"),
+                output_artifacts: try_get_optional_string(&r, "output_artifacts"),
             });
         }
         Ok(jobs)
@@ -712,11 +712,11 @@ impl JobQueue for SqliteJobQueue {
         Ok(purged)
     }
 
-    async fn link_sns_data(&self, job_id: &str, platform: &str, video_id: &str) -> Result<(), FactoryError> {
+    async fn link_sns_data(&self, job_id: &str, platform: &str, content_id: &str) -> Result<(), FactoryError> {
         let now = Utc::now().to_rfc3339();
-        sqlx::query("UPDATE jobs SET sns_platform = ?, sns_video_id = ?, published_at = ?, updated_at = ? WHERE id = ?")
+        sqlx::query("UPDATE jobs SET sns_platform = ?, sns_content_id = ?, published_at = ?, updated_at = ? WHERE id = ?")
             .bind(platform)
-            .bind(video_id)
+            .bind(content_id)
             .bind(&now)
             .bind(&now)
             .bind(job_id)
@@ -731,10 +731,10 @@ impl JobQueue for SqliteJobQueue {
         let rows = sqlx::query(
             "SELECT id, topic, style_name, karma_directives, status, started_at, last_heartbeat, 
                      tech_karma_extracted, creative_rating, execution_log, error_message,
-                     sns_platform, sns_video_id, published_at, output_videos 
+                     sns_platform, sns_content_id, published_at, output_artifacts 
               FROM jobs 
               WHERE sns_platform IS NOT NULL 
-              AND sns_video_id IS NOT NULL 
+              AND sns_content_id IS NOT NULL 
               AND published_at IS NOT NULL
               AND published_at <= datetime('now', ? || ' days')
               AND id NOT IN (SELECT job_id FROM sns_metrics_history WHERE milestone_days = ?)
@@ -767,9 +767,9 @@ impl JobQueue for SqliteJobQueue {
                 execution_log: try_get_optional_string(&r, "execution_log"),
                 error_message: try_get_optional_string(&r, "error_message"),
                 sns_platform: try_get_optional_string(&r, "sns_platform"),
-                sns_video_id: try_get_optional_string(&r, "sns_video_id"),
+                sns_content_id: try_get_optional_string(&r, "sns_content_id"),
                 published_at: try_get_optional_string(&r, "published_at"),
-                output_videos: try_get_optional_string(&r, "output_videos"),
+                output_artifacts: try_get_optional_string(&r, "output_artifacts"),
             });
         }
         Ok(jobs)
@@ -886,7 +886,7 @@ impl JobQueue for SqliteJobQueue {
         .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to fetch job context: {}", e) })?;
 
         let job_id: String = job_row.get("id");
-        let topic: String = job_row.get("topic");
+        let _topic: String = job_row.get("topic");
         let style_name: String = job_row.get("style_name");
         let milestone_days: i64 = job_row.get("milestone_days");
 
@@ -924,7 +924,7 @@ impl JobQueue for SqliteJobQueue {
         let rows = sqlx::query(
             "SELECT id, topic, style_name, karma_directives, status, started_at, last_heartbeat, 
                      tech_karma_extracted, creative_rating, execution_log, error_message,
-                     sns_platform, sns_video_id, published_at, output_videos 
+                     sns_platform, sns_content_id, published_at, output_artifacts 
               FROM jobs 
               ORDER BY created_at DESC LIMIT ?"
         )
@@ -949,9 +949,9 @@ impl JobQueue for SqliteJobQueue {
                 execution_log: try_get_optional_string(&r, "execution_log"),
                 error_message: try_get_optional_string(&r, "error_message"),
                 sns_platform: try_get_optional_string(&r, "sns_platform"),
-                sns_video_id: try_get_optional_string(&r, "sns_video_id"),
+                sns_content_id: try_get_optional_string(&r, "sns_content_id"),
                 published_at: try_get_optional_string(&r, "published_at"),
-                output_videos: try_get_optional_string(&r, "output_videos"),
+                output_artifacts: try_get_optional_string(&r, "output_artifacts"),
             });
         }
         Ok(jobs)
@@ -1070,9 +1070,9 @@ impl JobQueue for SqliteJobQueue {
             let execution_log: Option<String> = try_get_optional_string(&r, "execution_log");
             let error_message: Option<String> = try_get_optional_string(&r, "error_message");
             let sns_platform: Option<String> = try_get_optional_string(&r, "sns_platform");
-            let sns_video_id: Option<String> = try_get_optional_string(&r, "sns_video_id");
+            let sns_content_id: Option<String> = try_get_optional_string(&r, "sns_content_id");
             let published_at: Option<String> = try_get_optional_string(&r, "published_at");
-            let output_videos: Option<String> = try_get_optional_string(&r, "output_videos");
+            let output_artifacts: Option<String> = try_get_optional_string(&r, "output_artifacts");
             let status_str: String = r.get("status");
             let status = JobStatus::from_string(&status_str);
 
@@ -1089,9 +1089,9 @@ impl JobQueue for SqliteJobQueue {
                 execution_log,
                 error_message,
                 sns_platform,
-                sns_video_id,
+                sns_content_id,
                 published_at,
-                output_videos,
+                output_artifacts,
             });
         }
         Ok(jobs)

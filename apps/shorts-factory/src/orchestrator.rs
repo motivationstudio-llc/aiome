@@ -10,10 +10,10 @@
 
 use factory_core::contracts::{
     ConceptRequest, TrendRequest, TrendResponse,
-    VideoRequest, MediaRequest, MediaResponse,
+    GenerativeRequest, ArtifactResponse, MediaProcessingRequest, MediaProcessingResponse,
     VoiceRequest, WorkflowRequest, WorkflowResponse
 };
-use factory_core::traits::{AgentAct, MediaEditor};
+use factory_core::traits::{AgentAct, MediaProcessor};
 use factory_core::error::FactoryError;
 use infrastructure::trend_sonar::BraveTrendSonar;
 use infrastructure::concept_manager::ConceptManager;
@@ -45,6 +45,7 @@ pub struct ProductionOrchestrator {
     pub style_manager: Arc<StyleManager>,
     pub asset_manager: Arc<AssetManager>,
     pub export_dir: String,
+    pub artifact_extension: String,
 }
 
 impl ProductionOrchestrator {
@@ -60,6 +61,7 @@ impl ProductionOrchestrator {
         style_manager: Arc<StyleManager>,
         asset_manager: Arc<AssetManager>,
         export_dir: String,
+        artifact_extension: String,
     ) -> Self {
         Self {
             trend_sonar,
@@ -73,6 +75,7 @@ impl ProductionOrchestrator {
             style_manager,
             asset_manager,
             export_dir,
+            artifact_extension,
         }
     }
 }
@@ -168,13 +171,13 @@ impl AgentAct for ProductionOrchestrator {
                 let img_path = project_root.join(format!("visuals/scene_{}.png", i));
                 if !img_path.exists() {
                     let full_prompt = format!("{}, {}", concept_res.common_style, visual_prompt);
-                    let video_req = VideoRequest {
+                    let generative_req = GenerativeRequest {
                         prompt: full_prompt,
                         workflow_id: "shorts_standard_v1".to_string(),
-                        input_image: None,
+                        input_artifact: None,
                     };
                     budget.charge(0.10)?;
-                    let res = self.supervisor.enforce_act(&self.comfy_bridge, video_req).await?;
+                    let res: ArtifactResponse = self.supervisor.enforce_act(&self.comfy_bridge, generative_req).await?;
                     let temp_path = self.supervisor.jail().root().join(&res.output_path);
                     std::fs::create_dir_all(img_path.parent().unwrap()).ok();
                     std::fs::copy(&temp_path, &img_path).map_err(|e| FactoryError::Infrastructure { reason: e.to_string() })?;
@@ -219,8 +222,8 @@ impl AgentAct for ProductionOrchestrator {
         } // GPU Guard released
 
         // --- Phase 3: Forge & Parallel Composition ---
-        info!("🔥 Phase 3: Forge (Video Composition)...");
-        let mut output_videos = Vec::new();
+        info!("🔥 Phase 3: Forge (Media Composition)...");
+        let mut output_artifacts = Vec::new();
 
         for lang in &target_langs {
             if let (Some(audios), Some(script)) = (audio_assets.get(lang), concept_res.scripts.iter().find(|s| &s.lang == lang)) {
@@ -241,7 +244,7 @@ impl AgentAct for ProductionOrchestrator {
 
                 for (i, (img_path, audio_path)) in image_assets.iter().zip(audios.iter()).enumerate() {
                     let duration = self.media_forge.get_duration(audio_path).await.unwrap_or(5.0);
-                    let clip_path = lang_proj_root.join(format!("clip_{}.mp4", i));
+                    let clip_path = lang_proj_root.join(format!("clip_{}{}", i, self.artifact_extension));
                     
                     // Ken Burns
                     let clip = self.comfy_bridge.apply_ken_burns_effect(img_path, duration, jail, &style).await?;
@@ -273,22 +276,22 @@ impl AgentAct for ProductionOrchestrator {
                 std::fs::write(&srt_path, srt_content).ok();
 
                 // 3.2. Final Assembly per language
-                let combined_v = self.media_forge.concatenate_clips(video_clips.iter().map(|p| p.to_string_lossy().to_string()).collect(), format!("v_{}.mp4", lang)).await?;
+                let combined_v = self.media_forge.concatenate_clips(video_clips.iter().map(|p| p.to_string_lossy().to_string()).collect(), format!("v_{}{}", lang, self.artifact_extension)).await?;
                 let combined_a = self.media_forge.concatenate_clips(audios.iter().map(|p| p.to_string_lossy().to_string()).collect(), format!("a_{}.wav", lang)).await?;
                 
                 let finalized_a = lang_proj_root.join("final_audio.wav");
                 self.sound_mixer.mix_and_finalize(&std::path::PathBuf::from(combined_a), &input.category, &finalized_a, &style).await?;
 
                 let style_with_font = format!("Fontname={},FontSize={}", font_for_lang(lang), font_size_for_lang(lang));
-                let media_req = MediaRequest {
-                    video_path: combined_v,
-                    audio_path: finalized_a.to_string_lossy().to_string(),
-                    subtitle_path: Some(srt_path.to_string_lossy().to_string()),
+                let media_req = MediaProcessingRequest {
+                    input_path: combined_v,
+                    context_path: Some(finalized_a.to_string_lossy().to_string()),
+                    metadata_path: Some(srt_path.to_string_lossy().to_string()),
                     force_style: Some(style_with_font),
                 };
                 
                 budget.charge(0.01)?;
-                let media_res: MediaResponse = self.supervisor.enforce_act(&self.media_forge, media_req).await?;
+                let media_res: MediaProcessingResponse = self.supervisor.enforce_act(&self.media_forge, media_req).await?;
                 let final_path = std::path::PathBuf::from(media_res.final_path);
                 let delivered = infrastructure::workspace_manager::WorkspaceManager::deliver_output(
                     &format!("{}_{}", project_id, lang),
@@ -296,20 +299,20 @@ impl AgentAct for ProductionOrchestrator {
                     &self.export_dir,
                 ).await?;
 
-                output_videos.push(factory_core::contracts::OutputVideo {
-                    lang: lang.clone(),
+                output_artifacts.push(factory_core::contracts::OutputArtifact {
+                    tag: lang.clone(),
                     path: delivered.to_string_lossy().to_string(),
                 });
             }
         }
 
-        let first_path = output_videos.first().map(|v| v.path.clone()).unwrap_or_default();
+        let first_path = output_artifacts.first().map(|v| v.path.clone()).unwrap_or_default();
         
-        info!("🏆 Aiome Video Forge: Pipeline Completed for {} languages", output_videos.len());
+        info!("🏆 Aiome Media Forge: Pipeline Completed for {} variations", output_artifacts.len());
 
         Ok(WorkflowResponse {
-            final_video_path: first_path,
-            output_videos,
+            final_artifact_path: first_path,
+            output_artifacts,
             concept: concept_res,
         })
     }

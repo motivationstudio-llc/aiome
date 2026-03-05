@@ -15,9 +15,9 @@
 
 use async_trait::async_trait;
 use bastion::net_guard::ShieldClient;
-use factory_core::contracts::{VideoRequest, VideoResponse};
+use factory_core::contracts::{GenerativeRequest, ArtifactResponse};
 use factory_core::error::FactoryError;
-use factory_core::traits::{AgentAct, VideoGenerator};
+use factory_core::traits::{AgentAct, GenerativeEngine};
 use rig::tool::Tool;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -85,16 +85,16 @@ impl ComfyBridgeClient {
     /// JSON: 指定ノードの `inputs` 内のフィールドをセットする
     pub fn inject_node_value(workflow: &mut serde_json::Value, node_id: &str, field: &str, value: serde_json::Value) -> Result<(), FactoryError> {
         let node = workflow.get_mut(node_id)
-            .ok_or_else(|| FactoryError::ComfyWorkflowFailed { reason: format!("Node {} not found", node_id) })?;
+            .ok_or_else(|| FactoryError::RemoteServiceExecutionFailed { reason: format!("Node {} not found", node_id) })?;
         
         let inputs = node.get_mut("inputs")
-            .ok_or_else(|| FactoryError::ComfyWorkflowFailed { reason: format!("Node {} has no inputs", node_id) })?;
+            .ok_or_else(|| FactoryError::RemoteServiceExecutionFailed { reason: format!("Node {} has no inputs", node_id) })?;
             
         if let Some(obj) = inputs.as_object_mut() {
             obj.insert(field.to_string(), value);
             Ok(())
         } else {
-            Err(FactoryError::ComfyWorkflowFailed { reason: format!("Node {} inputs is not an object", node_id) })
+            Err(FactoryError::RemoteServiceExecutionFailed { reason: format!("Node {} inputs is not an object", node_id) })
         }
     }
 
@@ -185,8 +185,8 @@ impl ComfyBridgeClient {
         
         match self.shield.post(&url, &payload).await {
             Ok(res) if res.status().is_success() => Ok(()),
-            Ok(res) => Err(FactoryError::ComfyConnection { url, source: anyhow::anyhow!("Failed to clear queue: HTTP {}", res.status()) }),
-            Err(e) => Err(FactoryError::ComfyConnection { url, source: e.into() }),
+            Ok(res) => Err(FactoryError::RemoteServiceError { url, source: anyhow::anyhow!("Failed to clear queue: HTTP {}", res.status()) }),
+            Err(e) => Err(FactoryError::RemoteServiceError { url, source: e.into() }),
         }
     }
 
@@ -211,13 +211,13 @@ impl ComfyBridgeClient {
 }
 
 #[async_trait]
-impl VideoGenerator for ComfyBridgeClient {
-    async fn generate_video(
+impl GenerativeEngine for ComfyBridgeClient {
+    async fn generate_artifact(
         &self,
         prompt: &str,
         workflow_id: &str,
-        input_image: Option<&std::path::Path>,
-    ) -> Result<VideoResponse, FactoryError> {
+        input_artifact: Option<&std::path::Path>,
+    ) -> Result<ArtifactResponse, FactoryError> {
         // 1. The Zombie Queue 排除 (Pre-flight Queue Purge)
         self.clear_comfy_queue().await?;
 
@@ -230,7 +230,7 @@ impl VideoGenerator for ComfyBridgeClient {
             let json_str = tokio::fs::read_to_string(&workflow_path).await
                 .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to read workflow JSON: {}", e) })?;
             serde_json::from_str(&json_str)
-                .map_err(|e| FactoryError::ComfyWorkflowFailed { reason: format!("Invalid JSON: {}", e) })?
+                .map_err(|e| FactoryError::RemoteServiceExecutionFailed { reason: format!("Invalid JSON: {}", e) })?
         };
 
         // 3. ランダムな追跡用ジョブIDとシードの発行
@@ -239,7 +239,7 @@ impl VideoGenerator for ComfyBridgeClient {
 
         // 4. The Trinity Injection (3点動的注入)
         let prompt_node = Self::find_node_id_by_title(&workflow, "[API_PROMPT]")
-            .ok_or_else(|| FactoryError::ComfyWorkflowFailed { reason: "Missing [API_PROMPT] node".into() })?;
+            .ok_or_else(|| FactoryError::RemoteServiceExecutionFailed { reason: "Missing [API_PROMPT] node".into() })?;
         Self::inject_node_value(&mut workflow, &prompt_node, "text", serde_json::Value::String(prompt.to_string()))?;
 
         if let Some(sampler_node) = Self::find_node_id_by_title(&workflow, "[API_SAMPLER]") {
@@ -256,7 +256,7 @@ impl VideoGenerator for ComfyBridgeClient {
 
         // 5. Zero-Copy Input Injection (入力画像渡し)
         let mut injected_input_name = None;
-        if let Some(img_path) = input_image {
+        if let Some(img_path) = input_artifact {
             let unique_name = self.inject_input_file(img_path, &job_id).await?;
             injected_input_name = Some(unique_name.clone());
             if let Some(img_node) = Self::find_node_id_by_title(&workflow, "[API_IMAGE_INPUT]") {
@@ -267,7 +267,7 @@ impl VideoGenerator for ComfyBridgeClient {
         // 6. WebSocket 接続確立 (The Blind Submission 回避)
         let ws_url = format!("{}?clientId={}", self.api_url, job_id);
         let (mut ws_stream, _) = tokio_tungstenite::connect_async(&ws_url)
-            .await.map_err(|e| FactoryError::ComfyConnection { url: ws_url.clone(), source: e.into() })?;
+            .await.map_err(|e| FactoryError::RemoteServiceError { url: ws_url.clone(), source: e.into() })?;
 
         // 7. プロンプト（実行指令）送信
         let http_base = self.api_url.replace("ws://", "http://").replace("/ws", "");
@@ -278,18 +278,18 @@ impl VideoGenerator for ComfyBridgeClient {
         });
         
         let post_res = self.shield.post(&prompt_url, &payload).await
-            .map_err(|e| FactoryError::ComfyConnection { url: prompt_url.clone(), source: e.into() })?;
+            .map_err(|e| FactoryError::RemoteServiceError { url: prompt_url.clone(), source: e.into() })?;
             
         if !post_res.status().is_success() {
-            return Err(FactoryError::ComfyWorkflowFailed { reason: format!("POST /prompt failed: {}", post_res.status()) });
+            return Err(FactoryError::RemoteServiceExecutionFailed { reason: format!("POST /prompt failed: {}", post_res.status()) });
         }
         
         let post_body: serde_json::Value = post_res.json().await
-            .map_err(|e| FactoryError::ComfyWorkflowFailed { reason: e.to_string() })?;
+            .map_err(|e| FactoryError::RemoteServiceExecutionFailed { reason: e.to_string() })?;
             
-        let prompt_id = post_body.get("prompt_id")
+        let _prompt_id = post_body.get("prompt_id")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| FactoryError::ComfyWorkflowFailed { reason: "No prompt_id returned".into() })?
+            .ok_or_else(|| FactoryError::RemoteServiceExecutionFailed { reason: "No prompt_id returned".into() })?
             .to_string();
 
         // 8. WebSocket Receiver Loop (タイムアウト付き沈黙クラッシュ回避)
@@ -301,36 +301,39 @@ impl VideoGenerator for ComfyBridgeClient {
             while let Some(msg) = ws_stream.next().await {
                 let msg = match msg {
                     Ok(m) => m,
-                    Err(e) => return Err(FactoryError::ComfyWorkflowFailed { reason: format!("WS Error: {}", e) }),
+                    Err(e) => return Err(FactoryError::RemoteServiceExecutionFailed { reason: format!("WS Error: {}", e) }),
                 };
                 
                 if let tokio_tungstenite::tungstenite::Message::Text(text) = msg {
-                    if let Ok(event) = serde_json::from_str::<serde_json::Value>(&text) {
-                        let msg_type = event.get("type").and_then(|t| t.as_str());
-                        let data = event.get("data");
-                        
-                        if msg_type == Some("execution_error") {
-                            return Err(FactoryError::ComfyWorkflowFailed { reason: format!("ComfyUI reported execution_error: {:?}", data) });
-                        }
-                        
-                        if msg_type == Some("executed") && data.and_then(|d| d.get("prompt_id")).and_then(|v| v.as_str()) == Some(&prompt_id) {
-                            if let Some(d) = data {
-                                // 9. The Output Divergence: 画像、GIF、動画の全フォールバック解析
-                                if let Some(output) = d.get("output") {
-                                    for key in ["images", "gifs", "videos"] {
-                                        if let Some(arr) = output.get(key).and_then(|v| v.as_array()) {
-                                            if let Some(first) = arr.first() {
-                                                if let Some(fname) = first.get("filename").and_then(|v| v.as_str()) {
-                                                    final_filename = Some(fname.to_string());
-                                                    break;
-                                                }
+                    let json: serde_json::Value = serde_json::from_str(&text).unwrap_or_default();
+                    let msg_type = json.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                    
+                    if msg_type == "executed" {
+                        if let Some(data) = json.get("data") {
+                            if let Some(output) = data.get("output") {
+                                for (_, val) in output.as_object().unwrap() {
+                                    // ComfyUI image output
+                                    if let Some(images) = val.get("images").and_then(|v| v.as_array()) {
+                                        if let Some(first) = images.first() {
+                                            if let Some(fname) = first.get("filename").and_then(|v| v.as_str()) {
+                                                final_filename = Some(fname.to_string());
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    // ComfyUI-VideoHelperSuite or other video output
+                                    if let Some(gifs) = val.get("gifs").and_then(|v| v.as_array()) {
+                                        if let Some(first) = gifs.first() {
+                                            if let Some(fname) = first.get("filename").and_then(|v| v.as_str()) {
+                                                final_filename = Some(fname.to_string());
+                                                break;
                                             }
                                         }
                                     }
                                 }
                             }
-                            break; // 処理完了
                         }
+                        break; // 処理完了
                     }
                 }
             }
@@ -339,7 +342,7 @@ impl VideoGenerator for ComfyBridgeClient {
 
         // タイムアウト監視を実行
         let res = tokio::time::timeout(timeout_duration, ws_loop).await
-            .map_err(|_| FactoryError::ComfyWorkflowFailed { reason: "WebSocket Timeout while waiting for 'executed'".into() })?;
+            .map_err(|_| FactoryError::RemoteServiceExecutionFailed { reason: "WebSocket Timeout while waiting for 'executed'".into() })?;
             
         // 10. The Input Debris (Input Garbage Collection)
         // タイムアウトや直前のエラー等に関わらず、Inputが作られていた場合は確実に清掃する
@@ -354,16 +357,16 @@ impl VideoGenerator for ComfyBridgeClient {
 
         res?; // ws_loop 内部のエラーをここで評価
 
-        let name = final_filename.ok_or_else(|| FactoryError::ComfyWorkflowFailed { reason: "No filename collected from 'executed' event".into() })?;
+        let name = final_filename.ok_or_else(|| FactoryError::RemoteServiceExecutionFailed { reason: "No filename collected from 'executed' event".into() })?;
         
         let out_path = self.base_dir.join("output").join(name);
         if !out_path.exists() {
-            return Err(FactoryError::ComfyWorkflowFailed { reason: format!("Expected output file does not exist: {:?}", out_path) });
+            return Err(FactoryError::RemoteServiceExecutionFailed { reason: format!("Expected output file does not exist: {:?}", out_path) });
         }
         
-        Ok(VideoResponse {
+        Ok(ArtifactResponse {
             output_path: out_path.to_string_lossy().to_string(),
-            job_id,
+            job_id: job_id.clone(),
         })
     }
 
@@ -375,7 +378,7 @@ impl VideoGenerator for ComfyBridgeClient {
         let url = format!("{}/system_stats", http_base);
         match self.shield.get(&url).await {
             Ok(res) => Ok(res.status().is_success()),
-            Err(e) => Err(FactoryError::ComfyConnection {
+            Err(e) => Err(FactoryError::RemoteServiceError {
                 url: http_base,
                 source: e.into(),
             }),
@@ -399,21 +402,21 @@ pub struct ComfyOutput {
 
 #[async_trait]
 impl AgentAct for ComfyBridgeClient {
-    type Input = VideoRequest;
-    type Output = VideoResponse;
+    type Input = GenerativeRequest;
+    type Output = ArtifactResponse;
 
     async fn execute(
         &self,
         input: Self::Input,
         _jail: &bastion::fs_guard::Jail,
     ) -> Result<Self::Output, FactoryError> {
-        let input_path = input.input_image.as_deref().map(std::path::Path::new);
-        self.generate_video(&input.prompt, &input.workflow_id, input_path).await
+        let input_path = input.input_artifact.as_ref().map(std::path::PathBuf::from);
+        self.generate_artifact(&input.prompt, &input.workflow_id, input_path.as_deref()).await
     }
 }
 
 impl Tool for ComfyBridgeClient {
-    const NAME: &'static str = "comfy_bridge";
+    const NAME: &'static str = "generative_engine";
     type Args = ComfyArgs;
     type Output = ComfyOutput;
     type Error = FactoryError;
@@ -421,13 +424,13 @@ impl Tool for ComfyBridgeClient {
     async fn definition(&self, _prompt: String) -> rig::completion::ToolDefinition {
         rig::completion::ToolDefinition {
             name: Self::NAME.to_string(),
-            description: "ComfyUI を使用して、プロンプトに基づいた画像や動画を生成します。".to_string(),
+            description: "生成エンジンを使用して、プロンプトに基づいた成果物（画像や動画など）を生成します。".to_string(),
             parameters: serde_json::to_value(schemars::schema_for!(ComfyArgs)).unwrap(),
         }
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let res = self.generate_video(&args.prompt, &args.workflow_id, None).await?;
+        let res = self.generate_artifact(&args.prompt, &args.workflow_id, None).await?;
         Ok(ComfyOutput {
             output_path: res.output_path,
         })

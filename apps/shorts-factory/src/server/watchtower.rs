@@ -509,8 +509,8 @@ impl WatchtowerServer {
                 let jail_for_cmd = self.jail.clone();
                 let telemetry_for_cmd = self.telemetry.clone();
                 
-                let voice_actor_for_chat = self.voice_actor.clone();
-                let jail_for_chat = self.jail.clone();
+                let _voice_actor_for_chat = self.voice_actor.clone();
+                let _jail_for_chat = self.jail.clone();
                 let immune_system = self.immune_system.clone();
 
                 tokio::spawn(async move {

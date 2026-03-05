@@ -85,9 +85,9 @@ enum Commands {
         /// 投稿プラットフォーム (youtube, tiktok, etc.)
         #[arg(short, long, default_value = "youtube")]
         platform: String,
-        /// SNS側の動画ID
+        /// SNS側のコンテンツID
         #[arg(short, long)]
-        video_id: String,
+        content_id: String,
     },
     /// 進化の妥当性検証シミュレーター (Phase 11 Step 4)
     SimulateEvolution,
@@ -282,7 +282,7 @@ async fn main() -> Result<(), anyhow::Error> {
         config.ollama_url.clone(),
         config.model_name.clone(),
         config.brave_api_key.clone(),
-        config.youtube_api_key.clone(),
+        config.sns_api_key.clone(),
         config.gemini_api_key.clone(),
         watchtower_md.clone(),
         config.workspace_dir.clone(),
@@ -334,7 +334,7 @@ async fn main() -> Result<(), anyhow::Error> {
         std::fs::create_dir_all(&bgm_path)?;
     }
     let sound_mixer = SoundMixer::new(bgm_path);
-    let media_forge = MediaForgeClient::new(jail.clone());
+    let media_forge = MediaForgeClient::new(jail.clone(), config.artifact_extension.clone());
 
     // 6. 生産ライン・オーケストレーターの準備
     let orchestrator = Arc::new(ProductionOrchestrator::new(
@@ -349,6 +349,7 @@ async fn main() -> Result<(), anyhow::Error> {
         style_manager.clone(),
         asset_manager.clone(),
         config.export_dir.clone(),
+        config.artifact_extension.clone(),
     ));
 
     // コマンド分岐
@@ -430,9 +431,9 @@ async fn main() -> Result<(), anyhow::Error> {
             let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port)).await?;
             axum::serve(listener, app).await?;
         }
-        Commands::LinkSns { job_id, platform, video_id } => {
-            info!("🔗 Linking Job {} to {} video ID: {}", job_id, platform, video_id);
-            match job_queue.link_sns_data(&job_id, &platform, &video_id).await {
+        Commands::LinkSns { job_id, platform, content_id } => {
+            info!("🔗 Linking Job {} to {} content ID: {}", job_id, platform, content_id);
+            match job_queue.link_sns_data(&job_id, &platform, &content_id).await {
                 Ok(_) => info!("✅ Linking Successful."),
                 Err(e) => error!("❌ Failed to link SNS data: {}", e),
             }
@@ -484,8 +485,8 @@ async fn main() -> Result<(), anyhow::Error> {
 🎬 動画生成完了！");
                             println!("   📝 タイトル: {}", res.concept.title);
                             println!("   🎨 スタイル: {}", res.concept.style_profile);
-                            for v in res.output_videos {
-                                println!("   🎥 [{}] ファイル: {}", v.lang, v.path);
+                            for v in res.output_artifacts {
+                                println!("   🎥 [{}] ファイル: {}", v.tag, v.path);
                             }
                         }
                         Err(e) => {

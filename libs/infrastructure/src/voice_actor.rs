@@ -98,7 +98,7 @@ impl AgentAct for VoiceActor {
     ) -> Result<Self::Output, FactoryError> {
         let sanitized_text = Self::sanitize_for_tts(&input.text);
         if sanitized_text.is_empty() {
-            return Err(FactoryError::TtsFailure {
+            return Err(FactoryError::GenerativeInterfaceError {
                 reason: "Sanitized text is empty.".into(),
             });
         }
@@ -140,22 +140,22 @@ impl AgentAct for VoiceActor {
             ])
             .send()
             .await
-            .map_err(|e| FactoryError::TtsFailure {
+            .map_err(|e| FactoryError::GenerativeInterfaceError {
                 reason: format!("Failed to connect to TTS: {}", e),
             })?;
 
         if !response.status().is_success() {
             let status = response.status();
-            let err_body = response.text().await.unwrap_or_default();
+            let err_body: String = response.text().await.unwrap_or_default();
             error!("TTS Server Error [{}]: {}", status, err_body);
-            return Err(FactoryError::TtsFailure {
-                reason: format!("TTS Server Error [{}]: {}", status, err_body),
+            return Err(FactoryError::GenerativeInterfaceError {
+                reason: format!("TTS failed with status: {}. Body: {}", status, err_body)
             });
         }
 
         let audio_bytes = response.bytes().await
-            .map_err(|e| FactoryError::TtsFailure {
-                reason: format!("Failed to read data: {}", e),
+            .map_err(|e| FactoryError::GenerativeInterfaceError {
+                reason: format!("Failed to call TTS: {}", e)
             })?;
 
         let output_filename = format!("voice_{}.wav", uuid::Uuid::new_v4());

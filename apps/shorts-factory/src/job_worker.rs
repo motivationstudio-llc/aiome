@@ -171,20 +171,20 @@ impl JobWorker {
 
         match self.orchestrator.execute(req, &self.jail).await {
             Ok(res) => {
-                info!("✅ JobWorker: Job {} completed successfully: {} videos generated", job_id, res.output_videos.len());
+                info!("✅ JobWorker: Job {} completed successfully: {} artifacts generated", job_id, res.output_artifacts.len());
                 
                 // Store success log for Distillation
                 let success_log = format!(
                     "SUCCESS_LOG: {}
-Videos: {:?}
+Artifacts: {:?}
 Concept: {}", 
                     Utc::now().to_rfc3339(), 
-                    res.output_videos,
+                    res.output_artifacts,
                     res.concept.title
                 );
                 let _ = self.job_queue.store_execution_log(&job_id, &success_log).await;
 
-                let output_json = serde_json::to_string(&res.output_videos).unwrap_or_default();
+                let output_json = serde_json::to_string(&res.output_artifacts).unwrap_or_default();
                 if let Err(e) = self.job_queue.complete_job(&job_id, Some(&output_json)).await {
                     error!("❌ JobWorker: Failed to mark job as completed: {}", e);
                 } else {
@@ -210,13 +210,13 @@ Error: {}", Utc::now().to_rfc3339(), e);
                         let lesson = format!("STRATEGIC_DECISION: このジョブは以下の理由で中止されました: {}。同様の低密度なコンセプト生成を避けてください。", reason);
                         let _ = self.job_queue.store_karma(&job_id, "strategic_arbiter", &lesson, "Synthesized", &soul_hash).await;
                     }
-                    FactoryError::TtsFailure { reason } => {
+                    FactoryError::GenerativeInterfaceError { reason } => {
                         let _ = self.job_queue.increment_job_retry_count(&job_id).await;
-                        warn!("💀 JobWorker: TTS FAILURE detected. Executing Honorable Abort for Job {}", job_id);
-                        let _ = self.job_queue.fail_job(&job_id, &format!("TTS_ABORT: {}", reason)).await;
+                        warn!("💀 JobWorker: GENERATIVE FAILURE detected. Executing Honorable Abort for Job {}", job_id);
+                        let _ = self.job_queue.fail_job(&job_id, &format!("GENERATIVE_ABORT: {}", reason)).await;
                         
                         let lesson = format!(
-                            "WARNING: このコンセプトはTTSエンジンを破壊する可能性がありました。理由は: {}。今後はより純粋な日本語のみを使用してください。",
+                            "WARNING: このコンセプトは生成エンジンまたはインターフェースを破壊する可能性がありました。理由は: {}。今後はより安全なプロンプトや入力を提供してください。",
                             reason
                         );
                         let _ = self.job_queue.store_karma(&job_id, "voicing_failure_system", &lesson, "failure", &soul_hash).await;

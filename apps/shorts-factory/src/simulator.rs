@@ -72,7 +72,7 @@ pub async fn run_evolution_simulation(pool: &SqlitePool, api_key: &str, model_na
     // Scenario B: The Toxic Virality
     run_scenario(&pool, &oracle, "Scenario B: The Toxic Virality (Fuzzed)", fuzzed_views_b, fuzzed_likes_b, selected_comments_b).await?;
 
-    let fuzzed_views_c = apply_noise(&mut rng, 1_000, 0.5); // high noise for failed video
+    let fuzzed_views_c = apply_noise(&mut rng, 1_000, 0.5); // high noise for failed content
     let fuzzed_likes_c = apply_noise(&mut rng, 10, 0.5);
 
     let comments_c = [

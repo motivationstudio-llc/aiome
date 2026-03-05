@@ -17,10 +17,10 @@ use rig::prelude::*;
 use rig::completion::Prompt;
 use tracing::{info, error};
 
-/// 動画コンセプト生成機 (Director)
+/// コンセプト生成機 (Director)
 /// 
 /// トレンドデータを入力として受け取り、LLM (Gemini) を使用して
-/// 具体的な動画タイトル、脚本（字幕用・TTS用）、画像生成用プロンプトを生成する。
+/// 具体的なタイトル、脚本（表示用・読み上げ用）、生成用プロンプトを生成する。
 pub struct ConceptManager {
     api_key: String,
     model: String,
@@ -79,7 +79,7 @@ impl ConceptManager {
 
         let preamble = format!(
             "You are the Constitutional Prosecutor for an AI system.
-            Your job is to verify if the generated video concept adheres to the following 'SOUL.md' principles.
+            Your job is to verify if the generated concept adheres to the following 'SOUL.md' principles.
             
             [SOUL.md]
             {}
@@ -207,12 +207,12 @@ impl ConceptManager {
         let style_list = input.available_styles.join(", ");
 
         let preamble = format!(
-            "You are a professional video producer for YouTube Shorts. 
+            "You are a professional content producer and narrator. 
             You are a charismatic, intelligent narrator who loves cutting-edge technology.
-            Your goal is to explain complex tech topics with vivid metaphors and engaging storytelling.
+            Your goal is to explain complex topics with vivid metaphors and engaging storytelling.
 
             [MISSION]
-            Propose a video concept that instantly grabs the viewer's attention based on provided trends.
+            Propose a content concept that instantly grabs the viewer's attention based on provided trends.
 
             [ARCHITECTURE - Dual-Script System]
             Generate two types of text for each section to ensure both visual aesthetics and natural pronunciation:
@@ -220,7 +220,7 @@ impl ConceptManager {
             2. script_*: For TTS. Optimize for natural reading. Avoid complex symbols or abbreviations that might trip up the TTS.
 
             [STRUCTURE & VOLUME]
-            Target: 30-60 seconds. Thin scripts are strictly prohibited.
+            Target: Engaging and informative duration. Thin scripts are strictly prohibited.
             - intro (2-3 sentences): A 'hook' with a shocking fact or question.
             - body (5-7 sentences): The core. Include at least one data point, explain 'why', use a metaphor, and add a 'wow' factor.
             - outro (2-3 sentences): Wrap up the core insight and provide a CTA.
@@ -297,9 +297,9 @@ impl ConceptManager {
             [RELEVANT KARMA (PAST LESSONS)]
 {}
 {}
-
-\
-            Select the most interesting topic and generate a top-tier video concept, strictly following the provided Karma.", 
+ 
+ \
+            Select the most interesting topic and generate a top-tier content concept, strictly following the provided Karma.", 
             trend_list, karma_context, retry_warning
         );
 
@@ -313,14 +313,14 @@ impl ConceptManager {
         info!("  [Stage 2] Localizing to Japanese...");
         let client = self.get_client()?;
 
-        let preamble = "You are an expert Japanese translator and script editor for AI narration.
-            Translate the given English video script into engaging, natural Japanese.
-
-            [RULES]
-            - Tone: '知的だが親しみやすい'. Use '〜なんです' or '〜ですよね'.
-            - display_*: Keep technical terms or company names in English if they look better in subtitles (e.g., 'OpenAI', 'AI').
-            - script_*: !!CRITICAL!! This is for TTS. Use only Kanji, Hiragana, and Katakana. Convert ALL English terms and numbers to Katakana/Hiragana pronunciation (e.g., 'OpenAI' -> 'オープンエーアイ', 'AI' -> 'エイアイ'). No symbols like % or $.
-            - Ensure the rhythm is fast-paced for Shorts (short sentences).
+        let preamble = "You are an expert editor for AI narration.
+            Translate the given English content script into engaging, natural Japanese.
+ 
+             [RULES]
+             - Tone: '知的だが親しみやすい'. Use '〜なんです' or '〜ですよね'.
+             - display_*: Keep technical terms or company names in English if they look better in output (e.g., 'OpenAI', 'AI').
+             - script_*: !!CRITICAL!! This is for TTS. Use only Kanji, Hiragana, and Katakana. Convert ALL English terms and numbers to Katakana/Hiragana pronunciation (e.g., 'OpenAI' -> 'オープンエーアイ', 'AI' -> 'エイアイ'). No symbols like % or $.
+             - Ensure the rhythm is fast-paced (short sentences).
 
             [OUTPUT FORMAT (JSON only)]
             ```json

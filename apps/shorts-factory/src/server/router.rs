@@ -139,8 +139,8 @@ async fn remix_handler(
         // Execute the heavy task
         match orchestrator.execute(payload.clone(), &jail).await {
             Ok(res) => {
-                let video_count = res.output_videos.len();
-                let msg = format!("Job Completed: {} -> {} videos generated ({})", job_id_clone, video_count, res.final_video_path);
+                let artifact_count = res.output_artifacts.len();
+                let msg = format!("Job Completed: {} -> {} artifacts generated ({})", job_id_clone, artifact_count, res.final_artifact_path);
                 println!("{}", msg);
                 telemetry.broadcast_log("INFO", &msg);
             }

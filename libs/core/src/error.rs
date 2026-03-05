@@ -18,33 +18,33 @@ use thiserror::Error;
 /// ShortsFactory のドメインエラー
 #[derive(Debug, Error)]
 pub enum FactoryError {
-    // === トレンド調査 ===
-    #[error("トレンド取得に失敗: {source}")]
-    TrendFetch {
+    // === コンテキスト調査 (旧 トレンド調査) ===
+    #[error("コンテキスト取得に失敗: {source}")]
+    ContextFetch {
         #[source]
         source: anyhow::Error,
     },
 
-    // === 動画生成 ===
-    #[error("ComfyUI 接続エラー (url: {url}): {source}")]
-    ComfyConnection {
+    // === 生成エンジン (旧 動画生成) ===
+    #[error("外部サービス接続エラー (url: {url}): {source}")]
+    RemoteServiceError {
         url: String,
         #[source]
         source: anyhow::Error,
     },
 
-    #[error("ComfyUI ワークフロー実行タイムアウト ({timeout_secs}秒)")]
-    ComfyTimeout { timeout_secs: u64 },
+    #[error("外部サービス実行タイムアウト ({timeout_secs}秒)")]
+    RemoteServiceTimeout { timeout_secs: u64 },
 
-    #[error("ComfyUI ワークフロー実行失敗: {reason}")]
-    ComfyWorkflowFailed { reason: String },
+    #[error("外部サービス実行失敗: {reason}")]
+    RemoteServiceExecutionFailed { reason: String },
 
-    // === メディア編集 ===
-    #[error("FFmpeg 実行エラー: {reason}")]
-    FfmpegFailed { reason: String },
+    // === 外部プロセッサー (旧 メディア編集) ===
+    #[error("外部プロセス実行エラー: {reason}")]
+    SubprocessFailed { reason: String },
 
-    #[error("メディアファイルが見つからない: {path}")]
-    MediaNotFound { path: String },
+    #[error("アーティファクトが見つからない: {path}")]
+    ArtifactNotFound { path: String },
 
     // === ログ・通知 ===
     #[error("ログ記録エラー: {source}")]
@@ -71,8 +71,8 @@ pub enum FactoryError {
     },
 
     // === 運用・リソース管理 ===
-    #[error("VRAM不足: 必要 {required_mb}MB, 利用可能 {available_mb}MB")]
-    InsufficientVram {
+    #[error("リソース不足: 必要 {required_mb}MB, 利用可能 {available_mb}MB")]
+    ResourceShortage {
         required_mb: u64,
         available_mb: u64,
     },
@@ -92,8 +92,8 @@ pub enum FactoryError {
     #[error("インフラ構造エラー: {reason}")]
     Infrastructure { reason: String },
 
-    #[error("音声合成失敗 (TTS): {reason}")]
-    TtsFailure { reason: String },
+    #[error("生成インターフェース失敗: {reason}")]
+    GenerativeInterfaceError { reason: String },
 
     #[error("セキュリティ法規違反: {reason}")]
     SecurityViolation { reason: String },

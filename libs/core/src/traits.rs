@@ -38,39 +38,35 @@ pub struct TrendItem {
     pub score: f64,
 }
 
-/// 動画生成ツール (ComfyBridge)
-///
-/// ComfyUI API を通じて画像/動画を生成する。
+/// 生成エンジン (旧 ComfyBridge)
 #[async_trait]
-pub trait VideoGenerator: Send + Sync {
+pub trait GenerativeEngine: Send + Sync {
     /// ワークフローを実行し、生成されたファイルのパスを返す
-    async fn generate_video(
+    async fn generate_artifact(
         &self,
         prompt: &str,
         workflow_id: &str,
-        input_image: Option<&std::path::Path>,
-    ) -> Result<crate::contracts::VideoResponse, FactoryError>;
+        input_artifact: Option<&std::path::Path>,
+    ) -> Result<crate::contracts::ArtifactResponse, FactoryError>;
 
-    /// ComfyUI の接続状態を確認
+    /// 接続状態を確認
     async fn health_check(&self) -> Result<bool, FactoryError>;
 }
 
-/// メディア編集ツール (MediaForge)
-///
-/// FFmpeg を使って動画・音声・字幕を合成する。
+/// メディアプロセッサー (旧 MediaForge)
 #[async_trait]
-pub trait MediaEditor: Send + Sync {
-    /// 動画、音声、字幕を合成して最終出力を生成
+pub trait MediaProcessor: Send + Sync {
+    /// 複数のアセットを合成して最終出力を生成
     async fn combine_assets(
         &self,
-        video: &PathBuf,
-        audio: &PathBuf,
-        subtitle: Option<&PathBuf>,
+        input: &PathBuf,
+        context: &PathBuf,
+        metadata: Option<&PathBuf>,
         force_style: Option<String>,
     ) -> Result<PathBuf, FactoryError>;
 
-    /// 動画をショート用にリサイズ (9:16, 1080x1920)
-    async fn resize_for_shorts(&self, input: &PathBuf) -> Result<PathBuf, FactoryError>;
+    /// メディアを標準化 (旧 resize_for_shorts)
+    async fn standardize_media(&self, input: &PathBuf) -> Result<PathBuf, FactoryError>;
 
     /// 複数のメディアクリップを 1つのファイルに結合
     async fn concatenate_clips(&self, clips: Vec<String>, output_name: String) -> Result<String, FactoryError>;
@@ -134,10 +130,10 @@ pub struct Job {
     pub error_message: Option<String>,
     // --- Phase 11: World-in-the-Loop SNS Integration ---
     pub sns_platform: Option<String>,
-    pub sns_video_id: Option<String>,
+    pub sns_content_id: Option<String>,
     pub published_at: Option<String>,
-    /// 多言語出力された動画のリスト (JSON文字列)
-    pub output_videos: Option<String>,
+    /// 多言語出力された成果物のリスト (JSON文字列)
+    pub output_artifacts: Option<String>,
 }
 
 /// ジョブキュー (The Persistent Memory & Samsara)
@@ -156,7 +152,7 @@ pub trait JobQueue: Send + Sync {
     async fn dequeue(&self) -> Result<Option<Job>, FactoryError>;
 
     /// ジョブを完了状態にする
-    async fn complete_job(&self, job_id: &str, output_videos: Option<&str>) -> Result<(), FactoryError>;
+    async fn complete_job(&self, job_id: &str, output_artifacts: Option<&str>) -> Result<(), FactoryError>;
 
     /// ジョブを失敗状態にする
     async fn fail_job(&self, job_id: &str, reason: &str) -> Result<(), FactoryError>;
@@ -193,8 +189,8 @@ pub trait JobQueue: Send + Sync {
     /// 戻り値は削除されたジョブ数。
     async fn purge_old_jobs(&self, days: i64) -> Result<u64, FactoryError>;
 
-    /// SNS動画IDをジョブに紐付ける (Phase 11: The Anchor Link)
-    async fn link_sns_data(&self, job_id: &str, platform: &str, video_id: &str) -> Result<(), FactoryError>;
+    /// SNSコンテンツIDをジョブに紐付ける (Phase 11: The Anchor Link)
+    async fn link_sns_data(&self, job_id: &str, platform: &str, content_id: &str) -> Result<(), FactoryError>;
 
     /// 評価マイルストーンに到達した未評価のジョブを取得する (Phase 11: The Catch-up Logic)
     async fn fetch_jobs_for_evaluation(&self, milestone_days: i64, limit: i64) -> Result<Vec<Job>, FactoryError>;
@@ -301,8 +297,8 @@ pub struct SnsMetricsRecord {
 /// 稼働ログをSQLiteに記録し、必要に応じてSlack/Discordに通知する。
 #[async_trait]
 pub trait FactoryLogger: Send + Sync {
-    /// 動画生成成功をログに記録
-    async fn log_success(&self, video_id: &str, output_path: &PathBuf) -> Result<(), FactoryError>;
+    /// 成功ログ
+    async fn log_success(&self, artifact_id: &str, output_path: &std::path::PathBuf) -> Result<(), FactoryError>;
 
     /// エラーをログに記録
     async fn log_error(&self, reason: &str) -> Result<(), FactoryError>;

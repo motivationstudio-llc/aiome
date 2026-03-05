@@ -32,7 +32,7 @@ impl Oracle {
         }
     }
 
-    /// 動画の反響を評価し、最終審判（Verdict）を下す。
+    /// コンテンツの反響を評価し、最終審判（Verdict）を下す。
     pub async fn evaluate(
         &self,
         milestone_days: i64,
