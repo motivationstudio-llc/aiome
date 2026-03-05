@@ -126,8 +126,7 @@ impl Guard {
     fn is_forbidden_char(&self, c: char) -> bool {
         if c.is_control() {
             // 改行とタブは許可する
-            if c == '
-' || c == '	' {
+            if c == '\n' || c == '\t' {
                 return false;
             }
             return true;
@@ -139,7 +138,7 @@ impl Guard {
             _ => {}
         }
         // パスとして危険な文字
-        matches!(c, '/' | '\' | ':' | '*' | '?' | '"' | '<' | '>' | '|')
+        matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|')
     }
 
     fn mask_windows_reserved(&self, name: &str) -> String {

@@ -11,19 +11,23 @@
 use axum::{
     extract::State,
     routing::{get, post},
-    response::{self, IntoResponse},
+    response::IntoResponse,
     Router, Json,
     http::{StatusCode, HeaderMap},
+    error_handling::HandleErrorLayer,
 };
 use std::sync::Arc;
-use sqlx::{SqlitePool, Row};
+use sqlx::SqlitePool;
 use factory_core::contracts::{FederationSyncRequest, FederationSyncResponse, FederationPushRequest, FederationPushResponse, FederatedKarma, ImmuneRule};
 use tracing::{info, warn, error};
 use tower_http::cors::CorsLayer;
+use secrecy::ExposeSecret;
+use tower::{ServiceBuilder, limit::RateLimitLayer, buffer::BufferLayer};
+use std::time::Duration;
 
 struct HubState {
     pool: SqlitePool,
-    secret: String,
+    secret: secrecy::SecretString,
 }
 
 #[tokio::main]
@@ -32,7 +36,7 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt().json().init();
     
     let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite:samsara_hub.db?mode=rwc".to_string());
-    let secret = std::env::var("FEDERATION_SECRET").unwrap_or_else(|_| "hub_secret_1337".to_string());
+    let secret = secrecy::SecretString::new(std::env::var("FEDERATION_SECRET").unwrap_or_else(|_| "hub_secret_1337".to_string()).into());
     let port = std::env::var("PORT").unwrap_or_else(|_| "3016".to_string());
 
     let pool = SqlitePool::connect(&db_url).await?;
@@ -45,6 +49,14 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/federation/push", post(push_handler))
         .route("/api/v1/health", get(health_handler))
         .layer(CorsLayer::permissive())
+        .layer(
+            ServiceBuilder::new()
+                .layer(HandleErrorLayer::new(|err| async move {
+                    (StatusCode::INTERNAL_SERVER_ERROR, format!("Unhandled internal error: {}", err))
+                }))
+                .layer(BufferLayer::new(1024))
+                .layer(RateLimitLayer::new(100, Duration::from_secs(60)))
+        )
         .with_state(state);
 
     let addr = format!("0.0.0.0:{}", port);
@@ -126,7 +138,7 @@ async fn sync_handler(
 ) -> impl IntoResponse {
     // Auth Wall
     let auth = headers.get(axum::http::header::AUTHORIZATION).and_then(|h| h.to_str().ok());
-    if auth != Some(&format!("Bearer {}", state.secret)) {
+    if auth != Some(&format!("Bearer {}", state.secret.expose_secret())) {
         warn!("🔒 Unauthorized sync attempt from node: {}", payload.node_id);
         return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Unauthorized"}))).into_response();
     }
@@ -176,7 +188,7 @@ async fn push_handler(
 ) -> impl IntoResponse {
     // Auth Wall
     let auth = headers.get(axum::http::header::AUTHORIZATION).and_then(|h| h.to_str().ok());
-    if auth != Some(&format!("Bearer {}", state.secret)) {
+    if auth != Some(&format!("Bearer {}", state.secret.expose_secret())) {
         warn!("🔒 Unauthorized push attempt from node: {}", payload.node_id);
         return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Unauthorized"}))).into_response();
     }

@@ -28,6 +28,7 @@ use tuning::StyleManager;
 use async_trait::async_trait;
 use std::sync::Arc;
 use tracing::info;
+use factory_core::budget::JobBudget;
 
 /// 映像量産統括者 (ProductionOrchestrator)
 /// 
@@ -88,6 +89,8 @@ impl AgentAct for ProductionOrchestrator {
     ) -> Result<WorkflowResponse, FactoryError> {
         info!("🏭 Aiome Video Forge: Starting Pipeline for topic '{}'", input.topic);
 
+        let budget = JobBudget::new(1.0); // $1.00 budget per job
+
         // --- Phase 1: Concept & Setup ---
         let project_id = input.remix_id.unwrap_or_else(|| {
             format!("{}_{}", input.category, chrono::Utc::now().format("%Y%m%d_%H%M%S"))
@@ -106,6 +109,7 @@ impl AgentAct for ProductionOrchestrator {
              self.asset_manager.load_concept(&project_id)?
         } else {
             let trend_req = TrendRequest { category: input.category.clone() };
+            budget.charge(0.01)?;
             let trend_res: TrendResponse = self.supervisor.enforce_act(&self.trend_sonar, trend_req).await?;
             let concept_req = ConceptRequest { 
                 topic: input.topic.clone(),
@@ -115,6 +119,7 @@ impl AgentAct for ProductionOrchestrator {
                 relevant_karma: input.relevant_karma.clone(),
                 previous_attempt_log: input.previous_attempt_log.clone(),
             };
+            budget.charge(0.05)?;
             let res = self.supervisor.enforce_act(&self.concept_manager, concept_req).await?;
             self.asset_manager.save_concept(&project_id, &res)?;
             res
@@ -168,6 +173,7 @@ impl AgentAct for ProductionOrchestrator {
                         workflow_id: "shorts_standard_v1".to_string(),
                         input_image: None,
                     };
+                    budget.charge(0.10)?;
                     let res = self.supervisor.enforce_act(&self.comfy_bridge, video_req).await?;
                     let temp_path = self.supervisor.jail().root().join(&res.output_path);
                     std::fs::create_dir_all(img_path.parent().unwrap()).ok();
@@ -199,6 +205,7 @@ impl AgentAct for ProductionOrchestrator {
                                 style: if style_name.is_empty() { None } else { Some(style_name.clone()) },
                                 model_name: None, // Default in VoiceActor
                             };
+                            budget.charge(0.02)?;
                             let v_res = self.supervisor.enforce_act(&*self.voice_actor, voice_req).await?;
                             let temp_v = self.supervisor.jail().root().join(&v_res.audio_path);
                             std::fs::create_dir_all(audio_path.parent().unwrap()).ok();
@@ -280,8 +287,8 @@ impl AgentAct for ProductionOrchestrator {
                     force_style: Some(style_with_font),
                 };
                 
+                budget.charge(0.01)?;
                 let media_res: MediaResponse = self.supervisor.enforce_act(&self.media_forge, media_req).await?;
-
                 let final_path = std::path::PathBuf::from(media_res.final_path);
                 let delivered = infrastructure::workspace_manager::WorkspaceManager::deliver_output(
                     &format!("{}_{}", project_id, lang),
@@ -342,8 +349,7 @@ fn split_into_sentences(text: &str) -> Vec<String> {
     let mut current = String::new();
     
     // 英語と日本語の両方の句切りに対応
-    let delimiters = ['。', '？', '！', '.', '?', '!', '
-'];
+    let delimiters = ['。', '？', '！', '.', '?', '!', '\n'];
     
     for c in text.chars() {
         current.push(c);

@@ -8,7 +8,7 @@
  * License, or (at your option) any later version.
  */
 
-//! # ドメインエラー型
+//! ドメインエラー型
 //!
 //! `thiserror` を使い、すべてのドメインエラーに明確な型を付与する。
 //! Iron Principles: `unwrap()` / `expect()` は禁止。
@@ -97,6 +97,9 @@ pub enum FactoryError {
 
     #[error("セキュリティ法規違反: {reason}")]
     SecurityViolation { reason: String },
+
+    #[error("予算上限超過 (Budget Exhausted): {0}")]
+    BudgetExhausted(#[from] crate::budget::BudgetExhaustedError),
 
     #[error("名誉ある撤退 (Honorable Abort): {reason}")]
     HonorableAbort { reason: String },

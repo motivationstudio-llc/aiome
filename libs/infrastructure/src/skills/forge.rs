@@ -85,6 +85,7 @@ impl SkillForge {
                     capabilities: vec!["execute".to_string()], // Generated skills are mostly execution-based
                     inputs: vec!["String".to_string()],
                     outputs: vec!["String".to_string()],
+                    allowed_hosts: vec![],
                 };
                 let meta_json = serde_json::to_string_pretty(&meta)?;
                 fs::write(meta_path, meta_json)?;
@@ -94,13 +95,10 @@ impl SkillForge {
                 return Ok(final_path);
             } else {
                 let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-                error!("❌ [SkillForge] Compilation failed for {}:
-{}", skill_name, stderr);
+                error!("❌ [SkillForge] Compilation failed for {}:\n{}", skill_name, stderr);
                 
                 if attempt < retry_count {
                     warn!("🔄 [SkillForge] Requesting self-healing for {}...", skill_name);
-                    // ここで本来はLLMを呼び戻すべきだが、基盤としてはエラーとログを返して呼び出し側に委ねる。
-                    // もしくは LLMClient を注入して自動リトライさせる設計も可能。
                     return Err(format!("Compilation failed. Stderr: {}", stderr).into());
                 } else {
                     let _ = fs::remove_dir_all(&temp_dir);

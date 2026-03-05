@@ -54,14 +54,13 @@ impl MediaEditor for MediaForgeClient {
         // 字幕の焼き込み (Hard-burn) - Grade S Design
         if let Some(sub) = subtitle {
             let sub_path = sub.to_string_lossy()
-                .replace("'", "'\''")
-                .replace(":", "\:");
+                .replace("'", "'\\''")
+                .replace(":", "\\:");
             
             // デフォルトスタイル。FontSize=18, MarginV=30 (M4 Pro & Libass coordinate system optimization)
             let default_style = "FontName=Hiragino Sans,FontSize=18,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=2.0,Shadow=1.0,Alignment=2,MarginV=30";
             let active_style = if let Some(fs) = force_style {
                  // force_style が指定されている場合、デフォルトとマージ or 単体使用
-                 // 今回は簡易的に、FontName等を上書きするためにそのまま使うか、連結するか
                  format!("{},{}", default_style, fs)
             } else {
                  default_style.to_string()
@@ -140,8 +139,7 @@ impl MediaEditor for MediaForgeClient {
 
         let mut concat_list = String::new();
         for clip in clips {
-            concat_list.push_str(&format!("file '{}'
-", clip));
+            concat_list.push_str(&format!("file '{}'\n", clip));
         }
 
         let list_path = self.jail.root().join("concat_list.txt");

@@ -11,8 +11,9 @@
 use std::path::{Path, PathBuf};
 use std::collections::HashMap;
 use std::time::Duration;
-use tracing::{info, error};
+use tracing::{info, error, warn};
 use extism::{Manifest, Plugin};
+use jsonschema::JSONSchema;
 pub mod forge;
 
 
@@ -23,6 +24,8 @@ pub struct SkillMetadata {
     pub capabilities: Vec<String>,
     pub inputs: Vec<String>,
     pub outputs: Vec<String>,
+    #[serde(default)]
+    pub allowed_hosts: Vec<String>,
 }
 
 pub struct WasmSkillManager {
@@ -76,6 +79,7 @@ impl WasmSkillManager {
                     capabilities: vec!["execute".to_string()],
                     inputs: vec!["String".to_string()],
                     outputs: vec!["String".to_string()],
+                    allowed_hosts: vec![],
                 });
             }
         }
@@ -120,8 +124,20 @@ impl WasmSkillManager {
             manifest = manifest.with_allowed_path(jail_root.to_string_lossy().to_string(), "/mnt");
         }
 
-        // 2. Network: Allow all hosts for now (controlled by Intent Parser)
-        manifest = manifest.with_allowed_host("*");
+        // 2. Network: Whitelist-based isolation (Zero Trust)
+        let metadata = self.get_metadata(skill_name);
+        if let Some(meta) = metadata {
+            if meta.allowed_hosts.is_empty() {
+                 // Default: No network if not specified
+            } else if meta.allowed_hosts.contains(&"*".to_string()) {
+                warn!("⚠️ [WasmSkillManager] Skill '{}' uses wildcard network access. Be careful.", skill_name);
+                manifest = manifest.with_allowed_host("*");
+            } else {
+                for host in &meta.allowed_hosts {
+                    manifest = manifest.with_allowed_host(host);
+                }
+            }
+        }
 
         // 3. Resource Limits & Timeouts
         manifest = manifest.with_timeout(self.timeout);
@@ -152,6 +168,44 @@ impl WasmSkillManager {
 
         info!("✅ [WasmSkillManager] Skill execution successful: {}", skill_name);
         Ok(result)
+    }
+
+    pub fn get_metadata(&self, skill_name: &str) -> Option<SkillMetadata> {
+        let meta_path = self.skills_dir.join(format!("{}.meta.json", skill_name));
+        if let Ok(data) = std::fs::read_to_string(meta_path) {
+            serde_json::from_str(&data).ok()
+        } else {
+            None
+        }
+    }
+
+    /// ドライラン（Dry-Run）による論理検証。
+    /// 指定されたテスト入力に対して、期待されるスキーマに合致するかチェックする。
+    pub async fn validate_skill_logic(
+        &self, 
+        skill_name: &str, 
+        test_input: &str,
+        expected_schema_json: &str
+    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+        info!("🧪 [WasmSkillManager] Validating skill logic for: {}", skill_name);
+        
+        let output = self.call_skill(skill_name, "execute", test_input, None).await?;
+        
+        // JSON Schema validation
+        let schema_val: serde_json::Value = serde_json::from_str(expected_schema_json)?;
+        let instance: serde_json::Value = serde_json::from_str(&output)?;
+        
+        let compiled = JSONSchema::compile(&schema_val)
+            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, format!("Schema compilation failed: {}", e))) as Box<dyn std::error::Error + Send + Sync>)?;
+
+        if let Err(mut errors) = compiled.validate(&instance) {
+            let first_error = errors.next().map(|e| e.to_string()).unwrap_or_else(|| "Unknown validation error".to_string());
+            error!("❌ [WasmSkillManager] Logic validation failed for {}: {}", skill_name, first_error);
+            return Ok(false);
+        }
+
+        info!("✅ [WasmSkillManager] Logic validation successful: {}", skill_name);
+        Ok(true)
     }
 
     /// 知識ベース（Karma）から最適なスキルを意味的に探索する (Self-Wiring Capability)

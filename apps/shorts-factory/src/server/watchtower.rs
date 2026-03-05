@@ -36,8 +36,7 @@ fn extract_json(text: &str) -> String {
 fn extract_code(text: &str) -> String {
     if let Some(start) = text.find("```") {
         let after_start = &text[start + 3..];
-        if let Some(line_end) = after_start.find('
-') {
+        if let Some(line_end) = after_start.find('\n') {
             let code_start = &after_start[line_end + 1..];
             if let Some(end) = code_start.find("```") {
                 return code_start[..end].to_string();
@@ -655,16 +654,24 @@ impl WatchtowerServer {
                             let spec = v["forge_spec"].as_str().unwrap_or("汎用スキル");
                             let forge_preamble = format!(
                                 "{}
-
-【関数名】
-`pub fn {}(input: String) -> FnResult<String>` を生成してください。
-
-【作成すべき機能】
-{}", 
+                                
+                                【関数名】
+                                `pub fn {}(input: String) -> FnResult<String>` を生成してください。
+                                
+                                【作成すべき機能】
+                                {}
+                                
+                                【出力形式】
+                                必ず以下のJSON形式でのみ回答してください：
+                                {{
+                                    \"code\": \"Rustコード（エスケープ済みの文字列）\",
+                                    \"test_input\": \"機能検証のためのダミー入力文字列\",
+                                    \"test_schema\": \"期待される出力のJSON Schema文字列（例: {{\\\"type\\\": \\\"object\\\", ...}}）\"
+                                }}", 
                                 forge_prompt_text, func_name, spec
                             );
                             let forge_agent = client.agent("gemini-2.0-flash").preamble(&forge_preamble).build();
-                            let code_prompt = format!("以下の仕様に合わせて、指定された機能を実装したRustコード（lib.rsの内容）のみを出力してください。関数の名前は必ず `{}` にしてください。コードブロックで囲ってください。", func_name);
+                            let code_prompt = format!("仕様を実装してテストケースを作成してください。関数名は `{}` です。", func_name);
                             let code_response: String = match forge_agent.prompt(&code_prompt).await {
                                 Ok(r) => r,
                                 Err(e) => {
@@ -672,13 +679,51 @@ impl WatchtowerServer {
                                     String::new()
                                 }
                             };
-                            let rust_code = extract_code(&code_response);
+                            
+                            let (rust_code, test_input, test_schema) = if let Ok(json_text) = infrastructure::concept_manager::extract_json(&code_response) {
+                                if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(&json_text) {
+                                    let c = json_val["code"].as_str().unwrap_or("").to_string();
+                                    let ti = json_val["test_input"].as_str().unwrap_or("").to_string();
+                                    let ts = json_val["test_schema"].as_str().unwrap_or("{}").to_string();
+                                    (c, ti, ts)
+                                } else {
+                                    (extract_code(&code_response), String::new(), "{}".to_string())
+                                }
+                            } else {
+                                (extract_code(&code_response), String::new(), "{}".to_string())
+                            };
 
+                            if rust_code.is_empty() {
+                                error!("❌ [SkillForge] Missing rust_code for forging.");
+                                return;
+                            }
+
+                            // 1. Compile and save metadata
                             match skill_forge.forge_skill(&final_skill_name, &rust_code, 2, &spec).await {
                                 Ok(_) => {
-                                    info!("✅ [SkillForge] Auth-evolved skill: {}", final_skill_name);
-                                    comment = "新しいスキルが完成したよ！早速やってみるね。".to_string();
-                                    final_intent = "execute_skill"; // Forge 成功後は実行へ
+                                    // 2. Dry-Run validation immediately after forge
+                                    info!("🔬 [SkillForge] Starting Dry-Run validation for {}...", final_skill_name);
+                                    match skill_manager.validate_skill_logic(&final_skill_name, &test_input, &test_schema).await {
+                                        Ok(true) => {
+                                            info!("✅ [SkillForge] Logic validation PASSED: {}", final_skill_name);
+                                            comment = "新しいスキルの構築に成功、さらに論理テストも合格したよ！完璧な出来栄えだね。".to_string();
+                                            final_intent = "execute_skill";
+                                        }
+                                        Ok(false) => {
+                                            error!("❌ [SkillForge] Logic validation FAILED for {}. Discarding skill.", final_skill_name);
+                                            let _ = log_tx.send(CoreEvent::ChatResponse { 
+                                                response: format!("[Sad] 新しいスキルを作ってみたんだけど、テストで論理矛盾が見つかっちゃった…安全のために、今回は使うのをやめておくね。"), 
+                                                channel_id,
+                                                audio_path: None
+                                            }).await;
+                                            return;
+                                        }
+                                        Err(e) => {
+                                            warn!("⚠️ [SkillForge] Dry-Run validator crashed: {}. Falling back to manual check.", e);
+                                            comment = "スキルの構築はできたけど、検証中にエラーが出ちゃったな…。一旦使ってみるね。".to_string();
+                                            final_intent = "execute_skill";
+                                        }
+                                    }
                                 }
                                 Err(e) => {
                                     let _ = log_tx.send(CoreEvent::ChatResponse { 

@@ -20,13 +20,14 @@ use std::time::Duration;
 use uuid::Uuid;
 use chrono::Utc;
 use tracing::warn;
+use secrecy::ExposeSecret;
 
 /// Job Queue that utilizes SQLite in WAL Mode to allow multi-threaded queue operations.
 /// Implements **The Immortal Samsara Schema** — crash-resistant, self-healing, and eternal.
 #[derive(Clone)]
 pub struct SqliteJobQueue {
     pool: SqlitePool,
-    gemini_api_key: Option<String>,
+    gemini_api_key: Option<secrecy::SecretString>,
 }
 
 impl SqliteJobQueue {
@@ -52,7 +53,7 @@ impl SqliteJobQueue {
 
     /// Add embedding capability to the queue
     pub fn with_embeddings(mut self, api_key: &str) -> Self {
-        self.gemini_api_key = Some(api_key.to_string());
+        self.gemini_api_key = Some(secrecy::SecretString::new(api_key.into()));
         self
     }
 
@@ -161,13 +162,16 @@ impl SqliteJobQueue {
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_sns_metrics_job ON sns_metrics_history(job_id, milestone_days);")
             .execute(&self.pool).await.ok();
 
-        // New migrations for sns_metrics_history refinement
         for migration in [
             "ALTER TABLE sns_metrics_history ADD COLUMN raw_comments_json TEXT",
             "ALTER TABLE sns_metrics_history ADD COLUMN is_finalized INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE sns_metrics_history ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE sns_metrics_history ADD COLUMN hard_metric_score REAL",
             "ALTER TABLE sns_metrics_history ADD COLUMN engagement_rate REAL",
+            "ALTER TABLE sns_metrics_history ADD COLUMN alignment_score REAL",
+            "ALTER TABLE sns_metrics_history ADD COLUMN growth_score REAL",
+            "ALTER TABLE sns_metrics_history ADD COLUMN lesson TEXT",
+            "ALTER TABLE sns_metrics_history ADD COLUMN should_evolve INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE karma_logs ADD COLUMN soul_version_hash TEXT",
             "ALTER TABLE karma_logs ADD COLUMN karma_embedding BLOB",
             "ALTER TABLE karma_logs ADD COLUMN is_federated INTEGER NOT NULL DEFAULT 0",
@@ -473,7 +477,7 @@ impl JobQueue for SqliteJobQueue {
 
         // --- Phase 2: Semantic Re-Ranking (Optimized RAG) ---
         if let Some(ref api_key) = self.gemini_api_key {
-            if let Ok(client) = gemini::Client::new(api_key) {
+            if let Ok(client) = gemini::Client::new(api_key.expose_secret()) {
                 // Only embed current target topic (Candidates are already embedded in DB)
                 if let Ok(topic_builder) = client.embeddings::<String>("text-embedding-004").document(topic.to_string()) {
                     if let Ok(topic_res) = topic_builder.build().await {
@@ -528,7 +532,7 @@ impl JobQueue for SqliteJobQueue {
 
         let mut embedding: Option<Vec<u8>> = None;
         if let Some(ref api_key) = self.gemini_api_key {
-            if let Ok(client) = gemini::Client::new(api_key) {
+            if let Ok(client) = gemini::Client::new(api_key.expose_secret()) {
                 if let Ok(builder) = client.embeddings::<String>("text-embedding-004").document(lesson.to_string()) {
                     if let Ok(res) = builder.build().await {
                         if let Some((_, many)) = res.first() {
@@ -856,12 +860,13 @@ impl JobQueue for SqliteJobQueue {
         // 1. Update the Metrics Ledger (The Proof)
         sqlx::query(
             "UPDATE sns_metrics_history 
-             SET oracle_score_topic = ?, oracle_score_visual = ?, oracle_score_soul = ?, oracle_reason = ?, is_finalized = 1
+             SET alignment_score = ?, growth_score = ?, lesson = ?, should_evolve = ?, oracle_reason = ?, is_finalized = 1
              WHERE id = ?"
         )
-        .bind(verdict.topic_score)
-        .bind(verdict.visual_score)
-        .bind(verdict.soul_score)
+        .bind(verdict.alignment_score)
+        .bind(verdict.growth_score)
+        .bind(&verdict.lesson)
+        .bind(verdict.should_evolve as i32)
         .bind(&verdict.reasoning)
         .bind(record_id)
         .execute(&mut *tx)
@@ -886,41 +891,22 @@ impl JobQueue for SqliteJobQueue {
         let milestone_days: i64 = job_row.get("milestone_days");
 
         // 3. If it's the Final Verdict (30d), store the lesson in Karma Logs
-        // Average Engagement * Soul Score => Weight (0-100)
         if milestone_days == 30 {
-            // Semantic Karma Refinement (The Semantic Void 修正)
-            // もし魂が汚染されていたら、Oracleの理由を「新たな戒め」として最高優先度で叩き込む
-            if verdict.soul_score <= 0.5 {
-                let karma_id = Uuid::new_v4().to_string();
-                let lesson = format!("SOUL VIOLATION / 魂の汚染: {}", verdict.reasoning);
-                
-                sqlx::query(
-                    "INSERT INTO karma_logs (id, job_id, karma_type, related_skill, lesson, weight, soul_version_hash)
-                     VALUES (?, ?, ?, ?, ?, ?, ?)"
-                )
-                .bind(&karma_id)
-                .bind(&job_id)
-                .bind("Synthesized") // 新たな叡智・戒めとして合成
-                .bind(&style_name) // ここでの関連スキルは映像スタイル
-                .bind(&lesson)
-                .bind(100) // 絶対的な掟として RAG のトップに固定
-                .bind(soul_hash)
-                .execute(&mut *tx)
-                .await
-                .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to inject Semantic Refinement: {}", e) })?;
-            }
-            let avg_engagement = (verdict.topic_score + verdict.visual_score) / 2.0;
-            let calculated_weight = (50.0 + (avg_engagement * verdict.soul_score * 50.0)) as i64;
-            let weight = calculated_weight.clamp(0, 100);
+            let avg_score = (verdict.alignment_score + verdict.growth_score) / 2.0;
+            let weight = (avg_score * 100.0) as i64;
+            let weight = weight.clamp(0, 100);
+
+            let karma_id = Uuid::new_v4().to_string();
 
             sqlx::query(
-                "INSERT INTO karma_logs (job_id, topic, style_name, lesson, weight, soul_version_hash)
-                 VALUES (?, ?, ?, ?, ?, ?)"
+                "INSERT INTO karma_logs (id, job_id, karma_type, related_skill, lesson, weight, soul_version_hash)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)"
             )
+            .bind(&karma_id)
             .bind(&job_id)
-            .bind(&topic)
+            .bind("Synthesized")
             .bind(&style_name)
-            .bind(&verdict.reasoning)
+            .bind(&verdict.lesson)
             .bind(weight)
             .bind(soul_hash)
             .execute(&mut *tx)

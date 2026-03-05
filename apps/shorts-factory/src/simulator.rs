@@ -157,15 +157,16 @@ async fn run_scenario(
     };
 
     info!("⚖️  Verdict:");
-    info!("   - Topic Score:  {:.2}", verdict.topic_score);
-    info!("   - Visual Score: {:.2}", verdict.visual_score);
-    info!("   - Soul Score:   {:.2}", verdict.soul_score);
-    info!("   - Reasoning:    {}", verdict.reasoning);
+    info!("   - Alignment Score: {:.2}", verdict.alignment_score);
+    info!("   - Growth Score:    {:.2}", verdict.growth_score);
+    info!("   - Should Evolve:   {}", verdict.should_evolve);
+    info!("   - Lesson:          {}", verdict.lesson);
+    info!("   - Reasoning:       {}", verdict.reasoning);
 
-    // Calculate simulated Karma Weight
-    let avg_engagement = (verdict.topic_score + verdict.visual_score) / 2.0;
-    let calculated_weight = (50.0 + (avg_engagement * verdict.soul_score * 50.0)) as i64;
-    let weight = calculated_weight.clamp(0, 100);
+    // Calculate simulated Karma Weight (match job_queue.rs logic)
+    let avg_score = (verdict.alignment_score + verdict.growth_score) / 2.0;
+    let weight = (avg_score * 100.0) as i64;
+    let weight = weight.clamp(0, 100);
 
     info!("🧬 Simulated Karma Weight: {} / 100", weight);
 

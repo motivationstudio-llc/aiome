@@ -293,13 +293,15 @@ impl KarmaDirectives {
 /// 大衆の反応（Engagement）と設計者の美学（Soul）を統合し、次世代への「業（Karma）」を導き出す。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OracleVerdict {
-    /// トピックや脚本のエンゲージメントスコア (-1.0 〜 1.0)
-    pub topic_score: f64,
-    /// 映像スタイルや演出のエンゲージメントスコア (-1.0 〜 1.0)
-    pub visual_score: f64,
-    /// Soul.md（美学）との適合度 (0.0 〜 1.0)
-    pub soul_score: f64,
-    /// 次元分解に基づく分析とインサイト
+    /// 魂の整合性 (0.0 〜 1.0)
+    pub alignment_score: f64,
+    /// 成長への寄与 (0.0 〜 1.0)
+    pub growth_score: f64,
+    /// 次回への教訓
+    pub lesson: String,
+    /// 自己進化を試行すべきか
+    pub should_evolve: bool,
+    /// 内部推論
     pub reasoning: String,
 }
 

@@ -17,14 +17,6 @@ use std::path::Path;
 use std::time::Duration;
 
 /// 音声合成アクター (Qwen3-TTS Client)
-///
-/// Qwen3-TTS の OpenAI互換 /v1/audio/speech エンドポイントにリクエストを送信し、
-/// 生成された音声（WAV）を Jail 内に保存する。
-///
-/// 【設計思想】
-/// テキストを句点（。）単位で分割し、各文を個別にTTS合成する。
-/// 合成された各音声ファイルを FFmpeg で結合し、文間に 0.15秒の無音を挿入する。
-/// TTS サーバー側で末尾トリミングを行い、ハルシネーション（余分な音声）を防止する。
 #[derive(Clone)]
 pub struct VoiceActor {
     server_url: String,
@@ -52,8 +44,7 @@ impl VoiceActor {
 
         // 1. 制御文字・絵文字の除去
         for c in text.chars() {
-            if c.is_control() && c != '
-' {
+            if c.is_control() && c != '\n' {
                 continue;
             }
             let cp = c as u32;
@@ -114,27 +105,19 @@ impl AgentAct for VoiceActor {
 
         let lang = input.lang.as_deref().unwrap_or("ja");
         
-        // 言語別ボイスマッピング (将来的に設定ファイル出しも検討)
         let voice = if !input.voice.is_empty() {
             input.voice.clone()
         } else {
             match lang {
-                "en" => "aiome_en".to_string(), // 英語用モデル
+                "en" => "aiome_en".to_string(), 
                 "ja" => self.default_voice.clone(),
                 _ => self.default_voice.clone(),
             }
         };
 
-        // 言語別デフォルトスピード
         let speed = input.speed.unwrap_or_else(|| Self::default_speed_for_lang(lang));
-
-        // Style-Bert-VITS2 特有のパラメータ
         let model_name = input.model_name.as_deref().unwrap_or(&voice);
         let style = input.style.as_deref().unwrap_or("Neutral");
-
-        // Style-Bert-VITS2 では 'length' が時間軸の倍率
-        // (1.1 = longer/slower, 0.9 = shorter/faster)
-        // input.speed は一般的に「倍速」(1.2 = faster) なので逆数をとる
         let length = 1.0 / speed;
 
         info!(
@@ -147,7 +130,6 @@ impl AgentAct for VoiceActor {
 
         let url = format!("{}/voice", self.server_url);
         
-        // Style-Bert-VITS2 は Query Parameter で全ての入力を受け取る実装が一般的
         let response = self.client.post(&url)
             .query(&[
                 ("text", &sanitized_text),

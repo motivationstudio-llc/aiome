@@ -410,13 +410,13 @@ pub async fn start_cron_scheduler(
                                         record.views,
                                         record.likes,
                                         comments_json,
-                                    ).await {
+                                     ).await {
                                         Ok(verdict) => {
                                             // Reset Global Circuit Breaker on success
                                             let _ = jq.record_global_api_success().await;
 
-                                            info!("⚖️ [Oracle] Verdict decided for Job {}: topic={:.2}, soul={:.2}", 
-                                                record.job_id, verdict.topic_score, verdict.soul_score);
+                                            info!("⚖️ [Oracle] Verdict decided for Job {}: alignment={:.2}, growth={:.2}", 
+                                                record.job_id, verdict.alignment_score, verdict.growth_score);
                                             
                                             // Commit the Phase 11 Idempotent Transaction
                                             if let Err(e) = jq.apply_final_verdict(record.id, verdict, &current_soul_hash).await {
