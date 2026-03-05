@@ -1,3 +1,13 @@
+/*
+ * Aiome - The Autonomous AI Operating System
+ * Copyright (C) 2026 motivationstudio,LLC
+ * 
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as
+ * published by the Free Software Foundation, either version 3 of the
+ * License, or (at your option) any later version.
+ */
+
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use tokio::process::Command;
@@ -84,7 +94,8 @@ impl SkillForge {
                 return Ok(final_path);
             } else {
                 let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-                error!("❌ [SkillForge] Compilation failed for {}:\n{}", skill_name, stderr);
+                error!("❌ [SkillForge] Compilation failed for {}:
+{}", skill_name, stderr);
                 
                 if attempt < retry_count {
                     warn!("🔄 [SkillForge] Requesting self-healing for {}...", skill_name);

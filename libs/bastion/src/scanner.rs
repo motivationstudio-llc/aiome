@@ -1,3 +1,13 @@
+/*
+ * Aiome - The Autonomous AI Operating System
+ * Copyright (C) 2026 motivationstudio,LLC
+ * 
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as
+ * published by the Free Software Foundation, either version 3 of the
+ * License, or (at your option) any later version.
+ */
+
 //! # Scanner - 脆弱性スキャンモジュール
 //!
 //! プロジェクトの脆弱性スキャン・シークレット検出を行う。
@@ -36,10 +46,12 @@ pub fn run_scan() -> Result<()> {
         }
     }
 
-    println!("{}", "\n[+] Starting Secret Scan...".yellow());
+    println!("{}", "
+[+] Starting Secret Scan...".yellow());
     scan_for_secrets(".")?;
 
-    println!("{}", "\n=== CHECK FINISHED ===".bold().cyan());
+    println!("{}", "
+=== CHECK FINISHED ===".bold().cyan());
     Ok(())
 }
 
@@ -70,7 +82,7 @@ fn run_python_checks() -> Result<()> {
 fn scan_for_secrets(dir: &str) -> Result<()> {
     // 改善されたシークレット検出用正規表現（誤検知を減らすために境界を意識）
     let re = Regex::new(
-        r#"(?i)\b(api_key|password|secret|token|private_key|access_key|auth_token)\b\s*[:=]\s*['""]([a-zA-Z0-9_\-]{12,})['""]"#,
+        r#"(?i)(api_key|password|secret|token|private_key|access_key|auth_token)\s*[:=]\s*['""]([a-zA-Z0-9_\-]{12,})['""]"#,
     ).unwrap();
 
     let walker = WalkDir::new(dir).into_iter();

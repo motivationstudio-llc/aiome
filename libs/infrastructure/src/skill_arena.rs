@@ -1,3 +1,13 @@
+/*
+ * Aiome - The Autonomous AI Operating System
+ * Copyright (C) 2026 motivationstudio,LLC
+ * 
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as
+ * published by the Free Software Foundation, either version 3 of the
+ * License, or (at your option) any later version.
+ */
+
 use factory_core::error::FactoryError;
 use factory_core::contracts::ArenaMatch;
 use factory_core::traits::JobQueue;
@@ -58,7 +68,13 @@ impl SkillArena {
 }";
 
         let judge_prompt = format!(
-            "input: {}\n\n--- OUTPUT A ({}): ---\n{}\n\n--- OUTPUT B ({}): ---\n{}", 
+            "input: {}
+
+--- OUTPUT A ({}): ---
+{}
+
+--- OUTPUT B ({}): ---
+{}", 
             input, skill_a, out_a, skill_b, out_b
         );
 

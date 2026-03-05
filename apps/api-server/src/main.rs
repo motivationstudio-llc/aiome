@@ -1,3 +1,13 @@
+/*
+ * Aiome - The Autonomous AI Operating System
+ * Copyright (C) 2026 motivationstudio,LLC
+ * 
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as
+ * published by the Free Software Foundation, either version 3 of the
+ * License, or (at your option) any later version.
+ */
+
 use axum::{
     extract::{Path, Query},
     routing::get,
@@ -53,9 +63,31 @@ async fn get_mock_codewiki_page(
     Query(params): Query<WikiQuery>
 ) -> impl IntoResponse {
     let content = match params.slug.as_str() {
-        "api-usage" => "# 🚀 API Usage Guide\n\nThis documentation is pulled directly from **CodeWiki**.\n\n## Authentication\nUse the `Bearer` token in the header...\n\n```bash\ncurl -H \"Authorization: Bearer $TOKEN\" http://localhost:3015/api/wiki\n```",
-        "philosophy" => "# 🧠 Antigravity Philosophy\n\n## 1. 「魔法」の可視化\nブラックボックス化を阻止し、構造を一発で図解します。\n\n## 2. コンテキストスイッチの削減\nエディタを離れずに仕様を確認。\n\n## 3. 嘘つきドキュメントの撲滅\nCIでの自動更新により、常に最新の状態を維持。\n\n## 4. オンボーディングコスト削減\n「3ヶ月前の自分は他人」という前提でドキュメントを整備します。",
-        _ => "# Not Found\nThe requested CodeWiki page could not be simulated.",
+        "api-usage" => "# 🚀 API Usage Guide
+
+This documentation is pulled directly from **CodeWiki**.
+
+## Authentication
+Use the `Bearer` token in the header...
+
+```bash
+curl -H \"Authorization: Bearer $TOKEN\" http://localhost:3015/api/wiki
+```",
+        "philosophy" => "# 🧠 Antigravity Philosophy
+
+## 1. 「魔法」の可視化
+ブラックボックス化を阻止し、構造を一発で図解します。
+
+## 2. コンテキストスイッチの削減
+エディタを離れずに仕様を確認。
+
+## 3. 嘘つきドキュメントの撲滅
+CIでの自動更新により、常に最新の状態を維持。
+
+## 4. オンボーディングコスト削減
+「3ヶ月前の自分は他人」という前提でドキュメントを整備します。",
+        _ => "# Not Found
+The requested CodeWiki page could not be simulated.",
     };
     content.into_response()
 }

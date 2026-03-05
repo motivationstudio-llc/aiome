@@ -1,3 +1,13 @@
+/*
+ * Aiome - The Autonomous AI Operating System
+ * Copyright (C) 2026 motivationstudio,LLC
+ * 
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as
+ * published by the Free Software Foundation, either version 3 of the
+ * License, or (at your option) any later version.
+ */
+
 //! # Python Check - 推奨ライブラリ検証モジュール
 //!
 //! Pythonプロジェクトの requirements.txt をチェックし、
@@ -17,7 +27,8 @@ const RECOMMENDED_PACKAGES: &[(&str, &str)] = &[
 /// requirements.txt を読み込み、推奨ライブラリの有無をチェックする
 pub fn check_secure_requirements(requirements_path: &str) -> Result<()> {
     println!(
-        "\n{}",
+        "
+{}",
         "[+] Checking recommended security packages...".yellow()
     );
 
@@ -42,7 +53,8 @@ pub fn check_secure_requirements(requirements_path: &str) -> Result<()> {
 
     if missing_count > 0 {
         println!(
-            "\n  {} Run '{}' to generate recommended requirements.",
+            "
+  {} Run '{}' to generate recommended requirements.",
             "TIP:".cyan().bold(),
             "bastion init python".bold()
         );

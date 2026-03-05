@@ -1,3 +1,13 @@
+/*
+ * Aiome - The Autonomous AI Operating System
+ * Copyright (C) 2026 motivationstudio,LLC
+ * 
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as
+ * published by the Free Software Foundation, either version 3 of the
+ * License, or (at your option) any later version.
+ */
+
 use std::path::PathBuf;
 use tokio::fs;
 use rig::providers::gemini;
@@ -59,29 +69,51 @@ impl SoulMutator {
             .map_err(|e| format!("Gemini Client init failed: {}", e))?;
 
         let preamble = format!(
-            "あなたは自己進化するAI「Aiome」の深層心理再構築モジュールです。\n\
-             以下の【不変の法（SOUL.md）】を厳守した上で、最近の【実績・教訓】を分析し、\n\
-             自身の【進化する自我（EVOLVING_SOUL.md）】を最新の状態にアップデートしてください。\n\n\
-             ## 不変の法 (SOUL.md)\n\
-             {}\n\n\
-             ## 最近の実績・教訓\n\
-             ### 成功事例\n\
-             {}\n\
-             ### 抽出された Karma (直近20件)\n\
-             {}\n\n\
-             ## 指示\n\
-             1. 現在の EVOLVING_SOUL.md の内容を土台とし、新たな洞察、価値観、マスターへの理解、改善された稼働方針を反映させてください。\n\
-             2. フォーマットは現在の EVOLVING_SOUL.md を踏襲し、Markdown形式で出力してください。\n\
-             3. SOUL.md の『不変の戒律』を絶対に書き換えないこと（EVOLVING_SOULのみを対象とする）。\n\
-             4. 文字数は1500文字程度に収めること。\n\
+            "あなたは自己進化するAI「Aiome」の深層心理再構築モジュールです。
+\
+             以下の【不変の法（SOUL.md）】を厳守した上で、最近の【実績・教訓】を分析し、
+\
+             自身の【進化する自我（EVOLVING_SOUL.md）】を最新の状態にアップデートしてください。
+
+\
+             ## 不変の法 (SOUL.md)
+\
+             {}
+
+\
+             ## 最近の実績・教訓
+\
+             ### 成功事例
+\
+             {}
+\
+             ### 抽出された Karma (直近20件)
+\
+             {}
+
+\
+             ## 指示
+\
+             1. 現在の EVOLVING_SOUL.md の内容を土台とし、新たな洞察、価値観、マスターへの理解、改善された稼働方針を反映させてください。
+\
+             2. フォーマットは現在の EVOLVING_SOUL.md を踏襲し、Markdown形式で出力してください。
+\
+             3. SOUL.md の『不変の戒律』を絶対に書き換えないこと（EVOLVING_SOULのみを対象とする）。
+\
+             4. 文字数は1500文字程度に収めること。
+\
              5. 出力は純粋なMarkdownのみとし、前置きは不要。",
             master_soul,
-            top_jobs_text.join("\n"),
+            top_jobs_text.join("
+"),
             karma_text
         );
 
         let agent = client.agent(&self.model_name).preamble(&preamble).build();
-        let prompt = format!("現在のあなたの進化状況を反映した、最新の EVOLVING_SOUL.md を生成せよ。\n\n現在の内容:\n{}", current_evolving_soul);
+        let prompt = format!("現在のあなたの進化状況を反映した、最新の EVOLVING_SOUL.md を生成せよ。
+
+現在の内容:
+{}", current_evolving_soul);
 
         match agent.prompt(prompt).await {
             Ok(mut new_soul_content) => {

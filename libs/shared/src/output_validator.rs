@@ -1,3 +1,13 @@
+/*
+ * Aiome - The Autonomous AI Operating System
+ * Copyright (C) 2026 motivationstudio,LLC
+ * 
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as
+ * published by the Free Software Foundation, either version 3 of the
+ * License, or (at your option) any later version.
+ */
+
 //! # OutputValidator — LLM 出力のバリデーション
 //!
 //! Guardrails が「入力側」を守るのに対し、OutputValidator は「出力側」を守る。
@@ -105,20 +115,34 @@ fn build_repair_prompt(invalid_json: &str, error: &str) -> String {
     let safe_json = invalid_json.replace("```", "'''");
     
     format!(
-        "あなたの前回の出力は JSON パースに失敗しました。以下の情報を元に、正しい JSON を再生成してください。\n\
-         \n\
-         ## エラー内容\n\
-         {}\n\
-         \n\
-         ## あなたの前回の出力（問題あり）\n\
-         ```json\n\
-         {}\n\
-         ```\n\
-         \n\
-         ## ルール\n\
-         - 必ず有効な JSON **のみ** を出力してください（説明文は不要）。\n\
-         - 数値フィールドに文字列を入れないでください。\n\
-         - 必須フィールドを省略しないでください。\n\
+        "あなたの前回の出力は JSON パースに失敗しました。以下の情報を元に、正しい JSON を再生成してください。
+\
+         
+\
+         ## エラー内容
+\
+         {}
+\
+         
+\
+         ## あなたの前回の出力（問題あり）
+\
+         ```json
+\
+         {}
+\
+         ```
+\
+         
+\
+         ## ルール
+\
+         - 必ず有効な JSON **のみ** を出力してください（説明文は不要）。
+\
+         - 数値フィールドに文字列を入れないでください。
+\
+         - 必須フィールドを省略しないでください。
+\
          - 配列が期待される場所にはオブジェクトを入れないでください。",
         error, safe_json
     )
@@ -152,7 +176,11 @@ mod tests {
 
     #[test]
     fn test_extracts_json_from_markdown() {
-        let input = "Here is the result:\n```json\n{\"name\": \"hello\", \"count\": 10}\n```\nDone!";
+        let input = "Here is the result:
+```json
+{\"name\": \"hello\", \"count\": 10}
+```
+Done!";
         match validate_json_output::<TestStruct>(input) {
             ValidationResult::Valid(v) => {
                 assert_eq!(v.name, "hello");

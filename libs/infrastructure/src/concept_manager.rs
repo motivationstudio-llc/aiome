@@ -1,3 +1,13 @@
+/*
+ * Aiome - The Autonomous AI Operating System
+ * Copyright (C) 2026 motivationstudio,LLC
+ * 
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as
+ * published by the Free Software Foundation, either version 3 of the
+ * License, or (at your option) any later version.
+ */
+
 use factory_core::contracts::{ConceptRequest, ConceptResponse};
 use factory_core::traits::AgentAct;
 use factory_core::error::FactoryError;
@@ -81,7 +91,11 @@ impl ConceptManager {
         );
 
         let concept_summary = format!(
-            "Title: {}\nIntro: {}\nBody: {}\nOutro: {}\nVisuals: {:?}",
+            "Title: {}
+Intro: {}
+Body: {}
+Outro: {}
+Visuals: {:?}",
             concept.title, concept.display_intro, concept.display_body, concept.display_outro, concept.visual_prompts
         );
 
@@ -246,19 +260,27 @@ impl ConceptManager {
         let agent = client.agent(&self.model).preamble(&preamble).temperature(0.7).build();
         let trend_list = input.trend_items.iter()
             .map(|i| format!("- {} (Score: {})", i.keyword, i.score))
-            .collect::<Vec<_>>().join("\n");
+            .collect::<Vec<_>>().join("
+");
         
         let karma_context = if input.relevant_karma.is_empty() {
             "No specific past lessons for this topic yet.".to_string()
         } else {
-            input.relevant_karma.iter().map(|k| format!("- {}", k)).collect::<Vec<_>>().join("\n")
+            input.relevant_karma.iter().map(|k| format!("- {}", k)).collect::<Vec<_>>().join("
+")
         };
 
         let retry_warning = if let Some(log) = &input.previous_attempt_log {
             format!(
-                "\n[CRITICAL: SELF-CORRECTION REQUIRED]\n\
-                Your previous attempt failed. Analyzed failure log:\n\
-                <failure_log>\n{}\n</failure_log>\n\
+                "
+[CRITICAL: SELF-CORRECTION REQUIRED]
+\
+                Your previous attempt failed. Analyzed failure log:
+\
+                <failure_log>
+{}
+</failure_log>
+\
                 Please identify what went wrong and ensure this new concept fixes those issues. \
                 Do NOT repeat the same mistakes.",
                 log
@@ -268,8 +290,15 @@ impl ConceptManager {
         };
 
         let user_prompt = format!(
-            "Current trends:\n{}\n\n\
-            [RELEVANT KARMA (PAST LESSONS)]\n{}\n{}\n\n\
+            "Current trends:
+{}
+
+\
+            [RELEVANT KARMA (PAST LESSONS)]
+{}
+{}
+
+\
             Select the most interesting topic and generate a top-tier video concept, strictly following the provided Karma.", 
             trend_list, karma_context, retry_warning
         );
@@ -311,7 +340,12 @@ impl ConceptManager {
 
         let agent = client.agent(&self.model).preamble(preamble).temperature(0.3).build();
         let user_prompt = format!(
-            "Title: {}\nIntro: {}\nBody: {}\nOutro: {}\n\nTranslate these into Japanese for the display_* and script_* fields.",
+            "Title: {}
+Intro: {}
+Body: {}
+Outro: {}
+
+Translate these into Japanese for the display_* and script_* fields.",
             en_concept.title, en_concept.display_intro, en_concept.display_body, en_concept.display_outro
         );
 
@@ -342,16 +376,22 @@ pub fn extract_json(text: &str) -> Result<String, FactoryError> {
     if let (Some(start), Some(end)) = (clean_text.find('{'), clean_text.rfind('}')) {
         let mut json_str = clean_text[start..=end].to_string();
         // Remove trailing commas before closing braces/brackets, which is a common LLM hallucination
-        json_str = json_str.replace(",\n}", "\n}").replace(",}", "}").replace(",\n]", "\n]").replace(",]", "]");
+        json_str = json_str.replace(",
+}", "
+}").replace(",}", "}").replace(",
+]", "
+]").replace(",]", "]");
         
         // 欠落したダブルクオートを修復する簡易的な処理 (LLMが先頭のクオートを忘れがち)
         // `"key": 値,` -> `"key": "値",`
         // ただし [ や { または " で始まるものは除外
-        let re_missing_both = regex::Regex::new(r#""([a-zA-Z_]+)"\s*:\s*([^"\[\{\s][^",\n]+)\s*,"#).unwrap();
+        let re_missing_both = regex::Regex::new(r#""([a-zA-Z_]+)"\s*:\s*([^"\[\{\s][^",
+]+)\s*,"#).unwrap();
         json_str = re_missing_both.replace_all(&json_str, "\"$1\": \"$2\",").to_string();
         
         // 先頭だけ忘れて末尾はある場合: `"key": 値",` -> `"key": "値",`
-        let re_missing_start = regex::Regex::new(r#""([a-zA-Z_]+)"\s*:\s*([^"\[\{\s][^"\n]+)","#).unwrap();
+        let re_missing_start = regex::Regex::new(r#""([a-zA-Z_]+)"\s*:\s*([^"\[\{\s][^"
+]+)","#).unwrap();
         json_str = re_missing_start.replace_all(&json_str, "\"$1\": \"$2\",").to_string();
 
         Ok(json_str)

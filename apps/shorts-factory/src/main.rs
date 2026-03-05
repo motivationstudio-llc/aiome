@@ -1,3 +1,13 @@
+/*
+ * Aiome - The Autonomous AI Operating System
+ * Copyright (C) 2026 motivationstudio,LLC
+ * 
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as
+ * published by the Free Software Foundation, either version 3 of the
+ * License, or (at your option) any later version.
+ */
+
 use shared::config::FactoryConfig;
 use shared::security::SecurityPolicy;
 use infrastructure::comfy_bridge::ComfyBridgeClient;
@@ -211,13 +221,19 @@ async fn main() -> Result<(), anyhow::Error> {
     let evolving_soul_path = cwd.join("EVOLVING_SOUL.md");
     let master_soul = std::fs::read_to_string(&soul_md_path).unwrap_or_else(|_| {
         warn!("⚠️ SOUL.md not found at {}. Using default soul.", soul_md_path.display());
-        "## Default Soul\n- Be creative.\n- Stay true to the mission.".to_string()
+        "## Default Soul
+- Be creative.
+- Stay true to the mission.".to_string()
     });
     let evolving_soul = std::fs::read_to_string(&evolving_soul_path).unwrap_or_else(|_| {
         info!("ℹ️ EVOLVING_SOUL.md not found. Starting with blank evolving soul.");
         String::new()
     });
-    let soul_md = format!("{}\n\n---\n# Evolving Soul (自律進化領域)\n{}", master_soul, evolving_soul);
+    let soul_md = format!("{}
+
+---
+# Evolving Soul (自律進化領域)
+{}", master_soul, evolving_soul);
 
     // 5.3 WASM Self-Evolution Infrastructure (SkillForge & WasmSkillManager)
     let skills_dir = cwd.join("workspace/skills");
@@ -464,7 +480,8 @@ async fn main() -> Result<(), anyhow::Error> {
                 res = orchestrator.execute(workflow_req, &jail) => {
                     match res {
                         Ok(res) => {
-                            println!("\n🎬 動画生成完了！");
+                            println!("
+🎬 動画生成完了！");
                             println!("   📝 タイトル: {}", res.concept.title);
                             println!("   🎨 スタイル: {}", res.concept.style_profile);
                             for v in res.output_videos {

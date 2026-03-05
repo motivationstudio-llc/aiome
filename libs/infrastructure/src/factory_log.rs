@@ -1,3 +1,13 @@
+/*
+ * Aiome - The Autonomous AI Operating System
+ * Copyright (C) 2026 motivationstudio,LLC
+ * 
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as
+ * published by the Free Software Foundation, either version 3 of the
+ * License, or (at your option) any later version.
+ */
+
 //! # FactoryLog — 実行ログ・監査証跡システム
 //!
 //! SQLite を使用して動画生成の履歴、エラー、およびセキュリティイベント（ブロック記録）を保存する。

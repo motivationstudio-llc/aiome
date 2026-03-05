@@ -1,3 +1,13 @@
+/*
+ * Aiome - The Autonomous AI Operating System
+ * Copyright (C) 2026 motivationstudio,LLC
+ * 
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as
+ * published by the Free Software Foundation, either version 3 of the
+ * License, or (at your option) any later version.
+ */
+
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{info, warn, error};
@@ -165,7 +175,9 @@ impl JobWorker {
                 
                 // Store success log for Distillation
                 let success_log = format!(
-                    "SUCCESS_LOG: {}\nVideos: {:?}\nConcept: {}", 
+                    "SUCCESS_LOG: {}
+Videos: {:?}
+Concept: {}", 
                     Utc::now().to_rfc3339(), 
                     res.output_videos,
                     res.concept.title
@@ -186,7 +198,8 @@ impl JobWorker {
                 error!("🚨 JobWorker: Job {} failed: {}", job_id, e);
                 
                 // ALWAYS record execution log on failure for Distillation
-                let error_detail = format!("FAILURE_LOG: {}\nError: {}", Utc::now().to_rfc3339(), e);
+                let error_detail = format!("FAILURE_LOG: {}
+Error: {}", Utc::now().to_rfc3339(), e);
                 let _ = self.job_queue.store_execution_log(&job_id, &error_detail).await;
 
                 // --- Honorable Abort & Internal Karma Backpropagation ---

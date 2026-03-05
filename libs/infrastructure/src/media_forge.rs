@@ -1,3 +1,13 @@
+/*
+ * Aiome - The Autonomous AI Operating System
+ * Copyright (C) 2026 motivationstudio,LLC
+ * 
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as
+ * published by the Free Software Foundation, either version 3 of the
+ * License, or (at your option) any later version.
+ */
+
 use async_trait::async_trait;
 use bastion::fs_guard::Jail;
 use factory_core::contracts::{MediaRequest, MediaResponse};
@@ -44,8 +54,8 @@ impl MediaEditor for MediaForgeClient {
         // 字幕の焼き込み (Hard-burn) - Grade S Design
         if let Some(sub) = subtitle {
             let sub_path = sub.to_string_lossy()
-                .replace("'", "'\\''")
-                .replace(":", "\\:");
+                .replace("'", "'\''")
+                .replace(":", "\:");
             
             // デフォルトスタイル。FontSize=18, MarginV=30 (M4 Pro & Libass coordinate system optimization)
             let default_style = "FontName=Hiragino Sans,FontSize=18,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=2.0,Shadow=1.0,Alignment=2,MarginV=30";
@@ -130,7 +140,8 @@ impl MediaEditor for MediaForgeClient {
 
         let mut concat_list = String::new();
         for clip in clips {
-            concat_list.push_str(&format!("file '{}'\n", clip));
+            concat_list.push_str(&format!("file '{}'
+", clip));
         }
 
         let list_path = self.jail.root().join("concat_list.txt");

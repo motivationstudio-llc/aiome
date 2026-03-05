@@ -1,3 +1,13 @@
+/*
+ * Aiome - The Autonomous AI Operating System
+ * Copyright (C) 2026 motivationstudio,LLC
+ * 
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as
+ * published by the Free Software Foundation, either version 3 of the
+ * License, or (at your option) any later version.
+ */
+
 //! # TrendSonar — トレンド収集ツール (Brave Search Integration)
 //!
 //! 定時でトレンドキーワードを取得する。
@@ -165,4 +175,3 @@ impl Tool for BraveTrendSonar {
         Ok(TrendOutput { trends })
     }
 }
-

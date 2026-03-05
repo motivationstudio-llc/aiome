@@ -1,3 +1,13 @@
+/*
+ * Aiome - The Autonomous AI Operating System
+ * Copyright (C) 2026 motivationstudio,LLC
+ * 
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as
+ * published by the Free Software Foundation, either version 3 of the
+ * License, or (at your option) any later version.
+ */
+
 use factory_core::error::FactoryError;
 use factory_core::contracts::ImmuneRule;
 use factory_core::traits::JobQueue;
@@ -26,7 +36,9 @@ impl AdaptiveImmuneSystem {
             return Ok(0);
         }
 
-        let logs_concat = recent_karma.join("\n---\n");
+        let logs_concat = recent_karma.join("
+---
+");
         
         let client = gemini::Client::new(&self.gemini_api_key)
             .map_err(|e| FactoryError::Infrastructure { reason: e.to_string() })?;

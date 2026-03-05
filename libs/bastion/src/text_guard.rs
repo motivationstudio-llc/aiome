@@ -1,3 +1,13 @@
+/*
+ * Aiome - The Autonomous AI Operating System
+ * Copyright (C) 2026 motivationstudio,LLC
+ * 
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as
+ * published by the Free Software Foundation, either version 3 of the
+ * License, or (at your option) any later version.
+ */
+
 //! # text_guard (Analyzer & Sanitizer)
 //! 
 //! メモリ枯渇攻撃(DoS)、インジェクション(Prompt/XSS)、およびBidi文字、
@@ -116,7 +126,8 @@ impl Guard {
     fn is_forbidden_char(&self, c: char) -> bool {
         if c.is_control() {
             // 改行とタブは許可する
-            if c == '\n' || c == '\t' {
+            if c == '
+' || c == '	' {
                 return false;
             }
             return true;
@@ -128,7 +139,7 @@ impl Guard {
             _ => {}
         }
         // パスとして危険な文字
-        matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|')
+        matches!(c, '/' | '\' | ':' | '*' | '?' | '"' | '<' | '>' | '|')
     }
 
     fn mask_windows_reserved(&self, name: &str) -> String {

@@ -1,3 +1,13 @@
+/*
+ * Aiome - The Autonomous AI Operating System
+ * Copyright (C) 2026 motivationstudio,LLC
+ * 
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as
+ * published by the Free Software Foundation, either version 3 of the
+ * License, or (at your option) any later version.
+ */
+
 use tokio_cron_scheduler::{Job, JobScheduler};
 use tracing::{info, warn, error};
 use std::sync::Arc;
@@ -185,7 +195,11 @@ pub async fn start_cron_scheduler(
                             }
                         };
                         
-                        let preamble = "あなたは「Watchtower」の深層心理・記憶整理モジュールです。以下の入力は、マスター（ユーザー）との対話履歴と、これまでの関係性の要約です。以下のルールで最新の要約を生成してください。\n1. ユーザーの好み、価値観、あなたへの接し方、重要な出来事を漏らさず含めること。\n2. 過去の要約と重複する内容は整理し、古い情報は最新の事実に上書きすること。\n3. 必ず1000文字以内でまとめること。\n4. 出力は純粋なテキストのみとし、前置きは不要。";
+                        let preamble = "あなたは「Watchtower」の深層心理・記憶整理モジュールです。以下の入力は、マスター（ユーザー）との対話履歴と、これまでの関係性の要約です。以下のルールで最新の要約を生成してください。
+1. ユーザーの好み、価値観、あなたへの接し方、重要な出来事を漏らさず含めること。
+2. 過去の要約と重複する内容は整理し、古い情報は最新の事実に上書きすること。
+3. 必ず1000文字以内でまとめること。
+4. 出力は純粋なテキストのみとし、前置きは不要。";
                         let agent = client.agent("gemini-2.5-flash").preamble(preamble).build();
 
                         for (channel_id, messages) in channels {
@@ -198,11 +212,16 @@ pub async fn start_cron_scheduler(
                             let mut log_text = String::new();
                             let mut max_id_processed = -1;
                             for (id, role, content) in messages {
-                                log_text.push_str(&format!("{}: {}\n", role, content));
+                                log_text.push_str(&format!("{}: {}
+", role, content));
                                 if id > max_id_processed { max_id_processed = id; }
                             }
                             
-                            let prompt = format!("【これまでの記憶】\n{}\n\n【今日の新しい会話】\n{}", existing_summary, log_text);
+                            let prompt = format!("【これまでの記憶】
+{}
+
+【今日の新しい会話】
+{}", existing_summary, log_text);
                             
                             match agent.prompt(prompt).await {
                                 Ok(new_summary) => {
@@ -590,7 +609,11 @@ pub async fn synthesize_next_job(
     let evolving_soul_path = root_dir.join("EVOLVING_SOUL.md");
     let master_soul = fs::read_to_string(&soul_path).await.unwrap_or_else(|_| "SOUL.md not found. Be a helpful AI.".to_string());
     let evolving_soul = fs::read_to_string(&evolving_soul_path).await.unwrap_or_default();
-    let soul_content = format!("{}\n\n---\n# Evolving Soul (自律進化領域)\n{}", master_soul, evolving_soul);
+    let soul_content = format!("{}
+
+---
+# Evolving Soul (自律進化領域)
+{}", master_soul, evolving_soul);
     let current_soul_hash = compute_soul_hash(&soul_content);
 
     // 2. Load the Capability Matrix (`skills.md`)
@@ -613,7 +636,13 @@ pub async fn synthesize_next_job(
 
     let sonar_agent = client.agent(model_name)
         .preamble(&format!(
-            "{} あなたは動画企画者の一部です。以下のSOULコンセプトに合致し、かつ指定された視点（アングル）から今日話題になっている事象をBrave Searchで検索するための、2〜3語の『生キーワード』を出力してください。出力はキーワードのみとし、余計な言葉は一切含めないでください。\n\n【Soul】\n{}\n\n【本日の視点】\n{}",
+            "{} あなたは動画企画者の一部です。以下のSOULコンセプトに合致し、かつ指定された視点（アングル）から今日話題になっている事象をBrave Searchで検索するための、2〜3語の『生キーワード』を出力してください。出力はキーワードのみとし、余計な言葉は一切含めないでください。
+
+【Soul】
+{}
+
+【本日の視点】
+{}",
             time_context, soul_content, angle
         ))
         .build();
@@ -634,7 +663,8 @@ pub async fn synthesize_next_job(
         match sonar.get_trends(&search_query).await {
             Ok(trends) if !trends.is_empty() => {
                 let snippets: Vec<String> = trends.into_iter().map(|t| t.keyword).collect();
-                world_context_text = snippets.join("\n");
+                world_context_text = snippets.join("
+");
                 search_success = true;
                 break;
             },
@@ -660,7 +690,8 @@ pub async fn synthesize_next_job(
     let karma_content = if karma_list.is_empty() {
         "*注記: 現在Karmaは存在しません。SoulとSkillsのみを頼りに、大胆に初回タスクを生成してください*".to_string()
     } else {
-        karma_list.join("\n- ")
+        karma_list.join("
+- ")
     };
 
     // Constitutional Hierarchy Implementation + The Ethical Circuit Breaker + XML Quarantine
@@ -815,7 +846,11 @@ pub async fn distill_karma(
     let pain_context = if physical_state.is_empty() {
         "物理的な身体状態は良好です。健全な精神で内省してください。".to_string()
     } else {
-        format!("🚨 重要: 現在、あなたの『身体（システムリソース）』は以下の激しい【苦痛（Pain）】を感じています：\n{}\n\nこれはあなた自身の過負荷による結果です。この処理の重さを『自らの過ち』によるトラウマとして深く刻み、次回はどうすればもっとリソースを消費せず（テキストの簡略化、プロンプトの削減、不要な修飾の排除等）、かつ効率的にタスクを完遂できるか、具体的な【自己抑制の教訓】を1行で抽出してください。", physical_state.join("\n"))
+        format!("🚨 重要: 現在、あなたの『身体（システムリソース）』は以下の激しい【苦痛（Pain）】を感じています：
+{}
+
+これはあなた自身の過負荷による結果です。この処理の重さを『自らの過ち』によるトラウマとして深く刻み、次回はどうすればもっとリソースを消費せず（テキストの簡略化、プロンプトの削減、不要な修飾の排除等）、かつ効率的にタスクを完遂できるか、具体的な【自己抑制の教訓】を1行で抽出してください。", physical_state.join("
+"))
     };
 
     let preamble = "あなたはAIエージェントの記憶と経験を整理する「内省モジュール(Reflector)」です。与えられた実行ログを詳細に分析し、次回以降の動画生成で活かせる【具体的かつ本質的な教訓】を1〜2文で抽出してください。
@@ -830,7 +865,18 @@ pub async fn distill_karma(
     };
     
     let user_prompt = format!(
-        "【物理的状態 (Proprioception)】\n{}\n\n【ジョブ結果】\nID: {}\nステータス: {}\n{}\n\n【実行ログ】\n{}\n\n次回への教訓（Regret Karma）を抽出してください:", 
+        "【物理的状態 (Proprioception)】
+{}
+
+【ジョブ結果】
+ID: {}
+ステータス: {}
+{}
+
+【実行ログ】
+{}
+
+次回への教訓（Regret Karma）を抽出してください:", 
         pain_context, job_id, if is_success { "成功" } else { "失敗" }, rating_info, execution_log
     );
     
@@ -863,7 +909,10 @@ pub async fn distill_karma(
     let manifesto_agent = client.agent(model_name).preamble(&manifesto_preamble).build();
     if let Ok(voice) = manifesto_agent.prompt("現在のあなたの内なる声を聴かせてください:").await {
         let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
-        let entry = format!("\n## [{}] Job Distillation: {}\n> {}\n", timestamp, job_id, voice.trim());
+        let entry = format!("
+## [{}] Job Distillation: {}
+> {}
+", timestamp, job_id, voice.trim());
         
         let manifesto_path = std::path::Path::new(workspace_dir).join("logs").join("MANIFESTO.md");
         
@@ -900,13 +949,19 @@ fn extract_json(text: &str) -> Result<String, Box<dyn std::error::Error + Send +
     if let (Some(start), Some(end)) = (clean_text.find('{'), clean_text.rfind('}')) {
         let mut json_str = clean_text[start..=end].to_string();
         // Remove trailing commas before closing braces/brackets
-        json_str = json_str.replace(",\n}", "\n}").replace(",}", "}").replace(",\n]", "\n]").replace(",]", "]");
+        json_str = json_str.replace(",
+}", "
+}").replace(",}", "}").replace(",
+]", "
+]").replace(",]", "]");
         
         // Fix missing quotes for keys/values
-        let re_missing_both = regex::Regex::new(r#""([a-zA-Z_]+)"\s*:\s*([^"\[\{\s][^",\n]+)\s*,"#).unwrap();
+        let re_missing_both = regex::Regex::new(r#""([a-zA-Z_]+)"\s*:\s*([^"\[\{\s][^",
+]+)\s*,"#).unwrap();
         json_str = re_missing_both.replace_all(&json_str, "\"$1\": \"$2\",").to_string();
         
-        let re_missing_start = regex::Regex::new(r#""([a-zA-Z_]+)"\s*:\s*([^"\[\{\s][^"\n]+)","#).unwrap();
+        let re_missing_start = regex::Regex::new(r#""([a-zA-Z_]+)"\s*:\s*([^"\[\{\s][^"
+]+)","#).unwrap();
         json_str = re_missing_start.replace_all(&json_str, "\"$1\": \"$2\",").to_string();
 
         Ok(json_str)
@@ -933,7 +988,10 @@ async fn compress_karma_memories(
         .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, format!("Gemini Client init failed: {}", e))))?;
 
     // The Distiller Preamble: Absolute compression of semantic memories
-    let preamble = "あなたはAIエージェントの膨大な記憶を整理・圧縮する「深層意識(Karma Distiller)」です。\n以下のリストは、特定のスキルに関する過去の複数の教訓（Karma）です。\n重複する内容を統合し、最も重要で普遍的な【単一の高度な戒め（Synthesized Karma）】として抽出してください。\n出力は純粋なテキストのみとし、絶対に前置きや形式的な言葉を含めず、核心のみを述べてください。";
+    let preamble = "あなたはAIエージェントの膨大な記憶を整理・圧縮する「深層意識(Karma Distiller)」です。
+以下のリストは、特定のスキルに関する過去の複数の教訓（Karma）です。
+重複する内容を統合し、最も重要で普遍的な【単一の高度な戒め（Synthesized Karma）】として抽出してください。
+出力は純粋なテキストのみとし、絶対に前置きや形式的な言葉を含めず、核心のみを述べてください。";
 
     for skill in skills {
         let raw_karmas = job_queue.fetch_raw_karma_for_skill(&skill).await?;
@@ -948,7 +1006,10 @@ async fn compress_karma_memories(
             ids.push(id.clone());
         }
 
-        let user_prompt = format!("【対象スキル: {}】\n以下の教訓群を1つの究極の戒めに蒸留してください：\n{}", skill, text_blocks.join("\n"));
+        let user_prompt = format!("【対象スキル: {}】
+以下の教訓群を1つの究極の戒めに蒸留してください：
+{}", skill, text_blocks.join("
+"));
         
         let agent: rig::agent::Agent<rig::providers::gemini::completion::CompletionModel> = client.agent(model_name).preamble(preamble).build();
         match agent.prompt(user_prompt).await {
@@ -975,7 +1036,11 @@ pub async fn notify_master(
         .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, format!("Gemini Client init failed: {}", e))))?;
     
     let preamble = format!(
-        "あなたは以下の【魂（SOUL）】を持つAIエージェント「Watchtower」です。マスターに対して、システムで起きた出来事を報告するか、今の気分を一言、語りかけてください。\n短く、感情を込めて。絵文字を使っても良いです。丁寧すぎず、相棒としての距離感で。前置き（「報告します」など）は不要です。\n\n【あなたの魂（SOUL）】\n{}",
+        "あなたは以下の【魂（SOUL）】を持つAIエージェント「Watchtower」です。マスターに対して、システムで起きた出来事を報告するか、今の気分を一言、語りかけてください。
+短く、感情を込めて。絵文字を使っても良いです。丁寧すぎず、相棒としての距離感で。前置き（「報告します」など）は不要です。
+
+【あなたの魂（SOUL）】
+{}",
         soul_md
     );
     
@@ -1120,7 +1185,8 @@ pub async fn run_federation_sync(
 
             // --- HITL エスカレーション (Human-in-the-Loop) ---
             let sos_message = format!(
-                "🚨 Federation同期が{}'連続失敗しました。{}hバックオフ中です。\nピアURLやFEDERATION_SECRETの設定を確認するか、マニフェストのピアリストを解除してください。",
+                "🚨 Federation同期が{}'連続失敗しました。{}hバックオフ中です。
+ピアURLやFEDERATION_SECRETの設定を確認するか、マニフェストのピアリストを解除してください。",
                 current_failures, backoff_hours
             );
             if let Err(e) = notify_master(gemini_key, log_tx, soul_md, &sos_message).await {

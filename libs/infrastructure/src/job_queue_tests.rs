@@ -1,3 +1,13 @@
+/*
+ * Aiome - The Autonomous AI Operating System
+ * Copyright (C) 2026 motivationstudio,LLC
+ * 
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as
+ * published by the Free Software Foundation, either version 3 of the
+ * License, or (at your option) any later version.
+ */
+
 //! # Job Queue Tests — The Immortal Proof
 //!
 //! ファイルベース一時 SQLite を使った `SqliteJobQueue` の完全テストスイート。
@@ -145,7 +155,9 @@ mod tests {
         let id = jq.enqueue("Log Test", "logged", Some("{}")).await.unwrap();
         let _ = jq.dequeue().await.unwrap();
 
-        jq.store_execution_log(&id, "Step 1: OK\nStep 2: Render\nStep 3: Done").await.unwrap();
+        jq.store_execution_log(&id, "Step 1: OK
+Step 2: Render
+Step 3: Done").await.unwrap();
     }
 
     #[tokio::test]

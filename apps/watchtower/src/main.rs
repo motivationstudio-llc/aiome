@@ -1,3 +1,13 @@
+/*
+ * Aiome - The Autonomous AI Operating System
+ * Copyright (C) 2026 motivationstudio,LLC
+ * 
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as
+ * published by the Free Software Foundation, either version 3 of the
+ * License, or (at your option) any later version.
+ */
+
 use poise::serenity_prelude as serenity;
 use tracing::{info, warn, error};
 use std::sync::Arc;
@@ -31,7 +41,11 @@ async fn status(ctx: PoiseContext<'_>) -> Result<(), Error> {
     match &*status_guard {
         Some(s) => {
             let msg = format!(
-                "🟢 **System Online**\nCPU: {:.1}%\nRAM: {}MB\nVRAM: {}MB\nJob: {:?}",
+                "🟢 **System Online**
+CPU: {:.1}%
+RAM: {}MB
+VRAM: {}MB
+Job: {:?}",
                 s.cpu_usage, s.memory_used_mb, s.vram_used_mb, s.active_job_id
             );
             ctx.say(msg).await?;
@@ -396,7 +410,8 @@ async fn main() -> anyhow::Result<()> {
                                     }
                                     CoreEvent::ApprovalRequest { transition_id, description } => {
                                         let msg = CreateMessage::new()
-                                            .content(format!("🚨 **Approval Required**\n{}", description))
+                                            .content(format!("🚨 **Approval Required**
+{}", description))
                                             .button(CreateButton::new(format!("approve_{}", transition_id)).label("✅ Approve").style(serenity::ButtonStyle::Success))
                                             .button(CreateButton::new(format!("reject_{}", transition_id)).label("❌ Reject").style(serenity::ButtonStyle::Danger));
                                         let _ = log_chan.send_message(&http, msg).await;
@@ -510,13 +525,17 @@ async fn main() -> anyhow::Result<()> {
 
 async fn flush_logs(buffer: &mut Vec<LogEntry>, channel: ChannelId, http: &Arc<serenity::Http>) {
     if buffer.is_empty() { return; }
-    let mut content = String::from("🗒️ **Core Logs**\n```\n");
+    let mut content = String::from("🗒️ **Core Logs**
+```
+");
     for log in buffer.drain(..) {
-        let line = format!("[{}] {}\n", log.level, log.message);
+        let line = format!("[{}] {}
+", log.level, log.message);
         if content.len() + line.len() > 1900 { // Discord limit
             content.push_str("```");
             let _ = channel.say(http, &content).await;
-            content = String::from("```\n");
+            content = String::from("```
+");
         }
         content.push_str(&line);
     }

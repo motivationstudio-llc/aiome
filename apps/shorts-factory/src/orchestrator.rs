@@ -1,3 +1,13 @@
+/*
+ * Aiome - The Autonomous AI Operating System
+ * Copyright (C) 2026 motivationstudio,LLC
+ * 
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as
+ * published by the Free Software Foundation, either version 3 of the
+ * License, or (at your option) any later version.
+ */
+
 use factory_core::contracts::{
     ConceptRequest, TrendRequest, TrendResponse,
     VideoRequest, MediaRequest, MediaResponse,
@@ -241,7 +251,11 @@ impl AgentAct for ProductionOrchestrator {
                         let s_duration = duration * ratio;
                         let start = format_srt_time(current_time + accumulated);
                         let end = format_srt_time(current_time + accumulated + s_duration);
-                        srt_content.push_str(&format!("{}\n{} --> {}\n{}\n\n", srt_index, start, end, sentence));
+                        srt_content.push_str(&format!("{}
+{} --> {}
+{}
+
+", srt_index, start, end, sentence));
                         srt_index += 1;
                         accumulated += s_duration;
                     }
@@ -328,7 +342,8 @@ fn split_into_sentences(text: &str) -> Vec<String> {
     let mut current = String::new();
     
     // 英語と日本語の両方の句切りに対応
-    let delimiters = ['。', '？', '！', '.', '?', '!', '\n'];
+    let delimiters = ['。', '？', '！', '.', '?', '!', '
+'];
     
     for c in text.chars() {
         current.push(c);
