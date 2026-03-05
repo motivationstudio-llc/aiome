@@ -62,16 +62,41 @@ libs/shared          ← 共通型, Guardrails (Open)
 
 ---
 
+## ✨ 主な機能・できること (Capabilities)
+
+Aiome を導入することで、以下のような自律型ワークフローを瞬時に構築できます。
+
+- 🧠 **完全自律思考 (Autonomous loop)**: ユーザーの指示なしで、24時間トレンドを監視し、企画から生成までを全自動化。
+- 🎬 **メディア生成エコシステム**: ComfyUI (画像・動画生成) や FFmpeg (音声・動画編集) とシームレスに連携。
+- 🗣️ **Discord 経由の対話インターフェース**: Watchtower と呼ばれる人格化された窓口を通じて、自然言語でシステムに指示・対話が可能。
+- 🛡️ **堅牢なエラー自己修復ルール**: 実行エラーや LLM のハルシネーションを検知し、自らサンドボックス内で構成を修正して再実行。
+
+---
+
+## 🧩 スキル・エコシステム (Extensibility)
+
+Aiome の真の力は、**WASM（WebAssembly）を利用した極めて高い拡張性**にあります。
+
+- **Safe Sandbox**: 追加機能（スキル）は隔離された WASM 環境で実行されるため、コアシステムの安全性を脅かしません。
+- **Auto-Forging**: AI 自身が必要な機能をその場でプログラミングし、自己実装・デプロイする「Skill Forge」機能（※Pro版/一部高度機能）を備えています。
+- **Community Shared**: 開発したカスタムスキルは、将来的に SAMSARA Hub を通じて他のノードと共有可能になります。
+
+---
+
 ## 🛠️ 技術スタック (Technical Stack)
 
-| コンポーネント | 技術 |
-|---|---|
-| 言語 | **Rust** (メモリ安全・ネイティブ速度) |
-| LLM | Qwen 2.5-Coder via **Ollama** |
-| Agent | rig-core v0.30 |
-| 生成AI | **ComfyUI** (Image/Video generation) |
-| メディア処理 | **FFmpeg** |
-| データベース | SQLite (Karma storage) |
+![Rust](https://img.shields.io/badge/rust-%23000000.svg?style=for-the-badge&logo=rust&logoColor=white)
+![SQLite](https://img.shields.io/badge/sqlite-%2307405e.svg?style=for-the-badge&logo=sqlite&logoColor=white)
+![Discord](https://img.shields.io/badge/Discord-%235865F2.svg?style=for-the-badge&logo=discord&logoColor=white)
+![FFmpeg](https://img.shields.io/badge/FFmpeg-%232B65EC.svg?style=for-the-badge&logo=ffmpeg&logoColor=white)
+
+| コンポーネント | 採用技術 | 役割 |
+|---|---|---|
+| **Core Engine** | Rust | 高速・メモリ安全なオーケストレータ |
+| **LLM Backend** | Ollama (Qwen, Mistral 等) | ローカル推論による思考回路 |
+| **Media Engine** | ComfyUI / FFmpeg | 画像・動画・音声の錬成 |
+| **Storage** | SQLite | 記憶（Karma）、設定の永続化 |
+| **Expansion** | WebAssembly (Wasm) | 安全でポータブルなスキル実行環境 |
 
 ---
 
@@ -102,25 +127,24 @@ Aiome Core 上で動作する具体的なアプリケーションです。
 ## 🚀 クイックスタート (Quick Start)
 
 ### 1. 準備 (Prerequisites)
-以下のコンポーネントがインストールされ、起動している必要があります：
-- **Ollama**: `ollama serve`
-- **ComfyUI**: Web UI が起動していること
+以下のバックエンドサービスが起動していることを確認してください：
+- **Ollama**: `ollama serve` (推奨モデル: `qwen2.5-coder`)
+- **ComfyUI**: Web UI (`http://localhost:8188`)
 
-### 2. セットアップ
+### 2. セットアップ・実行
 ```bash
+# 1. リポジトリのクローン
 git clone https://github.com/motivationstudio-llc/aiome
 cd aiome
-cp .env.example .env  # APIキー等の設定
-```
 
-### 3. 起動
-```bash
-# Aiome Core サーバーの起動
+# 2. 環境変数の設定 (APIキーなど)
+cp .env.example .env
+
+# 3. Aiome Core の起動 (Samsara Protocol)
 cargo run -p shorts-factory -- serve
-
-# Watchtower (Discord Bot) の起動
-cargo run -p watchtower
 ```
+
+> **Note**: Discord 連携（Watchtower）を使用する場合は、別ターミナルで `cargo run -p watchtower` を実行してください。
 
 #### 🔑 主な環境変数 (.env)
 - `DISCORD_TOKEN`: Watchtower 用。
