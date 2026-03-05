@@ -33,10 +33,12 @@ You acknowledge and agree that the Maintainer may distribute your contributions 
 You represent that:
 - You are the sole author of the contribution and have the legal right to grant these licenses.
 - If your employer has rights to intellectual property you create, you have received permission to make contributions on behalf of that employer or that your employer has waived such rights for your contributions.
+- **For Entity Contributions**: If you are contributing on behalf of a company or legal entity, you represent that you have the legal authority to bind that entity to this agreement.
 
 お客様は以下を表明するものとします：
 - お客様がその貢献の唯一の作者であり、これらのライセンスを付与する法的権利を有していること。
 - お客様の雇用主が作成した知的財産に対して権利を有している場合、その雇用主に代わって貢献を行う許可を得ているか、雇用主がその貢献に対する権利を放棄していること。
+- **法人としての貢献の場合**: お客様が企業や法人を代表して貢献を行う場合、その法人を本同意書に拘束する法的権限を有していることを表明するものとします。
 
 ### 4. No Support (サポートの無保証)
 

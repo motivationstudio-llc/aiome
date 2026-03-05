@@ -23,6 +23,22 @@ Examples of behavior that contributes to a positive environment for our communit
 - コミュニティにとって何が最善であるかへの集中
 - 他のメンバーに対する共感
 
+### Unacceptable Behavior (許容されない行動)
+
+Examples of unacceptable behavior by participants include:
+- The use of sexualized language or imagery, and sexual attention or advances of any kind
+- Trolling, insulting or derogatory comments, and personal or political attacks
+- Public or private harassment
+- Publishing others' private information, such as a physical or email address, without their explicit permission
+- Other conduct which could reasonably be considered inappropriate in a professional setting
+
+参加者による許容されない行動の例：
+- 性的な言葉や画像の使用、およびいかなる種類の性的な関心やアプローチ
+- トローリング（煽り行為）、侮辱的・中傷的なコメント、および個人的・政治的な攻撃
+- 公的・私的なハラスメント
+- 明示的な許可なく他人の住所やメールアドレスなどのプライベートな情報を公開すること
+- その他、専門的な場において不適切と合理的に判断される行為
+
 ---
 
 ### Enforcement (執行)

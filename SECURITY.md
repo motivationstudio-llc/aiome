@@ -34,7 +34,7 @@ We ask that you follow responsible disclosure principles:
 責任ある開示の原則に従うようお願いします：
 - Give us a reasonable amount of time to fix the issue before making it public. (公開前に修正のための合理的な時間を確保してください。)
 - Do not exploit the vulnerability beyond what is necessary to prove its existence. (脆弱性の証明に必要な範囲を超えて悪用しないでください。)
-- Do not access or modify data belonging to other users. (他のユーザーのデータにアクセスしたり改変したりしないでなくね。)
+- Do not access or modify data belonging to other users. (他のユーザーのデータにアクセスしたり改変したりしないでください。)
 
 ---
 For technical details on our security architecture, see [docs/SECURITY_DESIGN.md](docs/SECURITY_DESIGN.md).
