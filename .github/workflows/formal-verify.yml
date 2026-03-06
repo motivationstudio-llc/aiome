@@ -1,0 +1,37 @@
+name: Formal Verification
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Java
+      uses: actions/setup-java@v4
+      with:
+        java-version: '21'
+        distribution: 'temurin'
+        
+    - name: Enable extism support
+      run: |
+        curl -sL https://get.extism.org/cli | sh -s -- -b /usr/local/bin
+        extism lib install
+        
+    - name: Download TLC Tools
+      run: curl -L -o tla2tools.jar https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar
+      
+    - name: Run TLC Model Checker (AiomeQuarantineProtocol)
+      run: java -cp tla2tools.jar tlc2.TLC specs/AiomeQuarantineProtocol.tla -modelcheck -deadlock -workers auto -config specs/AiomeQuarantineProtocol.cfg
+      
+    - name: Ensure Rust Toolchain
+      uses: dtolnay/rust-toolchain@stable
+      
+    - name: Run Model-Based Tests (Quarantine Protocol)
+      run: cargo test -p infrastructure --test mbt_quarantine

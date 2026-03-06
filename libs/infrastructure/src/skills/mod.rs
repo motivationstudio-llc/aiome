@@ -33,7 +33,7 @@ pub struct VerifiedSkill {
 impl UnverifiedSkill {
     /// 契約プログラミングにより、検証を通過したものだけが型を昇格できる
     #[requires(self.input_test_payload.len() < 50_000, "Payload limits exceeded")]
-    #[ensures(ret.is_ok(), "Skill failed deterministic verification")]
+    // #[ensures] is removed here because verification failure (Err) is a valid, expected state machine outcome for malicious skills.
     pub async fn verify(self, manager: &WasmSkillManager) -> Result<VerifiedSkill, Box<dyn std::error::Error + Send + Sync>> {
         let is_safe = manager.dry_run_skill(&self.name, &self.input_test_payload).await?;
         if is_safe {
@@ -223,7 +223,11 @@ impl WasmSkillManager {
             return Err(format!("Skill {} not found for dry-run", skill_name).into());
         }
 
-        info!("🛡️  [Layer 3 Deterministic Tracer] Starting dry-run for skill: {}", skill_name);
+        let func_name = self.get_metadata(skill_name)
+            .and_then(|m| m.capabilities.first().cloned())
+            .unwrap_or_else(|| "execute".to_string());
+
+        info!("🛡️  [Layer 3 Deterministic Tracer] Starting dry-run for skill: {} (func: {})", skill_name, func_name);
 
         // 1. Simulation Plugin の新設 (Extism Manifest の極限制限)
         // ネットワークアクセス一切なし、WASIディスクアクセス制限 (一切バインドしない)
@@ -242,13 +246,14 @@ impl WasmSkillManager {
         // 2. 実行時検証 (シミュレーション実行)
         // OOMや非合法なSyscallが発生した場合はエラーとして返ってくる
         info!("⚡ [Layer 3 Deterministic Tracer] Simulating execution with deterministic constraints...");
-        let result = plugin.call::<&str, String>("execute", test_input);
+        let result = plugin.call::<&str, String>(&func_name, test_input);
         match result {
             Ok(_) => {
                 info!("✅ [Layer 3 Deterministic Tracer] Protocol behavior validated deterministically: {}", skill_name);
                 Ok(true)
             }
             Err(e) => {
+                println!("🚨 [Layer 3 Deterministic Tracer] Deterministic Violation Detected: {}", e);
                 error!("🚨 [Layer 3 Deterministic Tracer] Deterministic Violation Detected: {}", e);
                 // パニック／OOM／許可されていないWASIコールの時点でブロック
                 Ok(false)

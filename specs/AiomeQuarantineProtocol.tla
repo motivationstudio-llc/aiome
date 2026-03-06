@@ -74,6 +74,9 @@ Next ==
        \/ ExecuteActive(s)
 
 Spec == Init /\ [][Next]_vars
+           /\ \A s \in Skills : WF_vars(DownloadComplete(s))
+                             /\ WF_vars(CheckManifest(s))
+                             /\ WF_vars(DryRunSimulate(s))
 
 \* -------------------------------------------------------------------------
 \* Security Properties to be Verified by TLC Checker
@@ -84,5 +87,10 @@ Spec == Init /\ [][Next]_vars
 \* meaning it has bypassed the DryRun gate.
 SafetyInvariant == 
     \A s \in Skills : appState[s] = "Active" => manifestValid[s] = TRUE
+
+\* 2. Liveness Property
+\* Every skill must eventually reach either the "Active" or "Violated" state and stay there.
+Liveness == 
+    \A s \in Skills : <>[](appState[s] \in {"Active", "Violated"})
 
 =============================================================================
