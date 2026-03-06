@@ -15,3 +15,4 @@ bastion = { package = "bastion-core", git = "https://github.com/for4xex-droid/ba
 chrono = { workspace = true }
 reqwest = { workspace = true }
 secrecy = { workspace = true }
+contracts = "0.6.7"

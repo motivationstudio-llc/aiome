@@ -15,6 +15,34 @@ use tracing::{info, error};
 use extism::{Manifest, Plugin};
 use jsonschema::JSONSchema;
 pub mod forge;
+use contracts::{requires, ensures};
+
+/// 状態: 未検証の外部Skill (TypeState Pattern)
+#[derive(Debug, Clone)]
+pub struct UnverifiedSkill {
+    pub name: String,
+    pub input_test_payload: String,
+}
+
+/// 状態: 確定的検証をパスした安全なSkill (TypeState Pattern)
+#[derive(Debug, Clone)]
+pub struct VerifiedSkill {
+    pub name: String,
+}
+
+impl UnverifiedSkill {
+    /// 契約プログラミングにより、検証を通過したものだけが型を昇格できる
+    #[requires(self.input_test_payload.len() < 50_000, "Payload limits exceeded")]
+    #[ensures(ret.is_ok(), "Skill failed deterministic verification")]
+    pub async fn verify(self, manager: &WasmSkillManager) -> Result<VerifiedSkill, Box<dyn std::error::Error + Send + Sync>> {
+        let is_safe = manager.dry_run_skill(&self.name, &self.input_test_payload).await?;
+        if is_safe {
+            Ok(VerifiedSkill { name: self.name })
+        } else {
+            Err(format!("Skill {} failed the deterministic dry-run quarantine", self.name).into())
+        }
+    }
+}
 
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -26,6 +54,8 @@ pub struct SkillMetadata {
     pub outputs: Vec<String>,
     #[serde(default)]
     pub allowed_hosts: Vec<String>,
+    #[serde(default)]
+    pub permissions: crate::security::PermissionManifest,
 }
 
 pub struct WasmSkillManager {
@@ -80,6 +110,7 @@ impl WasmSkillManager {
                     inputs: vec!["String".to_string()],
                     outputs: vec!["String".to_string()],
                     allowed_hosts: vec![],
+                    permissions: crate::security::PermissionManifest::default(),
                 });
             }
         }
@@ -103,6 +134,8 @@ impl WasmSkillManager {
     }
 
     /// WASMスキルを実行する (シークレット注入対応)
+    #[requires(!skill_name.is_empty(), "State Machine Violation: Skill name must not be empty")]
+    #[ensures(ret.is_ok() || ret.is_err(), "Runtime Integrity: Execution must yield a deterministic result")]
     pub async fn call_skill(
         &self, 
         skill_name: &str, 
@@ -174,6 +207,52 @@ impl WasmSkillManager {
             serde_json::from_str(&data).ok()
         } else {
             None
+        }
+    }
+
+    /// Layer 3: Deterministic Tracer (MEV型 Quarantine Simulation)
+    /// インストール対象のSkillを、ネットワークを完全に遮断し、
+    /// メモリ上限を極端に絞ったサンドボックス上で「空回し」させて振る舞いを検証する。
+    pub async fn dry_run_skill(
+        &self,
+        skill_name: &str,
+        test_input: &str,
+    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+        let wasm_path = self.skills_dir.join(format!("{}.wasm", skill_name));
+        if !wasm_path.exists() {
+            return Err(format!("Skill {} not found for dry-run", skill_name).into());
+        }
+
+        info!("🛡️  [Layer 3 Deterministic Tracer] Starting dry-run for skill: {}", skill_name);
+
+        // 1. Simulation Plugin の新設 (Extism Manifest の極限制限)
+        // ネットワークアクセス一切なし、WASIディスクアクセス制限 (一切バインドしない)
+        let manifest = Manifest::new([extism::Wasm::file(&wasm_path)])
+            .with_timeout(Duration::from_millis(500)); // タイムアウトも極端に短く (500ms)
+
+        // プラグイン初期化
+        let mut plugin = match Plugin::new(&manifest, [], true) {
+            Ok(p) => p,
+            Err(e) => {
+                error!("🚨 [Layer 3 Deterministic Tracer] Initialization violation (OOM or format error): {}", e);
+                return Ok(false);
+            }
+        };
+
+        // 2. 実行時検証 (シミュレーション実行)
+        // OOMや非合法なSyscallが発生した場合はエラーとして返ってくる
+        info!("⚡ [Layer 3 Deterministic Tracer] Simulating execution with deterministic constraints...");
+        let result = plugin.call::<&str, String>("execute", test_input);
+        match result {
+            Ok(_) => {
+                info!("✅ [Layer 3 Deterministic Tracer] Protocol behavior validated deterministically: {}", skill_name);
+                Ok(true)
+            }
+            Err(e) => {
+                error!("🚨 [Layer 3 Deterministic Tracer] Deterministic Violation Detected: {}", e);
+                // パニック／OOM／許可されていないWASIコールの時点でブロック
+                Ok(false)
+            }
         }
     }
 

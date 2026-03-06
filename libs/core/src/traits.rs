@@ -318,6 +318,9 @@ pub trait AgentAct: Send + Sync {
     type Output: serde::Serialize + for<'de> serde::Deserialize<'de> + Send;
 
     /// 憲法第1条に従い、Jail ハンドルを必須とする実行メソッド
+    /// 
+    /// Runtime Verification (Design by Contract):
+    /// 実行前と実行後の状態遷移は実装側のSDK境界マクロで強制されます。
     async fn execute(
         &self,
         input: Self::Input,

@@ -48,6 +48,7 @@ dependencies = [
  "async-trait",
  "bastion-core",
  "chrono",
+ "contracts",
  "reqwest 0.12.28",
  "secrecy",
  "serde",
@@ -992,6 +993,17 @@ dependencies = [
  "getrandom 0.2.17",
  "once_cell",
  "tiny-keccak",
+]
+
+[[package]]
+name = "contracts"
+version = "0.6.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "008eb94d541da40512913ef5e0707c3fb0e7280ba1af13f062461e46dd96ef7e"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.116",
 ]
 
 [[package]]
@@ -3078,6 +3090,7 @@ dependencies = [
  "async-trait",
  "bastion-core",
  "chrono",
+ "contracts",
  "extism",
  "extism-convert",
  "filetime",

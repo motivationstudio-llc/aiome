@@ -96,6 +96,7 @@ impl SkillForge {
                     inputs: vec!["String".to_string()],
                     outputs: vec!["String".to_string()],
                     allowed_hosts: vec![],
+                    permissions: crate::security::PermissionManifest::default(),
                 };
                 let meta_json = serde_json::to_string_pretty(&meta)?;
                 fs::write(meta_path, meta_json)?;
