@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.1.0] - 2026-03-05
 
 ### Added
-- **Open-Core Strategy**: Initial release under AGPL-3.0 with dual-license foundation.
+- **Full OSS Strategy**: Pivoted from Open-Core to a Full Open Source foundation under the MIT License.
 - **Aiome Branding**: Applied new visual identity including "Abstract Eye" logo and "Lobster Pilot" mascot.
 - **Bilingual Documentation**: Established bilingual (EN/JP) versions for CLA, Code of Conduct, and Security Policy.
 - **Governance Setup**: Implemented License Grant style CLA to encourage community contributions while protecting commercial rights.

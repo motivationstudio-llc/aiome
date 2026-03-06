@@ -1,5 +1,5 @@
 [package]
-license = "AGPL-3.0-only"
+license = "MIT"
 name = "aiome-core"
 version = "0.1.0"
 edition = "2021"

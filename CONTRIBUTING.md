@@ -6,12 +6,12 @@ First of all, thank you for considering contributing! It's people like you that 
 
 ---
 
-## 🏗️ Our Open-Core Model (オープンコア・モデル)
+## 🏗️ Full Open Source Model (フルオープンソース・モデル)
 
-Aiome follows an **Open-Core** model:
-Aiomeは**オープンコア**モデルを採用しています：
-- **Aiome Core (OSS)**: Under AGPL-3.0. Includes the framework, Karma system, and basic Watchtower features. (基本フレームワーク、Karmaシステム、および基本的なWatchtower機能を含むOSS版)
-- **Aiome Pro/Enterprise**: Features for mass-scale GPU orchestration and advanced Skill Forge capabilities are proprietary. (大規模なGPUオーケストレーションや高度なSkill Forge機能を含む商用版)
+Aiome follows a **Full Open Source** model:
+Aiomeは**完全オープンソース**モデルを採用しています：
+- **Aiome Core (OSS)**: Under the MIT License. Includes the framework, Karma system, Abyss Vault, and basic Watchtower features. (基本フレームワーク、Karmaシステム、Abyss Vault、および基本的なWatchtower機能を含む完全版)
+- **Ecosystem**: Advanced features (like specialized models, premium WASM skills, or managed Samsara Hub operations) are offered as separate modules or services. (高度な特化型WASMスキルや、Samsara HubのSaaS運用などは、独立したモジュールやサービスとして提供されます)
 
 ---
 
@@ -73,7 +73,7 @@ We follow a strict **Modular Workspace** architecture.
 
 ## ⚖️ License & CLA (ライセンスとCLA)
 
-By contributing, you agree that your contributions will be licensed under **AGPL-3.0** and you agree to the terms of our **[CLA.md](./CLA.md)**.
+By contributing, you agree that your contributions will be licensed under the **MIT License** and you agree to the terms of our **[CLA.md](./CLA.md)**.
 
 ---
 *Happy coding!*

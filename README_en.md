@@ -12,30 +12,33 @@
   <em>Build AI that Learns, Defends, and Evolves — Autonomously.</em>
 </p>
 
-<p align="center">
-  <img src="https://img.shields.io/badge/License-AGPL--3.0-red.svg" alt="License: AGPL-3.0">
+  <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT">
   <img src="https://img.shields.io/badge/Rust-1.75%2B-orange.svg" alt="Rust 1.75+">
   <img src="https://img.shields.io/badge/PRs-Welcome-brightgreen.svg" alt="PRs Welcome">
 </p>
 
 ---
 
-## 🌌 What is Aiome? (Concept)
+## 🌌 What is Aiome? (Philosophy & Concept)
 
-Aiome is more than just a task execution tool. It is a **next-generation autonomous AI operating system** that accumulates "lessons" (Karma) with each execution, protects itself from threats (Immune System), shares intelligence with other nodes (Federation), and forms its own unique "personality" (SOUL).
+Aiome is more than just a task execution tool or an agentic framework.
 
-Complex content generation (e.g., automated reporting) is merely one of the "skills" (modules) running on top of this powerful OS.
+**From "Raw Autonomy" to "Disciplined Autonomy"**
+Entrusting your system entirely to a raw agent like OpenClaw might seem like the ultimate freedom, but it is a "fragile freedom"—prone to infinite loops, API key leaks, and sudden crashes. 
+Aiome's purpose is not to restrict an AI's freedom, but to provide the **strong discipline and immune system required to let an AI operate unattended for 30 days straight without destroying its host.**
 
 ### 🛡️ 4 Core Pillars
 
-1.  **Self-Evolution (Karma)**: A learning capability that accumulates both failures and successes in SQLite to ensure the same mistakes are not repeated.
-2.  **Self-Defense (Immune System)**: An immune system that detects malicious outputs or infinite loops and autonomously cuts off and repairs circuits.
+1.  **The Sandbox (Boundary & Defense)**: Rather than handing over a raw shell, Aiome forces execution through WASM containers and physically isolates API keys via the `mlockall`-protected Abyss Vault. It provides the absolute guarantee that "even if the agent goes rogue, the host survives and secrets cannot leak."
+2.  **The Immune System (Immutable Lessons)**: To prevent an agent from forgetting its mistakes, Aiome uses an immutable cryptographic hash chain (Karma) built on SQLite. It records exactly what tasks failed, creating a tampering-proof foundation for permanent evolution.
 3.  **Swarm Intelligence (Federation)**: Instantly synchronizes "lessons learned" across global Aiome nodes via the Samsara Hub.
 4.  **Personality (SOUL Architecture)**: An identity simulated through dialogue with the user, transforming the AI from a mere tool into a true "partner."
 
+If a raw agent is a "wild genius brain," Aiome is the "skull, nervous system, and immune system" that allows that brain to safely survive and evolve in the real world. This is our core value as an Operating System.
+
 ---
 
-## 🏗️ Architecture (Open-Core Strategy)
+## 🏗️ Architecture (Full OSS Foundation)
 
 <table align="right">
   <tr>
@@ -46,16 +49,16 @@ Complex content generation (e.g., automated reporting) is merely one of the "ski
   </tr>
 </table>
 
-This project adopts an **Open-Core Model** to foster a healthy ecosystem.
+Aiome is a **Full Open Source (OSS)** project. Enterprise-grade security (Abyss Vault) and self-evolution features are completely free and open to everyone.
 
-### 🟢 Aiome Core (OSS Version - AGPL-3.0)
-The foundational Karma scheme, Immune defense, Federation synchronization, and basic SOUL engine are provided as open source.
-
-### 🔴 Aiome Pro / Enterprise (Commercial License)
-Advanced parallel processing (GPU Cluster), the high-performance execution engine (Advanced Skill Forge), and managed Hub features for enterprises are provided under a commercial license.
+### 🟢 Business Model (How we sustain)
+We provide the OS for free and create value through the ecosystem running on top of it.
+- **Premium Modules (Capabilities)**: Specialized WASM skills for high-end tasks like financial data analysis or advanced video rendering.
+- **SAMSARA Hub (Managed Service)**: Managed, high-speed federated learning hubs hosted for enterprises.
+- **Enterprise Support**: SLAs and technical support for corporate deployments.
 
 ```text
-apps/aiome-daemon  ← Main Execution Daemon (OSS Demo)
+apps/command-center  ← Main Execution Hub (The Body)
       ↓
 libs/core          ← Domain Logic (Open)
       ↓
@@ -189,6 +192,6 @@ cargo run -p watchtower
 
 ## 🛡️ License
 
-**Aiome Core** is provided under **AGPL-3.0**. For commercial use, contact [motivationstudio,LLC](https://github.com/motivationstudio-llc/aiome).
+**Aiome Core** is provided under the **MIT License**. For enterprise support or custom integration consulting, please contact [motivationstudio,LLC](https://github.com/motivationstudio-llc/aiome).
 
 *Built by [motivationstudio,LLC](https://github.com/motivationstudio-llc) — Powering the Future of AI Autonomy.*

@@ -4,9 +4,9 @@
 Thank you for your interest in contributing to **Aiome**!
 **Aiome**への貢献にご興味を持っていただき、ありがとうございます！
 
-To protect the project and its users, we require all contributors to agree to this Contributor License Agreement. This ensures that the project can remain open-source under the AGPL-3.0 license while also allowing **motivationstudio,LLC** (the "Maintainer") to offer commercial editions (Aiome Pro/Enterprise) and support.
+To protect the project and its users, we require all contributors to agree to this Contributor License Agreement. This ensures that the project can remain open-source under the MIT License while also allowing **motivationstudio,LLC** (the "Maintainer") to offer commercial modules, managed services, and support.
 
-プロジェクトとその利用者を保護するため、すべてのコントリビューターの方にこのライセンス同意書（CLA）への同意をお願いしています。これにより、プロジェクトを AGPL-3.0 ライセンスの下でオープンソースとして維持しつつ、**motivationstudio,LLC**（以下「メンテナ」）が商用エディション（Aiome Pro/Enterprise）やサポートを提供することを可能にします。
+プロジェクトとその利用者を保護するため、すべてのコントリビューターの方にこのライセンス同意書（CLA）への同意をお願いしています。これにより、プロジェクトを MIT ライセンスの下でオープンソースとして維持しつつ、**motivationstudio,LLC**（以下「メンテナ」）が商用モジュールやマネージドサービス、サポートを提供することを可能にします。
 
 ---
 
@@ -24,9 +24,9 @@ You also grant to the Maintainer and to recipients of software distributed by th
 
 ### 2. Right to Relicense (再ライセンスの権利)
 
-You acknowledge and agree that the Maintainer may distribute your contributions under different license terms, including but not limited to open-source licenses (like AGPL-3.0) and proprietary or commercial licenses for enterprise editions.
+You acknowledge and agree that the Maintainer may distribute your contributions under different license terms, including but not limited to open-source licenses (like MIT) and proprietary or commercial licenses for premium ecosystem modules.
 
-お客様は、メンテナがお客様の貢献を、オープンソースライセンス（AGPL-3.0 など）やエンタープライズ版向けのプロプライエタリまたは商用ライセンスを含む（ただしこれらに限定されない）異なるライセンス条項の下で配布できることを認め、同意するものとします。
+お客様は、メンテナがお客様の貢献を、オープンソースライセンス（MIT など）やプレミアム・エコシステム・モジュール向けのプロプライエタリまたは商用ライセンスを含む（ただしこれらに限定されない）異なるライセンス条項の下で配布できることを認め、同意するものとします。
 
 ### 3. Representations (表明)
 

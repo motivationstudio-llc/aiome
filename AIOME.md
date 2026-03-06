@@ -1,4 +1,4 @@
-# Rust Enterprise Template (Golden Rule)
+# Aiome Production Template (Golden Rule)
 
 大規模開発に向けた、堅牢でスケーラブルなRustプロジェクト構成。
 

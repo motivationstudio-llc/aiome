@@ -200,7 +200,7 @@
                 </ul>
             </section>
             <section>
-                <h4>Cloud Documentation <span class="badge">Enterprise API</span></h4>
+                <h4>Cloud Documentation <span class="badge">Cloud API</span></h4>
                 <ul>
                     <li><a href="#" onclick="loadCloudDoc('api-usage')">🔌 API Usage</a></li>
                     <li><a href="#" onclick="loadCloudDoc('philosophy')">🛡️ Vision & Philosophy</a></li>
@@ -260,7 +260,7 @@
                 const response = await fetch(`/api/clouddoc/page?slug=${slug}`);
                 const text = await response.text();
                 setTimeout(() => {
-                    document.getElementById('status-tag').innerText = 'Live via Enterprise API';
+                    document.getElementById('status-tag').innerText = 'Live via Cloud API';
                     renderMarkdown(text);
                 }, 400); // Aesthetic delay
             } catch (e) {
