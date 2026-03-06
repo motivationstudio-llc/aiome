@@ -16,7 +16,7 @@
 #[cfg(test)]
 mod tests {
     use crate::job_queue::SqliteJobQueue;
-    use factory_core::traits::{JobQueue, JobStatus};
+    use aiome_core::traits::{JobQueue, JobStatus};
 
     /// テスト用のユニーク一時ファイル JobQueue を作成
     /// 各テストが独自のDBファイルを持ち、ロック競合を回避する
@@ -34,10 +34,10 @@ mod tests {
     async fn test_enqueue_dequeue() {
         let (jq, _tmp) = create_test_queue().await;
 
-        let id = jq.enqueue("AI Future", "cinematic", Some("{}")).await.unwrap();
+        let id = jq.enqueue("data_processing", "AI Future", "cinematic", Some("{}")).await.unwrap();
         assert!(!id.is_empty());
 
-        let job = jq.dequeue().await.unwrap();
+        let job = jq.dequeue(&["data_processing"]).await.unwrap();
         assert!(job.is_some());
         let job = job.unwrap();
         assert_eq!(job.id, id);
@@ -49,7 +49,7 @@ mod tests {
     #[tokio::test]
     async fn test_dequeue_empty() {
         let (jq, _tmp) = create_test_queue().await;
-        let job = jq.dequeue().await.unwrap();
+        let job = jq.dequeue(&["data_processing"]).await.unwrap();
         assert!(job.is_none());
     }
 
@@ -57,17 +57,17 @@ mod tests {
     async fn test_complete_and_fail() {
         let (jq, _tmp) = create_test_queue().await;
         
-        let id1 = jq.enqueue("Topic A", "style_a", Some("{}")).await.unwrap();
-        let id2 = jq.enqueue("Topic B", "style_b", Some("{}")).await.unwrap();
+        let id1 = jq.enqueue("data_processing", "Topic A", "style_a", Some("{}")).await.unwrap();
+        let id2 = jq.enqueue("data_processing", "Topic B", "style_b", Some("{}")).await.unwrap();
 
-        let _ = jq.dequeue().await.unwrap(); // id1 -> Processing
-        let _ = jq.dequeue().await.unwrap(); // id2 -> Processing
+        let _ = jq.dequeue(&["data_processing"]).await.unwrap(); // id1 -> Processing
+        let _ = jq.dequeue(&["data_processing"]).await.unwrap(); // id2 -> Processing
 
         jq.complete_job(&id1, None).await.unwrap();
         jq.fail_job(&id2, "Test failure reason").await.unwrap();
 
         // Verify no more Pending jobs
-        let next = jq.dequeue().await.unwrap();
+        let next = jq.dequeue(&["data_processing"]).await.unwrap();
         assert!(next.is_none());
     }
 
@@ -77,8 +77,8 @@ mod tests {
     async fn test_zombie_reclaim() {
         let (jq, _tmp) = create_test_queue().await;
 
-        let id = jq.enqueue("Zombie Topic", "dark", Some("{}")).await.unwrap();
-        let _ = jq.dequeue().await.unwrap(); // Processing
+        let id = jq.enqueue("data_processing", "Zombie Topic", "dark", Some("{}")).await.unwrap();
+        let _ = jq.dequeue(&["data_processing"]).await.unwrap(); // Processing
 
         // Manually set BOTH started_at and last_heartbeat to 20 minutes ago
         sqlx::query(
@@ -97,8 +97,8 @@ mod tests {
     async fn test_heartbeat_pulse() {
         let (jq, _tmp) = create_test_queue().await;
 
-        let id = jq.enqueue("Heartbeat Test", "pulse", Some("{}")).await.unwrap();
-        let _ = jq.dequeue().await.unwrap();
+        let id = jq.enqueue("data_processing", "Heartbeat Test", "pulse", Some("{}")).await.unwrap();
+        let _ = jq.dequeue(&["data_processing"]).await.unwrap();
 
         jq.heartbeat_pulse(&id).await.unwrap();
         // If heartbeat was just updated, zombie reclaim should NOT capture it
@@ -112,8 +112,8 @@ mod tests {
     async fn test_creative_rating_success() {
         let (jq, _tmp) = create_test_queue().await;
 
-        let id = jq.enqueue("Rating Test", "rated", Some("{}")).await.unwrap();
-        let _ = jq.dequeue().await.unwrap();
+        let id = jq.enqueue("data_processing", "Rating Test", "rated", Some("{}")).await.unwrap();
+        let _ = jq.dequeue(&["data_processing"]).await.unwrap();
         jq.complete_job(&id, None).await.unwrap();
 
         // Completed job should accept rating
@@ -124,8 +124,8 @@ mod tests {
     async fn test_creative_rating_guard_rejects_failed() {
         let (jq, _tmp) = create_test_queue().await;
 
-        let id = jq.enqueue("Guard Test", "guarded", Some("{}")).await.unwrap();
-        let _ = jq.dequeue().await.unwrap();
+        let id = jq.enqueue("data_processing", "Guard Test", "guarded", Some("{}")).await.unwrap();
+        let _ = jq.dequeue(&["data_processing"]).await.unwrap();
         jq.fail_job(&id, "intentional failure").await.unwrap();
 
         // Failed job should REJECT rating (Atomic Guard)
@@ -139,7 +139,7 @@ mod tests {
     async fn test_creative_rating_guard_rejects_pending() {
         let (jq, _tmp) = create_test_queue().await;
 
-        let id = jq.enqueue("Pending Test", "pending", Some("{}")).await.unwrap();
+        let id = jq.enqueue("data_processing", "Pending Test", "pending", Some("{}")).await.unwrap();
         // Don't dequeue — stays Pending
 
         let result = jq.set_creative_rating(&id, -1).await;
@@ -152,11 +152,11 @@ mod tests {
     async fn test_store_execution_log() {
         let (jq, _tmp) = create_test_queue().await;
 
-        let id = jq.enqueue("Log Test", "logged", Some("{}")).await.unwrap();
-        let _ = jq.dequeue().await.unwrap();
+        let id = jq.enqueue("data_processing", "Log Test", "logged", Some("{}")).await.unwrap();
+        let _ = jq.dequeue(&["data_processing"]).await.unwrap();
 
         jq.store_execution_log(&id, "Step 1: OK
-Step 2: Render
+Step 2: Process
 Step 3: Done").await.unwrap();
     }
 
@@ -164,8 +164,8 @@ Step 3: Done").await.unwrap();
     async fn test_fetch_undistilled() {
         let (jq, _tmp) = create_test_queue().await;
 
-        let id = jq.enqueue("Undistilled", "raw", Some("{}")).await.unwrap();
-        let _ = jq.dequeue().await.unwrap();
+        let id = jq.enqueue("data_processing", "Undistilled", "raw", Some("{}")).await.unwrap();
+        let _ = jq.dequeue(&["data_processing"]).await.unwrap();
         jq.store_execution_log(&id, "Some log output").await.unwrap();
         jq.complete_job(&id, None).await.unwrap();
 
@@ -178,8 +178,8 @@ Step 3: Done").await.unwrap();
     async fn test_mark_karma_extracted() {
         let (jq, _tmp) = create_test_queue().await;
 
-        let id = jq.enqueue("Extract Test", "extract", Some("{}")).await.unwrap();
-        let _ = jq.dequeue().await.unwrap();
+        let id = jq.enqueue("data_processing", "Extract Test", "extract", Some("{}")).await.unwrap();
+        let _ = jq.dequeue(&["data_processing"]).await.unwrap();
         jq.store_execution_log(&id, "log").await.unwrap();
         jq.complete_job(&id, None).await.unwrap();
 
@@ -195,13 +195,13 @@ Step 3: Done").await.unwrap();
     async fn test_store_and_fetch_karma() {
         let (jq, _tmp) = create_test_queue().await;
 
-        let id = jq.enqueue("Karma Test", "karma", Some("{}")).await.unwrap();
+        let id = jq.enqueue("data_processing", "Karma Test", "karma", Some("{}")).await.unwrap();
         let hash = "test_hash";
-        jq.store_karma(&id, "comfy_bridge", "Use CFG 7.5 for anime", "Technical", hash).await.unwrap();
+        jq.store_karma(&id, "generative_engine", "Use param X for high quality", "Technical", hash).await.unwrap();
 
-        let results = jq.fetch_relevant_karma("Karma Test", "comfy_bridge", 10, hash).await.unwrap();
+        let results = jq.fetch_relevant_karma("Karma Test", "generative_engine", 10, hash).await.unwrap();
         assert_eq!(results.len(), 1);
-        assert!(results[0].contains("CFG 7.5"));
+        assert!(results[0].contains("Use param X"));
     }
 
     // ===== 6. DB Scavenger =====
@@ -210,8 +210,8 @@ Step 3: Done").await.unwrap();
     async fn test_purge_old_jobs() {
         let (jq, _tmp) = create_test_queue().await;
 
-        let id = jq.enqueue("Old Job", "ancient", Some("{}")).await.unwrap();
-        let _ = jq.dequeue().await.unwrap();
+        let id = jq.enqueue("data_processing", "Old Job", "ancient", Some("{}")).await.unwrap();
+        let _ = jq.dequeue(&["data_processing"]).await.unwrap();
         jq.complete_job(&id, None).await.unwrap();
 
         // Manually age the job by 60 days
@@ -225,7 +225,7 @@ Step 3: Done").await.unwrap();
         assert_eq!(purged, 1);
 
         // Verify dequeue returns nothing
-        let next = jq.dequeue().await.unwrap();
+        let next = jq.dequeue(&["data_processing"]).await.unwrap();
         assert!(next.is_none());
     }
 
@@ -233,8 +233,8 @@ Step 3: Done").await.unwrap();
     async fn test_purge_spares_recent_jobs() {
         let (jq, _tmp) = create_test_queue().await;
 
-        let id = jq.enqueue("Fresh Job", "new", Some("{}")).await.unwrap();
-        let _ = jq.dequeue().await.unwrap();
+        let id = jq.enqueue("data_processing", "Fresh Job", "new", Some("{}")).await.unwrap();
+        let _ = jq.dequeue(&["data_processing"]).await.unwrap();
         jq.complete_job(&id, None).await.unwrap();
 
         // Don't age — should NOT be purged
@@ -249,7 +249,7 @@ Step 3: Done").await.unwrap();
         let (jq, _tmp) = create_test_queue().await;
 
         // Try to enqueue with invalid JSON — should be caught by CHECK(json_valid())
-        let result = jq.enqueue("Bad JSON", "broken", Some("NOT_VALID_JSON")).await;
+        let result = jq.enqueue("data_processing", "Bad JSON", "broken", Some("NOT_VALID_JSON")).await;
         assert!(result.is_err());
     }
 
@@ -261,15 +261,15 @@ Step 3: Done").await.unwrap();
         let jq = std::sync::Arc::new(jq);
 
         // Enqueue exactly 1 job
-        let _id = jq.enqueue("Race Condition", "race", Some("{}")).await.unwrap();
+        let _id = jq.enqueue("data_processing", "Race Condition", "race", Some("{}")).await.unwrap();
 
         // Two concurrent dequeues — only one should get the job
         let jq1 = jq.clone();
         let jq2 = jq.clone();
 
         let (r1, r2) = tokio::join!(
-            tokio::spawn(async move { jq1.dequeue().await }),
-            tokio::spawn(async move { jq2.dequeue().await }),
+            tokio::spawn(async move { jq1.dequeue(&["data_processing"]).await }),
+            tokio::spawn(async move { jq2.dequeue(&["data_processing"]).await }),
         );
 
         let got1 = r1.unwrap().map(|o| o.is_some()).unwrap_or(false);
@@ -313,7 +313,7 @@ Step 3: Done").await.unwrap();
     async fn test_soul_versioning_dissonance() {
         let (jq, _tmp) = create_test_queue().await;
         
-        let id = jq.enqueue("Soul Test", "soul_style", Some("{}")).await.unwrap();
+        let id = jq.enqueue("data_processing", "Soul Test", "soul_style", Some("{}")).await.unwrap();
         
         let soul_v1 = "hash_v1";
         let soul_v2 = "hash_v2";

@@ -10,8 +10,8 @@
 
 ### 1. 自己進化サイクル (Auto-Evolution Loop)
 
-1.  **意図解析 (Parse)**: `CommandCenter` (Gemini 2.0) がユーザーの要求を解析し、既存スキルで対応不能かつ「構築可能」な場合に `forge_skill` 判定を下す。
-2.  **設計と実装 (Forge)**: `SkillForge` が Gemini に対して、特定の PDK 制約と「鉄の掟」を遵守した Rust コードの生成を依頼する。
+1.  **意図解析 (Parse)**: `CommandCenter` (Oracle LLM) がユーザーの要求を解析し、既存スキルで対応不能かつ「構築可能」な場合に `forge_skill` 判定を下す。
+2.  **設計と実装 (Forge)**: `SkillForge` が Oracle LLM に対して、特定の PDK 制約と「鉄の掟」を遵守した Rust コードの生成を依頼する。
 3.  **隔離ビルド (Compile)**: 生成されたコードは `/tmp` 下の UUID フォルダで、最小限の依存関係を持つ `skill_generator` テンプレートを用いて `wasm32-wasip1` ターゲットでビルドされる。
 4.  **検証とデプロイ (Load)**: ビルドが成功すると、WASM ファイルは `workspace/skills/` に配置され、`WasmSkillManager` がこれをホットロードする。
 5.  **実行 (Execute)**: ロードされたスキルは WASI サンドボックス内で、秒単位のタイムアウトとメモリ制限、ネットワークホワイトリスト管理の下で実行される。
@@ -34,7 +34,7 @@
 4.  **ネットワーク制御**: `AllowedHosts` 設定により、意図したドメイン以外への通信を遮断。
 5.  **リソース上限**: メモリ使用量上限 (100MB) と実行時間上限 (10秒) を適用。
 6.  **機密情報隠蔽**: プラグインはホストの環境変数に直接触れることはできず、許可されたキーのみが WASM メモリへ注入される。
-7.  **出力バリデーション**: スキルの生出力は Gemini (Synthesis層) が必ず再解析し、不適切な情報をマスターに返さない。
+7.  **出力バリデーション**: スキルの生出力は Oracle LLM (Synthesis層) が必ず再解析し、不適切な情報をユーザーに返さない。
 
 ---
 
@@ -48,9 +48,9 @@
 ## 🛠️ トラブルシューティングと自己修復
 
 - **Compilation Error**: ビルド失敗時、`SkillForge` は最大 3 回まで、エラー内容を LLM にフィードバックしてコードの自動修正（Self-Healing）を試みる。
-- **Execution Fail**: 実行エラー（パニッ、タイムアウト）が発生した場合、Watchtower はマスターに対し、現在機能が不安定であることを可愛らしく報告し、次の鍛造サイクルでの修正を期す。
+- **Execution Fail**: 実行エラー（タイムアウト等）が発生した場合、Watchtower はユーザーに対し、現在機能が不安定であることを丁寧に報告し、次の鍛造サイクルでの修正を期す。
 
 ---
 
 更新日: 2026-03-03
-管理者: Antigravity / Watchtower Evolution Unit
+管理者: Aiome / Watchtower Evolution Unit

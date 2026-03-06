@@ -37,14 +37,14 @@ pub enum CoreEvent {
         result: String,
         topic: String,
         style: String,
-        thumbnail_url: Option<String>,
+        preview_url: Option<String>,
     },
     /// コアからの対話応答 (音声付き)
     ChatResponse { 
         response: String, 
         channel_id: u64,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        audio_path: Option<String> 
+        resource_path: Option<String> 
     },
     /// 自律的な話しかけ（プッシュ通知）
     ProactiveTalk { message: String, channel_id: u64 },
@@ -56,8 +56,8 @@ pub enum CoreEvent {
 pub struct AgentStats {
     pub level: i32,
     pub exp: i32,
-    pub affection: i32,
-    pub intimacy: i32,
+    pub resonance: i32,
+    pub creativity: i32,
     pub fatigue: i32,
 }
 
@@ -66,7 +66,7 @@ pub enum ControlCommand {
     GetStatus,
     /// 育成ステータス取得
     GetAgentStats,
-    /// 彼女（Aiome）との対話 (一般チャット)
+    /// Aiomeとの対話 (一般チャット)
     Chat { message: String, channel_id: u64 },
     /// システム操作用の対話 (コマンドチャネル)
     CommandChat { message: String, channel_id: u64 },
@@ -85,6 +85,6 @@ pub enum ControlCommand {
     LinkSns {
         job_id: String,
         platform: String,
-        video_id: String,
+        content_id: String,
     },
 }

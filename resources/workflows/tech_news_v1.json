@@ -44,7 +44,7 @@
     },
     "9": {
         "inputs": {
-            "filename_prefix": "factory_test",
+            "filename_prefix": "aiome_test",
             "images": [
                 "8",
                 0

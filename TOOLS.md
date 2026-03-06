@@ -25,10 +25,9 @@ Things like:
 
 - home-server → 192.168.1.100, user: admin
 
-### TTS
-
-- Preferred voice: "Nova" (warm, slightly British)
-- Default speaker: Kitchen HomePod
+### Synthesis
+- Preferred profile: "Clear" (for summaries)
+- Default endpoint: Primary Output
 ```
 
 ## Why Separate?

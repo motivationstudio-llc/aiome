@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ProjectSummary } from './Warehouse';
-import { Play, Zap, Activity } from 'lucide-react';
+import { Zap, Activity, Box } from 'lucide-react';
 import { clsx } from 'clsx';
 import { invoke } from '@tauri-apps/api/core';
 
@@ -91,7 +91,7 @@ export function RemixLab({ targetProject }: RemixLabProps) {
         if (!targetProject || !selectedStyle) return;
 
         setIsProcessing(true);
-        setLogs(prev => [`🚀 Sending Remix Request for ${targetProject.id}...`, ...prev]);
+        setLogs(prev => [`🚀 Sending Request for ${targetProject.id}...`, ...prev]);
 
         try {
             const data = await invoke<RemixResponse>('post_remix', {
@@ -118,8 +118,8 @@ export function RemixLab({ targetProject }: RemixLabProps) {
                 <div className="mb-4 p-4 rounded-full bg-gray-900 border border-gray-800">
                     <Activity size={48} />
                 </div>
-                <p>NO PROJECT SELECTED</p>
-                <p className="text-sm mt-2">Please select a project from the WAREHOUSE.</p>
+                <p>NO RESOURCE SELECTED</p>
+                <p className="text-sm mt-2">Please select a resource from the WAREHOUSE.</p>
             </div>
         );
     }
@@ -142,7 +142,7 @@ export function RemixLab({ targetProject }: RemixLabProps) {
                 )}
 
                 <div className="mb-8">
-                    <label className="text-xs font-mono text-gray-500 mb-2 block">TARGET PROJECT</label>
+                    <label className="text-xs font-mono text-gray-500 mb-2 block">TARGET RESOURCE</label>
                     <div className="p-4 bg-gray-900 border border-gray-700 rounded-lg text-gray-200 font-mono text-sm">
                         {targetProject.title}
                         <div className="text-xs text-sonar-green mt-1">{targetProject.id}</div>
@@ -150,7 +150,7 @@ export function RemixLab({ targetProject }: RemixLabProps) {
                 </div>
 
                 <div className="mb-8">
-                    <label className="text-xs font-mono text-gray-500 mb-2 block">VISUAL STYLE</label>
+                    <label className="text-xs font-mono text-gray-500 mb-2 block">TRANSFORMATION PROFILE</label>
                     <select
                         value={selectedStyle}
                         onChange={(e) => setSelectedStyle(e.target.value)}
@@ -182,7 +182,7 @@ export function RemixLab({ targetProject }: RemixLabProps) {
                             <span>SYSTEM LOCKED</span>
                         ) : (
                             <>
-                                <Play size={20} fill="currentColor" />
+                                <Box size={20} />
                                 EXECUTE REMIX
                             </>
                         )}
@@ -207,13 +207,12 @@ export function RemixLab({ targetProject }: RemixLabProps) {
 
                 <div className="flex-1 flex items-center justify-center">
                     <div className="w-full max-w-4xl aspect-video bg-black border border-gray-800 rounded-xl overflow-hidden shadow-2xl relative group">
-                        {targetProject.thumbnail_url ? (
-                            <video
+                        {targetProject.preview_url ? (
+                            <img
                                 key={timestamp}
-                                src={`http://localhost:3000/assets/${targetProject.id}/final.mp4?t=${timestamp}`}
+                                src={`http://localhost:3000/assets/${targetProject.id}/latest_output.dat?t=${timestamp}`}
                                 className="w-full h-full object-contain"
-                                controls
-                                autoPlay={false}
+                                alt="Result Artifact"
                             />
                         ) : (
                             <div className="flex items-center justify-center h-full text-gray-700">
@@ -224,7 +223,7 @@ export function RemixLab({ targetProject }: RemixLabProps) {
                         {isProcessing && (
                             <div className="absolute inset-0 bg-black/80 flex flex-col items-center justify-center backdrop-blur-sm z-10">
                                 <div className="w-16 h-16 border-4 border-sonar-green border-t-transparent rounded-full animate-spin mb-4"></div>
-                                <div className="text-sonar-green font-mono animate-pulse">RENDERING NEW VISUALS...</div>
+                                <div className="text-sonar-green font-mono animate-pulse">PROCESSING ARTIFACT...</div>
                             </div>
                         )}
                     </div>

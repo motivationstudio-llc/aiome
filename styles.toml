@@ -40,7 +40,7 @@ fade_duration = 4.0
 
 [fast_cuts]
 name = "fast_cuts"
-description = "TikTok/Shorts特化のハイペースな演出。強力なパンと早めのトランジション。"
+description = "高密度・ハイペースな演出。強力なパンと早めのトランジション。"
 zoom_speed = 0.005
 pan_intensity = 1.2
 bgm_volume = 0.22

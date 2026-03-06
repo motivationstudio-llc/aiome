@@ -8,29 +8,27 @@
  * License, or (at your option) any later version.
  */
 
-use factory_core::error::FactoryError;
-use factory_core::contracts::ImmuneRule;
-use factory_core::traits::JobQueue;
-use rig::providers::gemini;
-use rig::prelude::*;
-use rig::completion::Prompt;
+use aiome_core::error::AiomeError;
+use aiome_core::contracts::ImmuneRule;
+use aiome_core::traits::JobQueue;
+use aiome_core::llm_provider::LlmProvider;
+use std::sync::Arc;
 use tracing::{info, warn};
-use secrecy::ExposeSecret;
 use uuid::Uuid;
 use chrono::Utc;
 
 pub struct AdaptiveImmuneSystem {
-    gemini_api_key: secrecy::SecretString,
+    provider: Arc<dyn LlmProvider>,
 }
 
 impl AdaptiveImmuneSystem {
-    pub fn new(api_key: String) -> Self {
-        Self { gemini_api_key: secrecy::SecretString::new(api_key.into()) }
+    pub fn new(provider: Arc<dyn LlmProvider>) -> Self {
+        Self { provider }
     }
 
     /// 失敗ログやセキュリティインシデントを分析し、新しい免疫ルールを生成する
-    pub async fn analyze_threats(&self, jq: &impl JobQueue) -> Result<u32, FactoryError> {
-        info!("防御システム: 脅威分析を開始中...");
+    pub async fn analyze_threats(&self, jq: &impl JobQueue) -> Result<u32, AiomeError> {
+        info!("防御システム: 脅威分析を開始中 (using {})...", self.provider.name());
         
         let recent_karma = jq.fetch_relevant_karma("security threat injection error", "global", 10, "current").await?;
         if recent_karma.is_empty() {
@@ -38,19 +36,13 @@ impl AdaptiveImmuneSystem {
         }
 
         let logs_concat = recent_karma.join("\n---\n");
-        
-        let client = gemini::Client::new(self.gemini_api_key.expose_secret())
-            .map_err(|e| FactoryError::Infrastructure { reason: e.to_string() })?;
-            
-        let preamble = "あなたはシステムの自己防衛エンジンです。防御ルールを1つ作成してください。";
+        let preamble = "あなたはシステムの自己防衛エンジンです。以下のログから攻撃パターンを特定し、防御ルールを1つ JSON 形式で作成してください。\nFormat: {\"pattern\": \"攻撃的な単語や正規表現\", \"severity\": 0-100, \"action\": \"Block/Alert\"}";
 
-        let agent = client.agent("gemini-2.0-flash").preamble(preamble).build();
-        let response: String = agent.prompt(logs_concat).await
-            .map_err(|e| FactoryError::Infrastructure { reason: e.to_string() })?;
+        let response = self.provider.complete(&logs_concat, Some(preamble)).await?;
 
         let json_str = crate::concept_manager::extract_json(&response)?;
         let v: serde_json::Value = serde_json::from_str(json_str.as_str())
-            .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to parse immune rule JSON: {}", e) })?;
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to parse immune rule JSON: {}", e) })?;
 
         let rule = ImmuneRule {
             id: Uuid::new_v4().to_string(),
@@ -67,7 +59,7 @@ impl AdaptiveImmuneSystem {
     }
 
     /// 入力内容が既存の免疫ルールに抵触するか検証する
-    pub async fn verify_intent(&self, input: &str, jq: &impl JobQueue) -> Result<Option<ImmuneRule>, FactoryError> {
+    pub async fn verify_intent(&self, input: &str, jq: &impl JobQueue) -> Result<Option<ImmuneRule>, AiomeError> {
         let rules = jq.fetch_active_immune_rules().await?;
         for rule in rules {
             if input.to_lowercase().contains(&rule.pattern.to_lowercase()) {

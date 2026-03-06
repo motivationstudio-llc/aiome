@@ -15,9 +15,9 @@
 
 use thiserror::Error;
 
-/// ShortsFactory のドメインエラー
+/// Framework のドメインエラー
 #[derive(Debug, Error)]
-pub enum FactoryError {
+pub enum AiomeError {
     // === コンテキスト調査 (旧 トレンド調査) ===
     #[error("コンテキスト取得に失敗: {source}")]
     ContextFetch {

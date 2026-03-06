@@ -1,0 +1,25 @@
+[package]
+name = "key-proxy"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+tokio = { workspace = true }
+axum = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+reqwest = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+secrecy = { workspace = true }
+zeroize = { version = "1.7", features = ["derive"] }
+thiserror = { workspace = true }
+tower = { workspace = true }
+tower-http = { version = "0.5", features = ["full", "limit"] }
+nix = { workspace = true }
+dotenvy = "0.15"
+
+# Internal
+aiome-core = { path = "../../libs/core" }
+shared = { path = "../../libs/shared" }

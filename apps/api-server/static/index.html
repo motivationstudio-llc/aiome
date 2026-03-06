@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Antigravity | Dashboard</title>
+    <title>Aiome | Dashboard</title>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600&family=JetBrains+Mono&display=swap"
         rel="stylesheet">
@@ -187,7 +187,7 @@
 
 <body>
     <aside>
-        <div class="brand">🌌 Antigravity</div>
+        <div class="brand">🌌 Aiome</div>
         <nav>
             <section>
                 <h4>Core Documentation</h4>
@@ -195,15 +195,15 @@
                     <!-- Local Wikis -->
                 </ul>
                 <ul style="margin-top: 1rem; border-top: 1px solid var(--border-color); padding-top: 1rem;">
-                    <li><a href="#" onclick="loadLocalWiki('CODEWIKI_USAGE_GUIDE.md')">💡 Usage Guide</a></li>
+                    <li><a href="#" onclick="loadLocalWiki('DOCUMENTATION_USAGE_GUIDE.md')">💡 Usage Guide</a></li>
                     <li><a href="#" onclick="loadLocalWiki('SKILLS_MANUAL.md')">🧠 Skills Manual</a></li>
                 </ul>
             </section>
             <section>
-                <h4>CodeWiki (Cloud) <span class="badge">SDK API</span></h4>
+                <h4>Cloud Documentation <span class="badge">Enterprise API</span></h4>
                 <ul>
-                    <li><a href="#" onclick="loadCodeWiki('api-usage')">🔌 API Usage</a></li>
-                    <li><a href="#" onclick="loadCodeWiki('philosophy')">🛡️ Vision & Philosophy</a></li>
+                    <li><a href="#" onclick="loadCloudDoc('api-usage')">🔌 API Usage</a></li>
+                    <li><a href="#" onclick="loadCloudDoc('philosophy')">🛡️ Vision & Philosophy</a></li>
                 </ul>
             </section>
         </nav>
@@ -252,19 +252,19 @@
             }
         }
 
-        async function loadCodeWiki(slug) {
+        async function loadCloudDoc(slug) {
             updateActive(event?.target);
-            document.getElementById('view-title').innerText = 'CodeWiki Cloud';
+            document.getElementById('view-title').innerText = 'Cloud Documentation';
             document.getElementById('status-tag').innerText = 'Syncing...';
             try {
-                const response = await fetch(`/api/codewiki/page?slug=${slug}`);
+                const response = await fetch(`/api/clouddoc/page?slug=${slug}`);
                 const text = await response.text();
                 setTimeout(() => {
-                    document.getElementById('status-tag').innerText = 'Live via SDK';
+                    document.getElementById('status-tag').innerText = 'Live via Enterprise API';
                     renderMarkdown(text);
                 }, 400); // Aesthetic delay
             } catch (e) {
-                renderMarkdown("# Error\nFailed to fetch from CodeWiki Cloud.");
+                renderMarkdown("# Error\nFailed to fetch from Cloud Documentation.");
             }
         }
 
@@ -289,7 +289,7 @@
         // Init
         document.addEventListener('DOMContentLoaded', () => {
             fetchWikiList();
-            loadCodeWiki('philosophy');
+            loadCloudDoc('philosophy');
         });
     </script>
 </body>

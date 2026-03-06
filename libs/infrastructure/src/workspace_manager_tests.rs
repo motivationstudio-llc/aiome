@@ -26,12 +26,12 @@ mod tests {
         let tmp_dir = tempfile::TempDir::new().unwrap();
         let root = tmp_dir.path();
 
-        // ディレクトリ構造: root / a / b / target.mp4
+        // ディレクトリ構造: root / a / b / target.dat
         let dir_a = root.join("a");
         let dir_b = dir_a.join("b");
         fs::create_dir_all(&dir_b).await.unwrap();
 
-        let file_path = dir_b.join("target.mp4");
+        let file_path = dir_b.join("target.dat");
         fs::write(&file_path, "dummy").await.unwrap();
 
         // Modify file time to be 48 hours old
@@ -41,11 +41,11 @@ mod tests {
             filetime::FileTime::from_system_time(forty_eight_hours_ago),
         ).unwrap();
 
-        let allowed = [".mp4"];
+        let allowed = [".dat"];
         WorkspaceManager::cleanup_expired_files(root.to_str().unwrap(), 24, &allowed).await.unwrap();
 
-        // 期待: target.mp4 が消え、a/b が空になり消沈、a も空になり消沈
-        assert!(!file_path.exists(), "target.mp4 should be deleted");
+        // 期待: target.dat が消え、a/b が空になり消沈、a も空になり消沈
+        assert!(!file_path.exists(), "target.dat should be deleted");
         assert!(!dir_b.exists(), "dir_b should be pruned");
         assert!(!dir_a.exists(), "dir_a should be pruned");
         assert!(root.exists(), "root should survive"); // root は prune しない
@@ -56,9 +56,9 @@ mod tests {
         let tmp_dir = tempfile::TempDir::new().unwrap();
         let root = tmp_dir.path();
 
-        let target_ext = root.join("old.mp4");
+        let target_ext = root.join("old.dat");
         let safe_ext = root.join("important.txt");
-        let safe_time = root.join("new.mp4");
+        let safe_time = root.join("new.dat");
 
         fs::write(&target_ext, "dummy").await.unwrap();
         fs::write(&safe_ext, "don't delete me").await.unwrap();
@@ -69,12 +69,12 @@ mod tests {
         filetime::set_file_mtime(&target_ext, filetime::FileTime::from_system_time(forty_eight_hours_ago)).unwrap();
         filetime::set_file_mtime(&safe_ext, filetime::FileTime::from_system_time(forty_eight_hours_ago)).unwrap();
 
-        let allowed = [".mp4"];
+        let allowed = [".dat"];
         WorkspaceManager::cleanup_expired_files(root.to_str().unwrap(), 24, &allowed).await.unwrap();
 
-        assert!(!target_ext.exists(), "old.mp4 should be deleted");
+        assert!(!target_ext.exists(), "old.dat should be deleted");
         assert!(safe_ext.exists(), "important.txt should NOT be deleted (not in whitelist)");
-        assert!(safe_time.exists(), "new.mp4 should NOT be deleted (not expired)");
+        assert!(safe_time.exists(), "new.dat should NOT be deleted (not expired)");
     }
 
     #[tokio::test]
@@ -86,19 +86,19 @@ mod tests {
         fs::create_dir_all(&source_dir).await.unwrap();
         
         // 0 byte file - should fail
-        let empty_file = source_dir.join("empty.mp4");
+        let empty_file = source_dir.join("empty.dat");
         fs::write(&empty_file, "").await.unwrap();
         let result = WorkspaceManager::deliver_output("job1", &empty_file, export_dir.to_str().unwrap()).await;
         assert!(result.is_err(), "Should reject 0 byte files");
 
         // Valid file
-        let valid_file = source_dir.join("valid.mp4");
+        let valid_file = source_dir.join("valid.dat");
         fs::write(&valid_file, "data").await.unwrap();
         
         let dest_path = WorkspaceManager::deliver_output("job2", &valid_file, export_dir.to_str().unwrap()).await.unwrap();
         
         assert!(!valid_file.exists(), "Source should be removed");
         assert!(dest_path.exists(), "Destination should exist");
-        assert!(dest_path.file_name().unwrap().to_str().unwrap().contains("_job2_valid.mp4"));
+        assert!(dest_path.file_name().unwrap().to_str().unwrap().contains("_job2_valid.dat"));
     }
 }

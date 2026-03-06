@@ -1,16 +1,13 @@
 [workspace]
 members = [
     "apps/api-server",
-    "apps/shorts-factory",
     "apps/watchtower",
     "apps/command-center/src-tauri",
     "apps/samsara-hub",
     "libs/core",
     "libs/infrastructure",
     "libs/shared",
-    "libs/tuning",
-    "libs/bastion",
-    "libs/sidecar", "workspace/skill_generator",
+    "libs/sidecar", "workspace/skill_generator", "apps/aiome-daemon", "apps/key-proxy",
 ]
 resolver = "2"
 

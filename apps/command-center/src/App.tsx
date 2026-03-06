@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Warehouse, ProjectSummary } from "./components/Warehouse";
 import { RemixLab } from "./components/RemixLab";
-import { FactoryLine } from "./components/FactoryLine";
+import { AiomeLine } from "./components/AiomeLine";
 import { JobDashboard } from "./components/JobDashboard";
 import { KarmaViewer } from "./components/KarmaViewer";
 import { LayoutDashboard, Library, Settings2, Clock, Database } from "lucide-react";
@@ -57,7 +57,7 @@ function App() {
       <main className="flex-1 relative">
         <div className="absolute inset-0 bg-[url('/grid.svg')] opacity-5 pointer-events-none"></div>
 
-        {activeTab === 'monitor' && <FactoryLine />}
+        {activeTab === 'monitor' && <AiomeLine />}
 
         {activeTab === 'jobs' && <JobDashboard />}
 

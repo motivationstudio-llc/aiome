@@ -10,7 +10,7 @@
 
 //! # ZombieKiller — 外部プロセスのタイムアウト管理
 //!
-//! ComfyUI や FFmpeg などの外部プロセスが無限にハングすることを防ぐ。
+//! 外部プロセスが無限にハングすることを防ぐ。
 //! 全ての外部呼び出しに「冷徹な損切りロジック」を強制する。
 
 use std::process::Output;
@@ -69,7 +69,7 @@ impl std::error::Error for ProcessError {}
 /// タイムアウト付きで外部プロセスを実行する
 ///
 /// # Arguments
-/// * `program` - 実行するプログラム名 (例: "ffmpeg", "curl")
+/// * `program` - 実行するプログラム名 (例: "curl", "python")
 /// * `args` - コマンドライン引数
 /// * `timeout` - タイムアウト時間
 ///
@@ -155,7 +155,7 @@ pub async fn run_with_timeout(
 
 /// HTTP リクエスト用のタイムアウト付きクライアントを生成
 ///
-/// ComfyUI API 等への通信に使用する。
+/// 外部API等への通信に使用する。
 pub fn http_client_with_timeout(timeout: Duration) -> Result<reqwest::Client, reqwest::Error> {
     reqwest::Client::builder()
         .timeout(timeout)

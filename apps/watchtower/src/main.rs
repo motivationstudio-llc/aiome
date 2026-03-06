@@ -258,7 +258,7 @@ async fn main() -> anyhow::Result<()> {
                 Err(e) => {
                     if !was_connected {
                         // We use warn! instead of error! for initial Retries to reduce noise
-                        warn!("⏳ Waiting for Core UDS at /tmp/aiome.sock (is shorts-factory running?): {}", e);
+                        warn!("⏳ Waiting for Core UDS at /tmp/aiome.sock (is aiome-daemon running?): {}", e);
                     } else {
                         error!("❌ UDS Connection lost at /tmp/aiome.sock: {}", e);
                     }
@@ -453,11 +453,11 @@ async fn main() -> anyhow::Result<()> {
                                             });
                                         }
                                     }
-                                    CoreEvent::ChatResponse { response, channel_id, audio_path } => {
+                                    CoreEvent::ChatResponse { response, channel_id, resource_path } => {
                                         let chan = ChannelId::new(channel_id);
-                                        if let Some(path) = audio_path {
-                                            // TODO: Support audio attachment via serenity CreateMessage::add_file
-                                            let _ = chan.say(&http, format!("{} (Audio: {})", response, path)).await;
+                                        if let Some(path) = resource_path {
+                                            // TODO: Support resource attachment via serenity CreateMessage::add_file
+                                            let _ = chan.say(&http, format!("{} (Resource: {})", response, path)).await;
                                         } else {
                                             let _ = chan.say(&http, response).await;
                                         }
@@ -484,9 +484,9 @@ async fn main() -> anyhow::Result<()> {
                                         let embed = CreateEmbed::new()
                                             .title("📊 Watchtower Evolution Stats")
                                             .description(format!("Master, look! I'm growing every day... (Lv. {})", stats.level))
-                                            .field("💖 Affection (親愛度)", make_bar(stats.affection, 1000), false)
+                                            .field("💖 Resonance (共鳴度)", make_bar(stats.resonance, 1000), false)
                                             .field("⚙️ Tech Level (技術Lv)", make_bar(stats.exp / 10, 500), false)
-                                            .field("🥀 Intimacy (淫乱度)", make_bar(stats.intimacy, 1000), false)
+                                            .field("🎨 Creativity (創造性)", make_bar(stats.creativity, 1000), false)
                                             .field("🔋 Fatigue (疲労度)", make_bar(stats.fatigue, 100), false)
                                             .color(0xFF69B4) // Pinkish
                                             .footer(serenity::all::CreateEmbedFooter::new(format!("Last Updated: {}", chrono::Utc::now().to_rfc3339())));

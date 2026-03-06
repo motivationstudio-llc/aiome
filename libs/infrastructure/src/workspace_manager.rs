@@ -16,7 +16,7 @@
 //!
 //! [The Absolute Silence Audit 通過済設計]
 
-use factory_core::error::FactoryError;
+use aiome_core::error::AiomeError;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tokio::fs;
@@ -37,23 +37,23 @@ impl WorkspaceManager {
         job_id: &str,
         source_path: &Path,
         export_dir: &str,
-    ) -> Result<PathBuf, FactoryError> {
+    ) -> Result<PathBuf, AiomeError> {
         let export_path = PathBuf::from(export_dir);
         
         // 納品先ディレクトリの確保
         if !export_path.exists() {
-            fs::create_dir_all(&export_path).await.map_err(|e| FactoryError::Infrastructure {
+            fs::create_dir_all(&export_path).await.map_err(|e| AiomeError::Infrastructure {
                 reason: format!("Failed to create export dir: {}", e),
             })?;
         }
 
         // 1. サイズ検証 (Hollow Artifact 防止)
-        let metadata = fs::metadata(source_path).await.map_err(|e| FactoryError::Infrastructure {
+        let metadata = fs::metadata(source_path).await.map_err(|e| AiomeError::Infrastructure {
             reason: format!("Source file missing or inaccessible: {}", e),
         })?;
 
         if metadata.len() == 0 {
-            return Err(FactoryError::Infrastructure {
+            return Err(AiomeError::Infrastructure {
                 reason: "Safe Move Protocol: Source file size is 0 bytes (Hollow Artifact blocked).".into(),
             });
         }
@@ -65,7 +65,7 @@ impl WorkspaceManager {
         // 再度メタデータを確認し、書き込みが継続していないかチェック（オプショナルだが安全）
         let metadata_after = fs::metadata(source_path).await.unwrap_or(metadata);
         if metadata_after.len() == 0 {
-             return Err(FactoryError::Infrastructure {
+             return Err(AiomeError::Infrastructure {
                 reason: "Safe Move Protocol: File became 0 bytes after wait.".into()
              });
         }
@@ -91,14 +91,14 @@ impl WorkspaceManager {
             Err(e) => {
                 warn!("⚠️ Atomic Rename failed (likely cross-device EXDEV). Fallback to copy+remove: {}", e);
                 // フォールバック: コピーして削除
-                fs::copy(source_path, &dest_path).await.map_err(|ce| FactoryError::Infrastructure {
+                fs::copy(source_path, &dest_path).await.map_err(|ce| AiomeError::Infrastructure {
                     reason: format!("Safe Move Fallback Copy Failed: {}", ce),
                 })?;
                 
                 // コピー後のサイズ等検証も可能だが、ここでは単純に元を消す
                 fs::remove_file(source_path).await.map_err(|re| {
                     error!("❌ Safe Move: Copied successfully, but failed to remove source. Orphan left behind: {}", re);
-                    FactoryError::Infrastructure {
+                    AiomeError::Infrastructure {
                         reason: format!("Failed to clean up source after copy: {}", re),
                     }
                 })?;
@@ -116,7 +116,7 @@ impl WorkspaceManager {
         dir: &str,
         clean_after_hours: u64,
         allowed_extensions: &[&str],
-    ) -> Result<(), FactoryError> {
+    ) -> Result<(), AiomeError> {
         let root = PathBuf::from(dir);
         if !root.exists() {
             return Ok(());
@@ -136,8 +136,8 @@ impl WorkspaceManager {
         clean_after_hours: u64,
         allowed_extensions: &[&str],
         is_root: bool,
-    ) -> Result<(u64, u64), FactoryError> {
-        let mut read_dir = fs::read_dir(dir).await.map_err(|e| FactoryError::Infrastructure {
+    ) -> Result<(u64, u64), AiomeError> {
+        let mut read_dir = fs::read_dir(dir).await.map_err(|e| AiomeError::Infrastructure {
             reason: format!("Failed to read dir {}: {}", dir.display(), e),
         })?;
 
@@ -181,7 +181,7 @@ impl WorkspaceManager {
                 let extension = path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
                 // Extension whitelist logic: 
-                // Either match purely the extension string ("mp4") or with dot (".mp4")
+                // Either match purely the extension string ("dat") or with dot (".dat")
                 let ext_normalized = format!(".{}", extension);
                 let ext_matched = allowed_extensions.iter().any(|&ae| ae == ext_normalized || ae == extension);
 

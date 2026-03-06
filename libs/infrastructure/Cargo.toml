@@ -5,8 +5,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-factory_core = { path = "../core", package = "factory-core" }
-tuning = { path = "../tuning" }
+aiome_core = { path = "../core", package = "aiome-core" }
+# tuning = { path = "../tuning" } (Moved to commercial repo)
 shared = { path = "../shared" }
 sqlx = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
@@ -16,13 +16,9 @@ anyhow = { workspace = true }
 tracing = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-rig-core = { workspace = true }
 schemars = { workspace = true }
 uuid = { version = "1.0", features = ["v4"] }
-bastion = { path = "../bastion", features = ["net", "fs"] }
-tokio-tungstenite = "0.28.0"
-rand = "0.10.0"
-futures-util = "0.3.32"
+bastion = { package = "bastion-core", git = "https://github.com/for4xex-droid/bastion.git", branch = "main", features = ["net", "fs"] }
 chrono.workspace = true
 regex = "1.12.3"
 async-recursion = "1.1.1"

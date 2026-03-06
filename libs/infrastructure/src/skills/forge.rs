@@ -35,6 +35,16 @@ impl SkillForge {
         retry_count: u32,
         description: &str,
     ) -> Result<PathBuf, Box<dyn std::error::Error + Send + Sync>> {
+        // Security Gate: Ensure forge is enabled
+        let enabled = std::env::var("SKILL_FORGE_ENABLED")
+            .map(|v| v.to_lowercase() == "true")
+            .unwrap_or(false);
+        
+        if !enabled {
+            error!("🛑 [SkillForge] Forging is BLOCKED. Set SKILL_FORGE_ENABLED=true to allow.");
+            return Err("Security Violation: Real-time skill forging is disabled in this environment.".into());
+        }
+
         let temp_dir = std::env::temp_dir().join(format!("skill_forge_{}_{}", skill_name, uuid::Uuid::new_v4()));
         fs::create_dir_all(&temp_dir)?;
 

@@ -10,7 +10,7 @@
 
 //! # Cleaner — ストレージ清掃と監視
 //!
-//! 動画生成過程で発生する一時ファイルや ComfyUI のキャッシュを自動清掃する。
+//! タスク実行過程で発生する一時ファイルやキャッシュを自動清掃する。
 //! また、ディスク残量を監視し、パンク前に安全に停止（安全弁）する機能を提供する。
 
 use std::path::{Path, PathBuf};
@@ -110,7 +110,7 @@ mod tests {
 
     #[test]
     fn test_cleanup_files() {
-        let temp_dir = std::env::temp_dir().join("shorts_factory_test_cleanup");
+        let temp_dir = std::env::temp_dir().join("aiome_core_test_cleanup");
         fs::create_dir_all(&temp_dir).unwrap();
         
         let file_path = temp_dir.join("temp_file.txt");

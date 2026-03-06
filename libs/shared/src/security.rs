@@ -33,7 +33,7 @@ impl SecurityPolicy {
     /// 
     /// デフォルトでは以下を許可：
     /// - Localhost (127.0.0.1)
-    /// - ComfyUI (8188)
+    /// - Test Node (8188)
     /// - Ollama (11434)
     pub fn default_production() -> Self {
         let shield = ShieldClient::builder()
@@ -48,10 +48,10 @@ impl SecurityPolicy {
         Self {
             network_shield: shield,
             allowed_tools: vec![
-                "comfy_bridge".to_string(),
-                "media_forge".to_string(),
+                "test_skill".to_string(),
+                "task_processor".to_string(),
                 "trend_sonar".to_string(),
-                "factory_log".to_string(),
+                "aiome_log".to_string(),
             ],
         }
     }
@@ -113,9 +113,9 @@ mod tests {
     fn test_default_policy_allows_registered_tools() {
         let policy = SecurityPolicy::default();
         assert!(policy.validate_tool("trend_sonar").is_ok());
-        assert!(policy.validate_tool("comfy_bridge").is_ok());
-        assert!(policy.validate_tool("media_forge").is_ok());
-        assert!(policy.validate_tool("factory_log").is_ok());
+        assert!(policy.validate_tool("test_skill").is_ok());
+        assert!(policy.validate_tool("task_processor").is_ok());
+        assert!(policy.validate_tool("aiome_log").is_ok());
     }
 
     #[test]
@@ -145,8 +145,8 @@ mod tests {
     #[test]
     fn test_register_new_tool() {
         let mut policy = SecurityPolicy::default();
-        assert!(policy.validate_tool("tiktok_uploader").is_err());
-        policy.register_tool("tiktok_uploader");
-        assert!(policy.validate_tool("tiktok_uploader").is_ok());
+        assert!(policy.validate_tool("external_api_client").is_err());
+        policy.register_tool("external_api_client");
+        assert!(policy.validate_tool("external_api_client").is_ok());
     }
 }

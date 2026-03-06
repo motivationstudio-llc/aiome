@@ -8,8 +8,9 @@
  * License, or (at your option) any later version.
  */
 
-pub mod cleaner;
 pub mod config;
+pub mod cleaner;
+
 pub mod guardrails;
 pub mod os_utils;
 pub mod output_validator;

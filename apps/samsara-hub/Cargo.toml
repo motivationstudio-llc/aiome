@@ -18,7 +18,7 @@ anyhow = "1.0"
 secrecy = { workspace = true }
 sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "sqlite", "chrono", "uuid"] }
 reqwest = { version = "0.12", features = ["json"] }
-factory-core = { path = "../../libs/core" }
+aiome-core = { path = "../../libs/core" }
 shared = { path = "../../libs/shared" }
 infrastructure = { path = "../../libs/infrastructure" }
 # Ensure tracing-subscriber has json for production logs

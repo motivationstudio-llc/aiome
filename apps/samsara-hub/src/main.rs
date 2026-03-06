@@ -18,7 +18,7 @@ use axum::{
 };
 use std::sync::Arc;
 use sqlx::SqlitePool;
-use factory_core::contracts::{FederationSyncRequest, FederationSyncResponse, FederationPushRequest, FederationPushResponse, FederatedKarma, ImmuneRule};
+use aiome_core::contracts::{FederationSyncRequest, FederationSyncResponse, FederationPushRequest, FederationPushResponse, FederatedKarma, ImmuneRule};
 use tracing::{info, warn, error};
 use tower_http::cors::CorsLayer;
 use secrecy::ExposeSecret;

@@ -18,13 +18,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Skill Arena**: Automated A/B testing framework for evaluating LLM prompts and styles.
 - **Oracle**: Multi-model consensus system for scoring and validating generated media.
 - **Resilience**: Jitter, Circuit Breaker, and HITL (Human-in-the-Loop) for federation sync and API calls.
-- **Watchtower (Discord)**: Persona-driven interaction with rich stats (Affection, Tech Lv) and evolution tracking.
+- **Watchtower (Discord)**: Persona-driven interaction with rich stats (Resonance, Tech Lv) and evolution tracking.
 - **Safety**: Structured JSON logging, `cargo audit` integration, and `cargo deny` license auditing.
 - **Self-Healing**: Automated memory distillation, DB scavenging, and karma pruning.
 
 ### Changed
 - Migrated federation endpoints to versioned API (`/api/v1/`).
-- Enhanced `shorts-factory` structured logging for enterprise observability.
+- Enhanced `aiome-daemon` structured logging for observability.
 
 ---
 [0.1.0]: https://github.com/motivationstudio-llc/aiome/releases/tag/v0.1.0

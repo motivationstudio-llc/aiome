@@ -36,7 +36,7 @@ async fn main() {
         // API routes
         .route("/api/wiki", get(list_wiki_files))
         .route("/api/wiki/:filename", get(get_wiki_content))
-        .route("/api/codewiki/page", get(get_mock_codewiki_page))
+        .route("/api/clouddoc/page", get(get_mock_clouddoc_page))
         .route("/api/health", get(get_health_status))
         .with_state(health_monitor)
         // Static files
@@ -44,11 +44,13 @@ async fn main() {
         .layer(CorsLayer::permissive());
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 3015));
-    tracing::info!("🌌 Antigravity Management Console listening on {}", addr);
+    tracing::info!("🌌 Aiome Management Console listening on {}", addr);
     
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
 }
+
+
 
 #[derive(Deserialize)]
 struct WikiQuery {
@@ -56,16 +58,16 @@ struct WikiQuery {
     slug: String,
 }
 
-/// Simulated CodeWiki SDK Logic
-/// In a real scenario, this would call the Google CodeWiki API
-async fn get_mock_codewiki_page(
+/// Simulated Wiki SDK Logic
+/// In a real scenario, this would call an External Documentation Provider
+async fn get_mock_clouddoc_page(
     _state: axum::extract::State<Arc<Mutex<HealthMonitor>>>,
     Query(params): Query<WikiQuery>
 ) -> impl IntoResponse {
     let content = match params.slug.as_str() {
         "api-usage" => "# 🚀 API Usage Guide
 
-This documentation is pulled directly from **CodeWiki**.
+This documentation is pulled directly from **CloudDoc**.
 
 ## Authentication
 Use the `Bearer` token in the header...
@@ -73,7 +75,7 @@ Use the `Bearer` token in the header...
 ```bash
 curl -H \"Authorization: Bearer $TOKEN\" http://localhost:3015/api/wiki
 ```",
-        "philosophy" => "# 🧠 Antigravity Philosophy
+        "philosophy" => "# 🧠 Aiome Philosophy
 
 ## 1. 「魔法」の可視化
 ブラックボックス化を阻止し、構造を一発で図解します。
@@ -87,7 +89,7 @@ CIでの自動更新により、常に最新の状態を維持。
 ## 4. オンボーディングコスト削減
 「3ヶ月前の自分は他人」という前提でドキュメントを整備します。",
         _ => "# Not Found
-The requested CodeWiki page could not be simulated.",
+The requested CloudDoc page could not be simulated.",
     };
     content.into_response()
 }
@@ -105,8 +107,8 @@ async fn list_wiki_files(_state: axum::extract::State<Arc<Mutex<HealthMonitor>>>
     }
     // Sort to keep CODE_WIKI at top
     files.sort_by(|a, b| {
-        if a == "CODE_WIKI.md" { std::cmp::Ordering::Less }
-        else if b == "CODE_WIKI.md" { std::cmp::Ordering::Greater }
+        if a == "CLOUD_DOCUMENTATION.md" { std::cmp::Ordering::Less }
+        else if b == "CLOUD_DOCUMENTATION.md" { std::cmp::Ordering::Greater }
         else { a.cmp(b) }
     });
     Json(files)

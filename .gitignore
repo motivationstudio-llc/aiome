@@ -16,6 +16,6 @@
 *.db-shm
 *.db-wal
 *.log
-factory.log
+aiome.log
 watchtower.log
 test.wav

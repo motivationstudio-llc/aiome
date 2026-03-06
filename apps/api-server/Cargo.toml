@@ -5,7 +5,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-factory_core = { path = "../../libs/core", package = "factory-core" }
+aiome_core = { path = "../../libs/core", package = "aiome-core" }
 infrastructure = { path = "../../libs/infrastructure" }
 shared = { path = "../../libs/shared" }
 tokio = { workspace = true }

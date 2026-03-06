@@ -16,7 +16,7 @@ sysinfo.workspace = true
 tracing = { workspace = true }
 nix = { workspace = true }
 tokio-util = { workspace = true }
-bastion = { path = "../bastion", features = ["fs", "net"] }
+bastion = { package = "bastion-core", git = "https://github.com/for4xex-droid/bastion.git", branch = "main", features = ["fs", "net"] }
 anyhow = { workspace = true }
 config = { workspace = true }
 unicode-normalization = { workspace = true }

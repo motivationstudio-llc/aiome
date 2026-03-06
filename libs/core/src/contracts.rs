@@ -116,7 +116,7 @@ pub struct ConceptResponse {
     pub metadata: std::collections::HashMap<String, String>,
 }
 
-// --- Generative Engine クラスター (旧 Video) ---
+// --- Generative Engine クラスター (旧 Media) ---
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GenerativeRequest {
@@ -131,12 +131,12 @@ pub struct ArtifactResponse {
     pub job_id: String,
 }
 
-// --- Voice クラスター ---
+// --- Synthesis クラスター ---
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VoiceRequest {
+pub struct SynthesisRequest {
     pub text: String,
-    pub voice: String,
+    pub profile: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub speed: Option<f32>,
     /// 音声の言語 (ja, en等)
@@ -151,8 +151,8 @@ pub struct VoiceRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VoiceResponse {
-    pub audio_path: String,
+pub struct SynthesisResponse {
+    pub resource_path: String,
 }
 
 // --- Media クラスター ---
@@ -252,7 +252,7 @@ pub struct LlmJobResponse {
 ///
 /// # Design Decisions (The Payload Audit)
 /// - `topic`/`style` は含まない（Split Payload: DB カラムと JSON の二重化防止）
-/// - `parameter_overrides` は二重 HashMap（Node-Targeted Overrides: ComfyUI ノード狙い撃ち）
+/// - `parameter_overrides` は二重 HashMap（Node-Targeted Overrides: 実行ノード狙い撃ち）
 /// - `confidence_score` は `u8` だが、DB 挿入前に `.clamped()` で 0-100 に強制（Bounded Clamp）
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct KarmaDirectives {
@@ -264,7 +264,7 @@ pub struct KarmaDirectives {
     #[serde(default)]
     pub negative_prompt_additions: String,
 
-    /// ComfyUI ノードを正確に狙い撃ちするための二重階層マップ (Node-Targeted Overrides)
+    /// 実行ノードを正確に狙い撃ちするための二重階層マップ (Node-Targeted Overrides)
     /// 構造: { "NodeTitle": { "parameter_name": value } }
     /// 例: { "[API_SAMPLER]": { "cfg": 8.0, "denoise": 0.65 } }
     #[serde(default)]

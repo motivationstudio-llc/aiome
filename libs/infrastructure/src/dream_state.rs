@@ -8,27 +8,21 @@
  * License, or (at your option) any later version.
  */
 
-use factory_core::traits::{JobQueue, TrendSource, JobStatus};
-use crate::trend_sonar::BraveTrendSonar;
+use aiome_core::traits::{JobQueue, TrendSource, JobStatus};
+use crate::trend_sonar::ExternalTrendSonar;
 use tracing::{info, warn};
 use std::error::Error;
 
-pub struct DreamState {
-    _gemini_api_key: String,
-    _model_name: String,
-}
+pub struct DreamState {}
 
 impl DreamState {
-    pub fn new(gemini_api_key: &str, model_name: &str) -> Self {
-        Self {
-            _gemini_api_key: gemini_api_key.to_string(),
-            _model_name: model_name.to_string(),
-        }
+    pub fn new() -> Self {
+        Self {}
     }
 
     /// 「夢想状態（Dream State）」を実行する。
     /// キューが空の時に、自発的なトレンド探索や過去の失敗への内省を行う。
-    pub async fn dream(&self, job_queue: &dyn JobQueue, trend_sonar: &BraveTrendSonar) -> Result<(), Box<dyn Error + Send + Sync>> {
+    pub async fn dream(&self, job_queue: &dyn JobQueue, trend_sonar: &ExternalTrendSonar) -> Result<(), Box<dyn Error + Send + Sync>> {
         info!("💤 [DreamState] AI is entering a contemplative Dream State...");
 
         // 1. Preemption Check: キューに仕事があるなら即座に起きる
@@ -50,7 +44,7 @@ impl DreamState {
     }
 
     /// 探索夢: TrendSonarを使って面白いトピックを拾い、将来のジョブとして予約する
-    async fn explorative_dream(&self, job_queue: &dyn JobQueue, trend_sonar: &BraveTrendSonar) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn explorative_dream(&self, job_queue: &dyn JobQueue, trend_sonar: &ExternalTrendSonar) -> Result<(), Box<dyn Error + Send + Sync>> {
         info!("💤 [DreamState] Mode: Explorative — Searching for new creative horizons...");
         
         let seeds = ["cyberpunk aesthetics", "ancient lost technology", "biomimicry", "lo-fi horror", "solarpunk architecture"];
@@ -64,7 +58,7 @@ impl DreamState {
                 
                 // phantomフラグ付きで投入（Orchestrator側で、誰もいない時に優先的に拾われる等の処理が可能）
                 let directives = format!("{{\"dream_born\": true, \"seed\": \"{}\", \"phantom\": true}}", seed);
-                job_queue.enqueue(&best.keyword, "auto", Some(&directives)).await?;
+                job_queue.enqueue("data_processing", &best.keyword, "auto", Some(&directives)).await?;
             }
             Ok(_) => warn!("💤 [DreamState] The dream was a void. No trends found."),
             Err(e) => warn!("💤 [DreamState] Dream vision blurred: {}", e),
@@ -93,7 +87,7 @@ impl DreamState {
             info!("🩹 [DreamState] Remembering the failure of '{}'. Dreaming of a redemption version...", fail.topic);
             let redemption_topic = format!("{} (Redemption Remix)", fail.topic);
             let directives = format!("{{\"remix_of\": \"{}\", \"dream_born\": true}}", fail.id);
-            job_queue.enqueue(&redemption_topic, &fail.style, Some(&directives)).await?;
+            job_queue.enqueue("data_processing", &redemption_topic, &fail.style, Some(&directives)).await?;
         } else {
             info!("✨ [DreamState] The past is clear. No recent failures haunt my dreams.");
         }

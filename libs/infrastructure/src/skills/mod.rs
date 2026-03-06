@@ -11,7 +11,7 @@
 use std::path::{Path, PathBuf};
 use std::collections::HashMap;
 use std::time::Duration;
-use tracing::{info, error, warn};
+use tracing::{info, error};
 use extism::{Manifest, Plugin};
 use jsonschema::JSONSchema;
 pub mod forge;
@@ -125,17 +125,15 @@ impl WasmSkillManager {
         }
 
         // 2. Network: Whitelist-based isolation (Zero Trust)
+        // Wildcard '*' is strictly forbidden for security reasons.
         let metadata = self.get_metadata(skill_name);
         if let Some(meta) = metadata {
-            if meta.allowed_hosts.is_empty() {
-                 // Default: No network if not specified
-            } else if meta.allowed_hosts.contains(&"*".to_string()) {
-                warn!("⚠️ [WasmSkillManager] Skill '{}' uses wildcard network access. Be careful.", skill_name);
-                manifest = manifest.with_allowed_host("*");
-            } else {
-                for host in &meta.allowed_hosts {
-                    manifest = manifest.with_allowed_host(host);
+            for host in &meta.allowed_hosts {
+                if host == "*" {
+                    error!("🛑 [WasmSkillManager] Wildcard network access is strictly FORBIDDEN for skill '{}'", skill_name);
+                    return Err(format!("Security Violation: Wildcard network access ('*') is not allowed for skill '{}'. Please specify explicit hosts.", skill_name).into());
                 }
+                manifest = manifest.with_allowed_host(host);
             }
         }
 
@@ -212,7 +210,7 @@ impl WasmSkillManager {
     pub async fn search_skill_in_knowledge(
         &self,
         query: &str,
-        jq: &impl factory_core::traits::JobQueue,
+        jq: &impl aiome_core::traits::JobQueue,
     ) -> Result<Option<String>, Box<dyn std::error::Error + Send + Sync>> {
         // 現在のスキル一覧を取得
         let available_skills = self.list_skills();

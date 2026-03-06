@@ -24,7 +24,7 @@
 
 Aiome is more than just a task execution tool. It is a **next-generation autonomous AI operating system** that accumulates "lessons" (Karma) with each execution, protects itself from threats (Immune System), shares intelligence with other nodes (Federation), and forms its own unique "personality" (SOUL).
 
-Video generation (e.g., Project-Boring) is merely one of the "skills" (modules) running on top of this powerful OS.
+Complex content generation (e.g., automated reporting) is merely one of the "skills" (modules) running on top of this powerful OS.
 
 ### 🛡️ 4 Core Pillars
 
@@ -55,13 +55,13 @@ The foundational Karma scheme, Immune defense, Federation synchronization, and b
 Advanced parallel processing (GPU Cluster), the high-performance execution engine (Advanced Skill Forge), and managed Hub features for enterprises are provided under a commercial license.
 
 ```text
-apps/shorts-factory  ← Main Binary (The Body / Open & Pro)
+apps/aiome-daemon  ← Main Execution Daemon (OSS Demo)
       ↓
-libs/core            ← Domain Logic (Open)
+libs/core          ← Domain Logic (Open)
       ↓
-libs/infrastructure  ← I/O Impl (ComfyUI, SQLite / Open)
+libs/infrastructure ← I/O Impl (SQLite, Network / Open)
       ↓
-libs/shared          ← Common Types, Guardrails (Open)
+libs/shared        ← Common Types, Guardrails (Open)
 ```
 
 ---
@@ -70,8 +70,8 @@ libs/shared          ← Common Types, Guardrails (Open)
 
 By deploying Aiome, you can instantly build autonomous workflows like the following:
 
-- 🧠 **Autonomous Loop**: Fully automates everything from planning to generation by monitoring trends 24/7 without user intervention.
-- 🎬 **Media Generation Ecosystem**: Seamless integration with ComfyUI (Image/Video generation) and FFmpeg (Audio/Video editing).
+- 🧠 **Autonomous Loop**: Fully automates everything from planning to generation by monitoring signals 24/7 without user intervention.
+- 🛠️ **Resource Orchestration**: Seamless integration with external generative engines and media processing tools.
 - 🗣️ **Discord Interaction Interface**: Issue commands and converse with the system using natural language via a personified gateway called the "Watchtower."
 - 🛡️ **Robust Error Self-Healing**: Detects execution errors and LLM hallucinations, autonomously modifies its configuration within the sandbox, and retries.
 
@@ -82,7 +82,7 @@ By deploying Aiome, you can instantly build autonomous workflows like the follow
 Aiome's true power lies in its **extreme extensibility leveraging WASM (WebAssembly)**.
 
 - **Safe Sandbox**: Additional features (skills) run in an isolated WASM environment, ensuring they do not compromise the safety of the core system.
-- **Auto-Forging**: Features a "Skill Forge" (Pro/Advanced feature) where the AI programs, implements, and deploys necessary functionalities on the fly.
+- **Auto-Forging**: Features a "Skill Forge" (Pro feature) where the AI programs, implements, and deploys necessary functionalities on the fly.
 - **Community Shared**: Custom skills you develop will eventually be shareable with other nodes via the SAMSARA Hub.
 
 ---
@@ -92,15 +92,16 @@ Aiome's true power lies in its **extreme extensibility leveraging WASM (WebAssem
 ![Rust](https://img.shields.io/badge/rust-%23000000.svg?style=for-the-badge&logo=rust&logoColor=white)
 ![SQLite](https://img.shields.io/badge/sqlite-%2307405e.svg?style=for-the-badge&logo=sqlite&logoColor=white)
 ![Discord](https://img.shields.io/badge/Discord-%235865F2.svg?style=for-the-badge&logo=discord&logoColor=white)
-![FFmpeg](https://img.shields.io/badge/FFmpeg-%232B65EC.svg?style=for-the-badge&logo=ffmpeg&logoColor=white)
+![FFmpeg](https://img.shields.io/badge/FFmpeg-%23007808.svg?style=for-the-badge&logo=ffmpeg&logoColor=white)
 
 | Component | Technology | Role |
 |---|---|---|
-| **Core Engine** | Rust | Fast, memory-safe orchestrator |
-| **LLM Backend** | Ollama (Qwen, Mistral, etc.) | Thought circuits via local inference |
-| **Media Engine** | ComfyUI / FFmpeg | Transmutation of images, videos, and audio |
-| **Storage** | SQLite | Persistence of memories (Karma) and config |
-| **Expansion** | WebAssembly (Wasm) | Safe and portable skill execution environment |
+| **Core Engine** | Rust / Bastion OSS | Fast, memory-safe, and robust security foundation |
+| **Security Layer** | Abyss Vault (Key Proxy) | Physical API key isolation & memory protection (mlockall/zeroize) |
+| **LLM Backend** | Ollama / Gemini (via Proxy) | Unified local and cloud inference routing |
+| **Media Engine** | ComfyUI / FFmpeg | Autonomous generation of advanced images, video, and audio |
+| **Storage** | SQLite (Hash Chain integrated) | Tamper-proof persistence of memories (Karma) and logs |
+| **Expansion** | WebAssembly (Wasm) | Safe and portable skill execution under strict network controls |
 
 ---
 
@@ -121,10 +122,8 @@ Watchtower is the gateway for a master to interact with Aiome's "Personality." T
 - **Details**: [docs/WATCHTOWER_USER_GUIDE.md](docs/WATCHTOWER_USER_GUIDE.md) *(JP)*
 - **Personality Manifest**: [WATCHTOWER_MANIFEST.md](WATCHTOWER_MANIFEST.md) 🐾
 
-### 2. Factory / Skills (Skills & Modules)
-Specific applications running on Aiome Core.
-
-- **Shorts Factory**: Fully automated video mass-production for YouTube Shorts.
+### 2. Command Center (Demonstration)
+A basic reference implementation of an execution loop using Aiome Core.
 
 ---
 
@@ -132,13 +131,13 @@ Specific applications running on Aiome Core.
 
 ### 1. Prerequisites
 Ensure the following requirements are met:
-- **System**: `ffmpeg` (for video/audio processing) must be in your PATH.
+- **System**: `ffmpeg` (for video and audio processing) must be in your PATH.
 - **Ollama**: `ollama serve` is running.
-  - Recommended models: `qwen2.5-coder` (Generation) & `huihui_ai/mistral-small-abliterated` (Watchtower Personality/Constitutional)
-- **Sidecars**:
-  - **ComfyUI**: Generative engine (`http://localhost:8188`)
-  - **Style-Bert-VITS2**: TTS server. Requires a `Python 3.10+` environment.
-- **External API**: `Gemini API Key` and `Brave Search API Key` are required for autonomous planning and trend analysis.
+  - Recommended models: `qwen2.5-coder` (for analysis & production) & `mistral-small` (for Watchtower personality)
+- **Sidecars (Optional)**:
+  - **ComfyUI**: Image and video generation engine (default: `http://localhost:8188`)
+  - **Style-Bert-VITS2**: Speech synthesis server. Requires Python 3.10+ environment.
+- **External API**: If you use external APIs (e.g. Gemini/OpenAI), environment variables must be supplied to the secure proxy.
 
 ### 2. Setup & Run
 ```bash
@@ -149,21 +148,23 @@ cd aiome
 # 2. Configure environment variables (API keys, etc.)
 cp .env.example .env
 
-# 3. Start Aiome Core (Samsara Protocol)
-cargo run -p shorts-factory -- serve
+# 3. Start Abyss Vault (Key Proxy)
+# ⚠️ ALL API requests pass through this proxy. Be sure to start this first.
+GEMINI_API_KEY=your_key_here cargo run --bin key-proxy &
 
-# 4. Start Watchtower (Discord Client) in a separate terminal
+# 4. Start Command Center (The Body)
+cargo run -p command-center
+
+# 5. Start Watchtower (Discord Client - The Soul)
 cargo run -p watchtower
 ```
 
-> **Note**: `shorts-factory` communicates with `watchtower` via a UDS socket. To enable interaction (Discord integration), both processes must be running simultaneously.
+> **Note**: `command-center` communicates with `watchtower` via a UDS socket. To enable interactive features (Discord integration), both processes must be run simultaneously.
 
 #### 🔑 Key Environment Variables (.env)
-- `DISCORD_TOKEN`: For Watchtower.
-- `GEMINI_API_KEY`: For autonomous planning (Samsara Protocol).
-- `BRAVE_API_KEY`: For trend monitoring (Sonar Ping).
-- `OLLAMA_BASE_URL`: For LLM connections (Default: http://localhost:11434).
-- `COMFYUI_URL`: For the generative engine (Default: http://localhost:8188).
+- `DISCORD_TOKEN`: For Watchtower integration.
+- `OLLAMA_BASE_URL`: For local LLM connections (default: `http://localhost:11434`).
+- `EXTERNAL_SERVICE_URL`: For integration with external generation engines like ComfyUI.
 
 ---
 

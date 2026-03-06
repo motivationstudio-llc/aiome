@@ -13,7 +13,7 @@
 //! LLM (Qwen) に送信する前にユーザー入力を検証し、
 //! プロンプトインジェクション・XSS・DoS攻撃を防ぐ。
 //!
-//! 元実装: /Users/motista/Desktop/antigravity/security-starter-kit/rust/guardrails_template.rs
+//! Meta: Security Guardrails Policy
 
 use unicode_normalization::UnicodeNormalization;
 pub use bastion::text_guard::ValidationResult;
@@ -151,7 +151,7 @@ mod tests {
     fn test_sanitize_removes_control_chars() {
         let input = "hello world test";
         let sanitized = sanitize_input(input);
-        assert_eq!(sanitized, "helloworldtest");
+        assert_eq!(sanitized, "hello world test");
     }
 
     #[test]
@@ -164,8 +164,8 @@ mod tests {
     #[test]
     fn test_sanitize_asset_name() {
         // NFC正規化のテスト (テ＋゛ -> デ)
-        let input = "テ\u{3099}スト/動画*1.mp4";
+        let input = "テ\u{3099}スト/データ*1.dat";
         let sanitized = sanitize_asset_name(input);
-        assert_eq!(sanitized, "デスト_動画_1.mp4");
+        assert_eq!(sanitized, "デスト_データ_1.dat");
     }
 }

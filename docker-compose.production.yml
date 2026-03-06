@@ -1,0 +1,40 @@
+version: '3.8'
+
+services:
+  # The Abyss Vault (Key Proxy)
+  # Responsible for holding sensitive API keys in memory (locked).
+  key-proxy:
+    build:
+      context: ..
+      dockerfile: docker/production.Dockerfile
+      args:
+        BIN_NAME: key-proxy
+    environment:
+      - BIND_ALL=true
+      - KEY_PROXY_PORT=9999
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+    cap_add:
+      - IPC_LOCK # REQUIRED for mlockall() security
+    security_opt:
+      - no-new-privileges:true
+    restart: always
+
+  # The AIOME Command Center (Main Application)
+  # No API keys in environment; communicates through the proxy.
+  command-center:
+    build:
+      context: ..
+      dockerfile: docker/production.Dockerfile
+      args:
+        BIN_NAME: command-center
+    environment:
+      - KEY_PROXY_URL=http://key-proxy:9999
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      - DISCORD_TOKEN=${DISCORD_TOKEN}
+    depends_on:
+      - key-proxy
+    restart: always
+    ports:
+      - "8080:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway" # For accessing local Ollama

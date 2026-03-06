@@ -8,30 +8,29 @@
  * License, or (at your option) any later version.
  */
 
-use factory_core::error::FactoryError;
-use factory_core::contracts::ArenaMatch;
-use factory_core::traits::JobQueue;
-use rig::providers::gemini;
-use rig::completion::Prompt;
-use rig::client::CompletionClient;
+use aiome_core::error::AiomeError;
+use aiome_core::contracts::ArenaMatch;
+use aiome_core::traits::JobQueue;
+use aiome_core::llm_provider::LlmProvider;
+use std::sync::Arc;
 use tracing::{info, warn};
 use uuid::Uuid;
 use chrono::Utc;
 
 pub struct SkillArena {
-    gemini_api_key: String,
+    provider: Arc<dyn LlmProvider>,
 }
 
 impl SkillArena {
-    pub fn new(api_key: String) -> Self {
-        Self { gemini_api_key: api_key }
+    pub fn new(provider: Arc<dyn LlmProvider>) -> Self {
+        Self { provider }
     }
 
     /// 二つの異なるスキル（WASM）の出力を比較し、勝利スキルを決定する
     pub async fn match_skill(&self, skill_a: &str, skill_b: &str, input: &str, jq: &impl JobQueue, 
-        sm: &crate::skills::WasmSkillManager) -> Result<Option<String>, FactoryError> {
+        sm: &crate::skills::WasmSkillManager) -> Result<Option<String>, AiomeError> {
         
-        info!("⚔️  Arena Match: {} vs {} (topic: {})", skill_a, skill_b, input);
+        info!("⚔️  Arena Match: {} vs {} (topic: {}) using {}", skill_a, skill_b, input, self.provider.name());
 
         // 両方のスキルを実行
         let res_a = sm.call_skill(skill_a, "call", input, None).await;
@@ -50,9 +49,6 @@ impl SkillArena {
         };
 
         // LLMに審判を依頼
-        let client = gemini::Client::new(&self.gemini_api_key)
-            .map_err(|e| FactoryError::Infrastructure { reason: e.to_string() })?;
-            
         let judge_preamble = "あなたは『AI進化アリーナ』の公正な審判です。
 二つのスキルの出力を比較し、どちらがよりユーザーの意図に忠実で、品質が高いかを判定してください。
 
@@ -68,23 +64,15 @@ impl SkillArena {
 }";
 
         let judge_prompt = format!(
-            "input: {}
-
---- OUTPUT A ({}): ---
-{}
-
---- OUTPUT B ({}): ---
-{}", 
+            "input: {}\n\n--- OUTPUT A ({}): ---\n{}\n\n--- OUTPUT B ({}): ---\n{}", 
             input, skill_a, out_a, skill_b, out_b
         );
 
-        let agent = client.agent("gemini-2.0-flash").preamble(judge_preamble).build();
-        let judge_res: String = agent.prompt(&judge_prompt).await
-            .map_err(|e: rig::completion::PromptError| FactoryError::Infrastructure { reason: e.to_string() })?;
+        let judge_res = self.provider.complete(&judge_prompt, Some(judge_preamble)).await?;
 
         let json_str = crate::concept_manager::extract_json(&judge_res)?;
         let v: serde_json::Value = serde_json::from_str(json_str.as_str())
-            .map_err(|e| FactoryError::Infrastructure { reason: format!("Judge JSON error: {}", e) })?;
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Judge JSON error: {}", e) })?;
 
         let winner_raw = v["winner"].as_str().unwrap_or("");
         let final_winner = if winner_raw.contains(skill_a) {
@@ -117,11 +105,8 @@ impl SkillArena {
     }
 
     /// アリーナの歴史から統計的に弱いスキルを特定し、淘汰（アンインストール）の準備をする
-    pub async fn analyze_and_cull(&self, _jq: &impl JobQueue, _sm: &crate::skills::WasmSkillManager) -> Result<Vec<String>, FactoryError> {
+    pub async fn analyze_and_cull(&self, _jq: &impl JobQueue, _sm: &crate::skills::WasmSkillManager) -> Result<Vec<String>, AiomeError> {
         info!("🧬 淘汰アルゴリズム（淘汰プロセス）を実行中...");
-        
-        // 現状は簡易的な淘汰ロジック：同じ能力セットを持つスキルのうち、最新の敗北記録を持つものを抽出
-        // ※ 実際には統計的な累積勝率（Eelo等）で計算すべきだが、ここでは最小実装に留める
         Ok(Vec::new()) 
     }
 }

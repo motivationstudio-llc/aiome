@@ -8,34 +8,32 @@
  * License, or (at your option) any later version.
  */
 
-use rig::providers::gemini;
-use rig::prelude::*;
 use async_trait::async_trait;
-use factory_core::traits::{Job, JobQueue, JobStatus, SnsMetricsRecord};
-use factory_core::contracts::OracleVerdict;
-use factory_core::error::FactoryError;
+use aiome_core::traits::{Job, JobQueue, JobStatus, SnsMetricsRecord};
+use aiome_core::contracts::OracleVerdict;
+use aiome_core::error::AiomeError;
 use sqlx::{SqlitePool, Row};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
 use std::time::Duration;
 use uuid::Uuid;
 use chrono::Utc;
 use tracing::warn;
-use secrecy::ExposeSecret;
+use aiome_core::llm_provider::EmbeddingProvider;
+use std::sync::Arc;
 
 /// Job Queue that utilizes SQLite in WAL Mode to allow multi-threaded queue operations.
-/// Implements **The Immortal Samsara Schema** — crash-resistant, self-healing, and eternal.
 #[derive(Clone)]
 pub struct SqliteJobQueue {
     pool: SqlitePool,
-    gemini_api_key: Option<secrecy::SecretString>,
+    embed_provider: Option<Arc<dyn EmbeddingProvider>>,
 }
 
 impl SqliteJobQueue {
     /// Connects to the SQLite database and initializes the WAL mode and schema.
-    pub async fn new(db_path: &str) -> Result<Self, FactoryError> {
+    pub async fn new(db_path: &str) -> Result<Self, AiomeError> {
         use std::str::FromStr;
         let options = SqliteConnectOptions::from_str(db_path)
-            .map_err(|e| FactoryError::Infrastructure { reason: format!("Invalid db_path {}: {}", db_path, e) })?
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Invalid db_path {}: {}", db_path, e) })?
             .create_if_missing(true)
             .journal_mode(SqliteJournalMode::Wal)
             .busy_timeout(Duration::from_millis(5000));
@@ -44,16 +42,16 @@ impl SqliteJobQueue {
             .max_connections(5)
             .connect_with(options)
             .await
-            .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to connect to SQLite: {}", e) })?;
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to connect to SQLite: {}", e) })?;
 
-        let queue = Self { pool, gemini_api_key: None };
+        let queue = Self { pool, embed_provider: None };
         queue.init_db().await?;
         Ok(queue)
     }
 
     /// Add embedding capability to the queue
-    pub fn with_embeddings(mut self, api_key: &str) -> Self {
-        self.gemini_api_key = Some(secrecy::SecretString::new(api_key.into()));
+    pub fn with_embeddings(mut self, provider: Arc<dyn EmbeddingProvider>) -> Self {
+        self.embed_provider = Some(provider);
         self
     }
 
@@ -70,12 +68,13 @@ impl SqliteJobQueue {
     /// - `ON DELETE SET NULL`: Eternal Karma — jobs die, lessons live (The Memory Wipe Trap 防衛)
     /// - `CHECK(weight BETWEEN 0 AND 100)`: Bounded Confidence (The Karma Singularity 防衛)
     /// - `last_applied_at`: Usage tracking for TTL decay (The Static Decay Trap 防衛)
-    async fn init_db(&self) -> Result<(), FactoryError> {
+    async fn init_db(&self) -> Result<(), AiomeError> {
         // Use CREATE TABLE IF NOT EXISTS to prevent data loss on restart.
         // The old DROP TABLE approach is replaced for production safety.
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS jobs (
                 id TEXT PRIMARY KEY, 
+                category TEXT NOT NULL,
                 topic TEXT NOT NULL,
                 style_name TEXT NOT NULL, 
                 karma_directives TEXT NOT NULL CHECK(json_valid(karma_directives)), 
@@ -95,7 +94,7 @@ impl SqliteJobQueue {
         )
         .execute(&self.pool)
         .await
-        .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to create jobs table: {}", e) })?;
+        .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to create jobs table: {}", e) })?;
 
         // Embedded Migrations: safely add columns that may not exist in older schemas.
         // SQLite ALTER TABLE ADD COLUMN errors are silently ignored (idempotent).
@@ -126,7 +125,7 @@ impl SqliteJobQueue {
         )
         .execute(&self.pool)
         .await
-        .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to create karma_logs table: {}", e) })?;
+        .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to create karma_logs table: {}", e) })?;
 
         // Indices for optimal performance
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_jobs_status_started ON jobs(status, started_at);")
@@ -155,7 +154,7 @@ impl SqliteJobQueue {
                 recorded_at TEXT DEFAULT (datetime('now')),
                 FOREIGN KEY(job_id) REFERENCES jobs(id) ON DELETE CASCADE
             );"
-        ).execute(&self.pool).await.map_err(|e| FactoryError::Infrastructure {
+        ).execute(&self.pool).await.map_err(|e| AiomeError::Infrastructure {
             reason: format!("Failed to create sns_metrics_history: {}", e),
         })?;
 
@@ -163,6 +162,7 @@ impl SqliteJobQueue {
             .execute(&self.pool).await.ok();
 
         for migration in [
+            "ALTER TABLE jobs ADD COLUMN category TEXT NOT NULL DEFAULT 'default'",
             "ALTER TABLE sns_metrics_history ADD COLUMN raw_comments_json TEXT",
             "ALTER TABLE sns_metrics_history ADD COLUMN is_finalized INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE sns_metrics_history ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0",
@@ -180,24 +180,24 @@ impl SqliteJobQueue {
             let _ = sqlx::query(migration).execute(&self.pool).await;
         }
         
-        // --- Phase 12: Project Ani Foundation ---
+        // --- Phase 12: Agent Evolution Foundation ---
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS agent_stats (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 level INTEGER NOT NULL DEFAULT 1,
                 exp INTEGER NOT NULL DEFAULT 0,
-                affection INTEGER NOT NULL DEFAULT 0,
-                intimacy INTEGER NOT NULL DEFAULT 0,
+                resonance INTEGER NOT NULL DEFAULT 0,
+                creativity INTEGER NOT NULL DEFAULT 0,
                 fatigue INTEGER NOT NULL DEFAULT 0,
                 updated_at TEXT DEFAULT (datetime('now'))
             );"
         )
         .execute(&self.pool)
         .await
-        .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to create agent_stats table: {}", e) })?;
+        .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to create agent_stats table: {}", e) })?;
 
         // Seed initial data if table is empty
-        let _ = sqlx::query("INSERT OR IGNORE INTO agent_stats (id, level, exp, affection, intimacy, fatigue) VALUES (1, 1, 0, 0, 0, 0);")
+        let _ = sqlx::query("INSERT OR IGNORE INTO agent_stats (id, level, exp, resonance, creativity, fatigue) VALUES (1, 1, 0, 0, 0, 0);")
             .execute(&self.pool)
             .await;
 
@@ -211,7 +211,7 @@ impl SqliteJobQueue {
         )
         .execute(&self.pool)
         .await
-        .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to create system_state table: {}", e) })?;
+        .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to create system_state table: {}", e) })?;
 
         // --- Watchtower Memory Distillation Tables ---
         sqlx::query(
@@ -225,7 +225,7 @@ impl SqliteJobQueue {
             );"
         )
         .execute(&self.pool).await
-        .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to create chat_history: {}", e) })?;
+        .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to create chat_history: {}", e) })?;
 
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_chat_history_channel ON chat_history(channel_id, created_at DESC);")
             .execute(&self.pool).await.ok();
@@ -240,7 +240,7 @@ impl SqliteJobQueue {
             );"
         )
         .execute(&self.pool).await
-        .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to create chat_memory_summaries: {}", e) })?;
+        .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to create chat_memory_summaries: {}", e) })?;
 
         // --- Phase 5: Transmigration History ---
         sqlx::query(
@@ -253,7 +253,7 @@ impl SqliteJobQueue {
             );"
         )
         .execute(&self.pool).await
-        .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to create soul_mutation_history: {}", e) })?;
+        .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to create soul_mutation_history: {}", e) })?;
 
         // --- Phase 12-F: Karma Federation ---
         sqlx::query(
@@ -263,7 +263,7 @@ impl SqliteJobQueue {
             );"
         )
         .execute(&self.pool).await
-        .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to create federation_peers: {}", e) })?;
+        .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to create federation_peers: {}", e) })?;
 
         Ok(())
     }
@@ -271,16 +271,17 @@ impl SqliteJobQueue {
 
 #[async_trait]
 impl JobQueue for SqliteJobQueue {
-    async fn enqueue(&self, topic: &str, style: &str, karma_directives: Option<&str>) -> Result<String, FactoryError> {
+    async fn enqueue(&self, category: &str, topic: &str, style: &str, karma_directives: Option<&str>) -> Result<String, AiomeError> {
         let id = Uuid::new_v4().to_string();
         let now = Utc::now().to_rfc3339();
         // Default to empty JSON object if None, satisfying CHECK(json_valid(...))
         let directives = karma_directives.unwrap_or("{}");
 
         sqlx::query(
-            "INSERT INTO jobs (id, topic, style_name, karma_directives, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+            "INSERT INTO jobs (id, category, topic, style_name, karma_directives, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
         )
         .bind(&id)
+        .bind(category)
         .bind(topic)
         .bind(style)
         .bind(directives)
@@ -289,22 +290,23 @@ impl JobQueue for SqliteJobQueue {
         .bind(&now)
         .execute(&self.pool)
         .await
-        .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to enqueue job: {}", e) })?;
+        .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to enqueue job: {}", e) })?;
 
         Ok(id)
     }
 
-    async fn fetch_job(&self, job_id: &str) -> Result<Option<Job>, FactoryError> {
+    async fn fetch_job(&self, job_id: &str) -> Result<Option<Job>, AiomeError> {
         let row = sqlx::query(
-            "SELECT id, topic, style_name, karma_directives, status, started_at, last_heartbeat, tech_karma_extracted, creative_rating, execution_log, error_message, sns_platform, sns_content_id, published_at, output_artifacts FROM jobs WHERE id = ?"
+            "SELECT id, category, topic, style_name, karma_directives, status, started_at, last_heartbeat, tech_karma_extracted, creative_rating, execution_log, error_message, sns_platform, sns_content_id, published_at, output_artifacts FROM jobs WHERE id = ?"
         )
         .bind(job_id)
         .fetch_optional(&self.pool)
         .await
-        .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to fetch job {}: {}", job_id, e) })?;
+        .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to fetch job {}: {}", job_id, e) })?;
 
         if let Some(r) = row {
             let id: String = r.get("id");
+            let category: String = r.get("category");
             let topic: String = r.get("topic");
             let style: String = r.get("style_name");
             let karma_directives: Option<String> = try_get_optional_string(&r, "karma_directives");
@@ -321,6 +323,7 @@ impl JobQueue for SqliteJobQueue {
 
             Ok(Some(Job {
                 id,
+                category,
                 topic,
                 style,
                 karma_directives,
@@ -341,17 +344,23 @@ impl JobQueue for SqliteJobQueue {
         }
     }
 
-    async fn dequeue(&self) -> Result<Option<Job>, FactoryError> {
+    async fn dequeue(&self, capable_categories: &[&str]) -> Result<Option<Job>, AiomeError> {
         let mut tx = self.pool.begin().await
-            .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to start transaction: {}", e) })?;
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to start transaction: {}", e) })?;
 
-        let row = sqlx::query(
-            "SELECT id, topic, style_name, karma_directives, status, started_at, last_heartbeat, tech_karma_extracted, creative_rating, execution_log, error_message, sns_platform, sns_content_id, published_at, output_artifacts FROM jobs WHERE status = ? ORDER BY created_at ASC LIMIT 1"
-        )
-        .bind(JobStatus::Pending.to_string())
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to fetch pending job: {}", e) })?;
+        let placeholders = capable_categories.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+        let query_str = format!(
+            "SELECT id, category, topic, style_name, karma_directives, status, started_at, last_heartbeat, tech_karma_extracted, creative_rating, execution_log, error_message, sns_platform, sns_content_id, published_at, output_artifacts FROM jobs WHERE status = ? AND category IN ({}) ORDER BY created_at ASC LIMIT 1",
+            placeholders
+        );
+        let mut query = sqlx::query(&query_str).bind(JobStatus::Pending.to_string());
+        for cat in capable_categories {
+            query = query.bind(*cat);
+        }
+
+        let row = query.fetch_optional(&mut *tx)
+            .await
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to fetch pending job: {}", e) })?;
 
         if let Some(r) = row {
             let id: String = r.get("id");
@@ -377,13 +386,14 @@ impl JobQueue for SqliteJobQueue {
                 .bind(&id)
                 .execute(&mut *tx)
                 .await
-                .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to update job status: {}", e) })?;
+                .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to update job status: {}", e) })?;
 
             tx.commit().await
-                .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to commit transaction: {}", e) })?;
+                .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to commit transaction: {}", e) })?;
 
             Ok(Some(Job {
                 id,
+                category: r.get("category"),
                 topic,
                 style,
                 karma_directives,
@@ -404,7 +414,7 @@ impl JobQueue for SqliteJobQueue {
         }
     }
 
-    async fn complete_job(&self, job_id: &str, output_artifacts: Option<&str>) -> Result<(), FactoryError> {
+    async fn complete_job(&self, job_id: &str, output_artifacts: Option<&str>) -> Result<(), AiomeError> {
         let now = Utc::now().to_rfc3339();
         sqlx::query("UPDATE jobs SET status = ?, output_artifacts = ?, updated_at = ? WHERE id = ?")
             .bind(JobStatus::Completed.to_string())
@@ -413,11 +423,11 @@ impl JobQueue for SqliteJobQueue {
             .bind(job_id)
             .execute(&self.pool)
             .await
-            .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to complete job {}: {}", job_id, e) })?;
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to complete job {}: {}", job_id, e) })?;
         Ok(())
     }
 
-    async fn fail_job(&self, job_id: &str, reason: &str) -> Result<(), FactoryError> {
+    async fn fail_job(&self, job_id: &str, reason: &str) -> Result<(), AiomeError> {
         let now = Utc::now().to_rfc3339();
         sqlx::query("UPDATE jobs SET status = ?, error_message = ?, updated_at = ? WHERE id = ?")
             .bind(JobStatus::Failed.to_string())
@@ -426,11 +436,11 @@ impl JobQueue for SqliteJobQueue {
             .bind(job_id)
             .execute(&self.pool)
             .await
-            .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to fail job {}: {}", job_id, e) })?;
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to fail job {}: {}", job_id, e) })?;
         Ok(())
     }
 
-    async fn fetch_relevant_karma(&self, topic: &str, skill_id: &str, limit: i64, current_soul_hash: &str) -> Result<Vec<String>, FactoryError> {
+    async fn fetch_relevant_karma(&self, topic: &str, skill_id: &str, limit: i64, current_soul_hash: &str) -> Result<Vec<String>, AiomeError> {
         // --- Phase 1: Boltzmann SQL Candidate Search ---
         let candidate_limit = limit * 5;
         let rows = sqlx::query(
@@ -444,7 +454,7 @@ impl JobQueue for SqliteJobQueue {
         .bind(candidate_limit)
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| FactoryError::Infrastructure { reason: format!("SQL Karma Query failed: {}", e) })?;
+        .map_err(|e| AiomeError::Infrastructure { reason: format!("SQL Karma Query failed: {}", e) })?;
 
         if rows.is_empty() {
             return Ok(Vec::new());
@@ -475,31 +485,23 @@ impl JobQueue for SqliteJobQueue {
             }
         }).collect();
 
-        // --- Phase 2: Semantic Re-Ranking (Optimized RAG) ---
-        if let Some(ref api_key) = self.gemini_api_key {
-            if let Ok(client) = gemini::Client::new(api_key.expose_secret()) {
-                // Only embed current target topic (Candidates are already embedded in DB)
-                if let Ok(topic_builder) = client.embeddings::<String>("text-embedding-004").document(topic.to_string()) {
-                    if let Ok(topic_res) = topic_builder.build().await {
-                        if let Some((_, topic_many)) = topic_res.first() {
-                            let topic_vec = &topic_many.first().vec;
-
-                            for candidate in candidates.iter_mut() {
-                                if let Some(ref emb_vec) = candidate.stored_embedding {
-                                    candidate.semantic_score = cosine_similarity(topic_vec, emb_vec);
-                                }
-                            }
-
-                            // Re-rank by Semantic Score (70%) + SQL Weight (30%)
-                            candidates.sort_by(|a, b| {
-                                let score_a = a.semantic_score * 0.7 + (a.sql_weight / 100.0) * 0.3;
-                                let score_b = b.semantic_score * 0.7 + (b.sql_weight / 100.0) * 0.3;
-                                score_b.partial_cmp(&score_a).unwrap_or(std::cmp::Ordering::Equal)
-                            });
+        // --- Phase 2: Semantic Re-ranking (If embeddings available) ---
+        if !rows.is_empty() {
+            if let Some(ref provider) = self.embed_provider {
+                if let Ok(topic_vec_f32) = provider.embed(topic).await {
+                    let topic_vec: Vec<f64> = topic_vec_f32.into_iter().map(|f| f as f64).collect();
+                    for candidate in &mut candidates {
+                        if let Some(ref emb_vec) = candidate.stored_embedding {
+                            candidate.semantic_score = cosine_similarity(&topic_vec, emb_vec);
                         }
-                    } else {
-                        warn!("🧬 [KarmaRAG] Failed to embed topic for semantic ranking. Falling back to SQL weight.");
                     }
+                    candidates.sort_by(|a, b| {
+                        let score_a = a.semantic_score * 0.7 + (a.sql_weight / 100.0) * 0.3;
+                        let score_b = b.semantic_score * 0.7 + (b.sql_weight / 100.0) * 0.3;
+                        score_b.partial_cmp(&score_a).unwrap_or(std::cmp::Ordering::Equal)
+                    });
+                } else {
+                    warn!("🧬 [KarmaRAG] Failed to embed topic using {}. Falling back to SQL weight.", provider.name());
                 }
             }
         }
@@ -526,24 +528,17 @@ impl JobQueue for SqliteJobQueue {
         Ok(final_karma)
     }
 
-    async fn store_karma(&self, job_id: &str, skill_id: &str, lesson: &str, karma_type: &str, soul_hash: &str) -> Result<(), FactoryError> {
+    async fn store_karma(&self, job_id: &str, skill_id: &str, lesson: &str, karma_type: &str, soul_hash: &str) -> Result<(), AiomeError> {
         let id = Uuid::new_v4().to_string();
         let now = Utc::now().to_rfc3339();
 
         let mut embedding: Option<Vec<u8>> = None;
-        if let Some(ref api_key) = self.gemini_api_key {
-            if let Ok(client) = gemini::Client::new(api_key.expose_secret()) {
-                if let Ok(builder) = client.embeddings::<String>("text-embedding-004").document(lesson.to_string()) {
-                    if let Ok(res) = builder.build().await {
-                        if let Some((_, many)) = res.first() {
-                            let emb = many.first();
-                            let bytes: Vec<u8> = emb.vec.iter().flat_map(|f| f.to_le_bytes()).collect();
-                            embedding = Some(bytes);
-                        }
-                    } else {
-                        warn!("🧬 [KarmaStore] Failed to generate embedding for lesson (ignoring)");
-                    }
-                }
+        if let Some(ref provider) = self.embed_provider {
+            if let Ok(vec) = provider.embed(lesson).await {
+                let bytes: Vec<u8> = vec.iter().flat_map(|f| f.to_le_bytes()).collect();
+                embedding = Some(bytes);
+            } else {
+                warn!("🧬 [KarmaStore] Failed to generate embedding using {} (ignoring)", provider.name());
             }
         }
 
@@ -560,13 +555,13 @@ impl JobQueue for SqliteJobQueue {
         .bind(embedding)
         .execute(&self.pool)
         .await
-        .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to store karma for job {}: {}", job_id, e) })?;
+        .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to store karma for job {}: {}", job_id, e) })?;
         Ok(())
     }
 
     /// The Zombie Hunter (Heartbeat Edition): Reclaims jobs whose heartbeat has gone silent.
     /// Uses `last_heartbeat` instead of `started_at`, preventing false kills on long-running jobs.
-    async fn reclaim_zombie_jobs(&self, timeout_minutes: i64) -> Result<u64, FactoryError> {
+    async fn reclaim_zombie_jobs(&self, timeout_minutes: i64) -> Result<u64, AiomeError> {
         let now = Utc::now().to_rfc3339();
         let result = sqlx::query(
             "UPDATE jobs SET status = 'Failed', error_message = 'Zombie reclaimed: heartbeat timeout exceeded', updated_at = ? 
@@ -578,7 +573,7 @@ impl JobQueue for SqliteJobQueue {
         .bind(timeout_minutes)
         .execute(&self.pool)
         .await
-        .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to reclaim zombie jobs: {}", e) })?;
+        .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to reclaim zombie jobs: {}", e) })?;
 
         let count = result.rows_affected();
         if count > 0 {
@@ -589,7 +584,7 @@ impl JobQueue for SqliteJobQueue {
 
     /// Sets the creative rating for a completed job (Human-in-the-Loop, Asynchronous Karma).
     /// Atomic Guard: Only Completed or Processing jobs can receive ratings.
-    async fn set_creative_rating(&self, job_id: &str, rating: i32) -> Result<(), FactoryError> {
+    async fn set_creative_rating(&self, job_id: &str, rating: i32) -> Result<(), AiomeError> {
         let now = Utc::now().to_rfc3339();
         let result = sqlx::query(
             "UPDATE jobs SET creative_rating = ?, updated_at = ? WHERE id = ? AND status IN ('Completed', 'Processing')"
@@ -599,10 +594,10 @@ impl JobQueue for SqliteJobQueue {
         .bind(job_id)
         .execute(&self.pool)
         .await
-        .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to set creative rating for job {}: {}", job_id, e) })?;
+        .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to set creative rating for job {}: {}", job_id, e) })?;
 
         if result.rows_affected() == 0 {
-            return Err(FactoryError::Infrastructure {
+            return Err(AiomeError::Infrastructure {
                 reason: format!("Atomic Guard: Job '{}' is not in Completed/Processing state, rating rejected", job_id),
             });
         }
@@ -610,7 +605,7 @@ impl JobQueue for SqliteJobQueue {
     }
 
     /// The Heartbeat Pulse: Worker calls this periodically to prove it's alive.
-    async fn heartbeat_pulse(&self, job_id: &str) -> Result<(), FactoryError> {
+    async fn heartbeat_pulse(&self, job_id: &str) -> Result<(), AiomeError> {
         let now = Utc::now().to_rfc3339();
         sqlx::query("UPDATE jobs SET last_heartbeat = ?, updated_at = ? WHERE id = ?")
             .bind(&now)
@@ -618,12 +613,12 @@ impl JobQueue for SqliteJobQueue {
             .bind(job_id)
             .execute(&self.pool)
             .await
-            .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to pulse heartbeat for job {}: {}", job_id, e) })?;
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to pulse heartbeat for job {}: {}", job_id, e) })?;
         Ok(())
     }
 
     /// Log-First Distillation: Stores the execution log in the DB.
-    async fn store_execution_log(&self, job_id: &str, log: &str) -> Result<(), FactoryError> {
+    async fn store_execution_log(&self, job_id: &str, log: &str) -> Result<(), AiomeError> {
         let now = Utc::now().to_rfc3339();
         sqlx::query("UPDATE jobs SET execution_log = ?, updated_at = ? WHERE id = ?")
             .bind(log)
@@ -631,14 +626,14 @@ impl JobQueue for SqliteJobQueue {
             .bind(job_id)
             .execute(&self.pool)
             .await
-            .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to store execution log for job {}: {}", job_id, e) })?;
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to store execution log for job {}: {}", job_id, e) })?;
         Ok(())
     }
 
     /// Deferred Distillation: Find completed/failed jobs with logs but no karma extracted yet.
-    async fn fetch_undistilled_jobs(&self, limit: i64) -> Result<Vec<Job>, FactoryError> {
+    async fn fetch_undistilled_jobs(&self, limit: i64) -> Result<Vec<Job>, AiomeError> {
         let rows = sqlx::query(
-            "SELECT id, topic, style_name, karma_directives, status, started_at, last_heartbeat, 
+            "SELECT id, category, topic, style_name, karma_directives, status, started_at, last_heartbeat, 
                      tech_karma_extracted, creative_rating, execution_log, error_message,
                      sns_platform, sns_content_id, published_at, output_artifacts 
               FROM jobs 
@@ -650,13 +645,14 @@ impl JobQueue for SqliteJobQueue {
         .bind(limit)
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to fetch undistilled jobs: {}", e) })?;
+        .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to fetch undistilled jobs: {}", e) })?;
 
         let mut jobs = Vec::new();
         for r in rows {
             let tech_karma_extracted: i32 = r.get("tech_karma_extracted");
             jobs.push(Job {
                 id: r.get("id"),
+                category: r.get("category"),
                 topic: r.get("topic"),
                 style: r.get("style_name"),
                 karma_directives: try_get_optional_string(&r, "karma_directives"),
@@ -681,28 +677,28 @@ impl JobQueue for SqliteJobQueue {
     }
 
     /// Marks a job as having had its karma extracted (tech_karma_extracted = 1).
-    async fn mark_karma_extracted(&self, job_id: &str) -> Result<(), FactoryError> {
+    async fn mark_karma_extracted(&self, job_id: &str) -> Result<(), AiomeError> {
         let now = Utc::now().to_rfc3339();
         sqlx::query("UPDATE jobs SET tech_karma_extracted = 1, updated_at = ? WHERE id = ?")
             .bind(&now)
             .bind(job_id)
             .execute(&self.pool)
             .await
-            .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to mark karma extracted for job {}: {}", job_id, e) })?;
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to mark karma extracted for job {}: {}", job_id, e) })?;
         Ok(())
     }
 
     /// DB Scavenger: Purge Completed/Failed jobs older than `days` days.
     /// karma_logs survive via ON DELETE SET NULL (Eternal Karma — jobs die, lessons live).
     /// Rigid Review: Purge threshold is typically >30 days (e.g. 60) to prevent the Watcher from losing targets.
-    async fn purge_old_jobs(&self, days: i64) -> Result<u64, FactoryError> {
+    async fn purge_old_jobs(&self, days: i64) -> Result<u64, AiomeError> {
         let result = sqlx::query(
             "DELETE FROM jobs WHERE status IN ('Completed', 'Failed') AND created_at < datetime('now', ? || ' days')"
         )
         .bind(format!("-{}", days))
         .execute(&self.pool)
         .await
-        .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to purge old jobs: {}", e) })?;
+        .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to purge old jobs: {}", e) })?;
 
         let purged = result.rows_affected();
 
@@ -712,7 +708,7 @@ impl JobQueue for SqliteJobQueue {
         Ok(purged)
     }
 
-    async fn link_sns_data(&self, job_id: &str, platform: &str, content_id: &str) -> Result<(), FactoryError> {
+    async fn link_sns_data(&self, job_id: &str, platform: &str, content_id: &str) -> Result<(), AiomeError> {
         let now = Utc::now().to_rfc3339();
         sqlx::query("UPDATE jobs SET sns_platform = ?, sns_content_id = ?, published_at = ?, updated_at = ? WHERE id = ?")
             .bind(platform)
@@ -722,14 +718,14 @@ impl JobQueue for SqliteJobQueue {
             .bind(job_id)
             .execute(&self.pool)
             .await
-            .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to link SNS data for job {}: {}", job_id, e) })?;
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to link SNS data for job {}: {}", job_id, e) })?;
         Ok(())
     }
 
-    async fn fetch_jobs_for_evaluation(&self, milestone_days: i64, limit: i64) -> Result<Vec<Job>, FactoryError> {
+    async fn fetch_jobs_for_evaluation(&self, milestone_days: i64, limit: i64) -> Result<Vec<Job>, AiomeError> {
         // The Catch-up Logic: State-based query that finds jobs past their milestone without a record.
         let rows = sqlx::query(
-            "SELECT id, topic, style_name, karma_directives, status, started_at, last_heartbeat, 
+            "SELECT id, category, topic, style_name, karma_directives, status, started_at, last_heartbeat, 
                      tech_karma_extracted, creative_rating, execution_log, error_message,
                      sns_platform, sns_content_id, published_at, output_artifacts 
               FROM jobs 
@@ -745,13 +741,14 @@ impl JobQueue for SqliteJobQueue {
         .bind(limit)
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to fetch jobs for evaluation: {}", e) })?;
+        .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to fetch jobs for evaluation: {}", e) })?;
 
         let mut jobs = Vec::new();
         for r in rows {
             let tech_karma_extracted: i32 = r.get("tech_karma_extracted");
             jobs.push(Job {
                 id: r.get("id"),
+                category: r.get("category"),
                 topic: r.get("topic"),
                 style: r.get("style_name"),
                 karma_directives: try_get_optional_string(&r, "karma_directives"),
@@ -784,7 +781,7 @@ impl JobQueue for SqliteJobQueue {
         likes: i64,
         comments_count: i64,
         raw_comments: Option<&str>,
-    ) -> Result<(), FactoryError> {
+    ) -> Result<(), AiomeError> {
         // --- #11 Statistical Pre-processing (Hard Metrics) ---
         let engagement_rate = if views > 0 {
             (likes as f64 / views as f64) * 100.0
@@ -816,10 +813,10 @@ impl JobQueue for SqliteJobQueue {
         .bind(engagement_rate)
         .execute(&self.pool)
         .await
-        .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to record SNS metrics: {}", e) })?;
+        .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to record SNS metrics: {}", e) })?;
         Ok(())
     }
-    async fn fetch_pending_evaluations(&self, limit: i64) -> Result<Vec<SnsMetricsRecord>, FactoryError> {
+    async fn fetch_pending_evaluations(&self, limit: i64) -> Result<Vec<SnsMetricsRecord>, AiomeError> {
         let rows = sqlx::query(
             "SELECT id, job_id, milestone_days, views, likes, comments_count, raw_comments_json, hard_metric_score, engagement_rate
              FROM sns_metrics_history
@@ -829,7 +826,7 @@ impl JobQueue for SqliteJobQueue {
         .bind(limit)
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to fetch pending evaluations: {}", e) })?;
+        .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to fetch pending evaluations: {}", e) })?;
 
         let mut out = Vec::new();
         for row in rows {
@@ -853,9 +850,9 @@ impl JobQueue for SqliteJobQueue {
         record_id: i64,
         verdict: OracleVerdict,
         soul_hash: &str,
-    ) -> Result<(), FactoryError> {
+    ) -> Result<(), AiomeError> {
         let mut tx = self.pool.begin().await
-            .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to start transaction: {}", e) })?;
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to start transaction: {}", e) })?;
 
         // 1. Update the Metrics Ledger (The Proof)
         sqlx::query(
@@ -871,7 +868,7 @@ impl JobQueue for SqliteJobQueue {
         .bind(record_id)
         .execute(&mut *tx)
         .await
-        .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to update ledger: {}", e) })?;
+        .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to update ledger: {}", e) })?;
 
         // 2. Fetch job info for Karma update
         let job_row = sqlx::query(
@@ -883,7 +880,7 @@ impl JobQueue for SqliteJobQueue {
         .bind(record_id)
         .fetch_one(&mut *tx)
         .await
-        .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to fetch job context: {}", e) })?;
+        .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to fetch job context: {}", e) })?;
 
         let job_id: String = job_row.get("id");
         let _topic: String = job_row.get("topic");
@@ -911,18 +908,18 @@ impl JobQueue for SqliteJobQueue {
             .bind(soul_hash)
             .execute(&mut *tx)
             .await
-            .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to update Karma logs: {}", e) })?;
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to update Karma logs: {}", e) })?;
         }
 
         tx.commit().await
-            .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to commit transaction: {}", e) })?;
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to commit transaction: {}", e) })?;
 
         Ok(())
     }
 
-    async fn fetch_recent_jobs(&self, limit: i64) -> Result<Vec<Job>, FactoryError> {
+    async fn fetch_recent_jobs(&self, limit: i64) -> Result<Vec<Job>, AiomeError> {
         let rows = sqlx::query(
-            "SELECT id, topic, style_name, karma_directives, status, started_at, last_heartbeat, 
+            "SELECT id, category, topic, style_name, karma_directives, status, started_at, last_heartbeat, 
                      tech_karma_extracted, creative_rating, execution_log, error_message,
                      sns_platform, sns_content_id, published_at, output_artifacts 
               FROM jobs 
@@ -931,13 +928,14 @@ impl JobQueue for SqliteJobQueue {
         .bind(limit)
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to fetch recent jobs: {}", e) })?;
+        .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to fetch recent jobs: {}", e) })?;
 
         let mut jobs = Vec::new();
         for r in rows {
             let tech_karma_extracted: i32 = r.get("tech_karma_extracted");
             jobs.push(Job {
                 id: r.get("id"),
+                category: r.get("category"),
                 topic: r.get("topic"),
                 style: r.get("style_name"),
                 karma_directives: try_get_optional_string(&r, "karma_directives"),
@@ -957,76 +955,76 @@ impl JobQueue for SqliteJobQueue {
         Ok(jobs)
     }
 
-    async fn get_agent_stats(&self) -> Result<shared::watchtower::AgentStats, FactoryError> {
-        let row = sqlx::query("SELECT level, exp, affection, intimacy, fatigue FROM agent_stats WHERE id = 1")
+    async fn get_agent_stats(&self) -> Result<shared::watchtower::AgentStats, AiomeError> {
+        let row = sqlx::query("SELECT level, exp, resonance, creativity, fatigue FROM agent_stats WHERE id = 1")
             .fetch_one(&self.pool)
             .await
-            .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to fetch agent stats: {}", e) })?;
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to fetch agent stats: {}", e) })?;
 
         use sqlx::Row;
         Ok(shared::watchtower::AgentStats {
             level: row.get("level"),
             exp: row.get("exp"),
-            affection: row.get("affection"),
-            intimacy: row.get("intimacy"),
+            resonance: row.get("resonance"),
+            creativity: row.get("creativity"),
             fatigue: row.get("fatigue"),
         })
     }
 
-    async fn add_affection(&self, amount: i32) -> Result<(), FactoryError> {
-        sqlx::query("UPDATE agent_stats SET affection = affection + ?, updated_at = datetime('now') WHERE id = 1")
+    async fn add_resonance(&self, amount: i32) -> Result<(), AiomeError> {
+        sqlx::query("UPDATE agent_stats SET resonance = resonance + ?, updated_at = datetime('now') WHERE id = 1")
             .bind(amount)
             .execute(&self.pool)
             .await
-            .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to update affection: {}", e) })?;
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to update resonance: {}", e) })?;
         Ok(())
     }
 
-    async fn add_tech_exp(&self, amount: i32) -> Result<(), FactoryError> {
+    async fn add_tech_exp(&self, amount: i32) -> Result<(), AiomeError> {
         sqlx::query("UPDATE agent_stats SET exp = exp + ?, updated_at = datetime('now') WHERE id = 1")
             .bind(amount)
             .execute(&self.pool)
             .await
-            .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to update exp: {}", e) })?;
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to update exp: {}", e) })?;
         Ok(())
     }
 
-    async fn add_intimacy(&self, amount: i32) -> Result<(), FactoryError> {
-        sqlx::query("UPDATE agent_stats SET intimacy = intimacy + ?, updated_at = datetime('now') WHERE id = 1")
+    async fn add_creativity(&self, amount: i32) -> Result<(), AiomeError> {
+        sqlx::query("UPDATE agent_stats SET creativity = creativity + ?, updated_at = datetime('now') WHERE id = 1")
             .bind(amount)
             .execute(&self.pool)
             .await
-            .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to update intimacy: {}", e) })?;
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to update creativity: {}", e) })?;
         Ok(())
     }
 
-    async fn get_pending_job_count(&self) -> Result<i64, FactoryError> {
+    async fn get_pending_job_count(&self) -> Result<i64, AiomeError> {
         let row = sqlx::query("SELECT COUNT(*) as count FROM jobs WHERE status = ?")
             .bind(JobStatus::Pending.to_string())
             .fetch_one(&self.pool)
             .await
-            .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to count pending jobs: {}", e) })?;
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to count pending jobs: {}", e) })?;
         Ok(row.get("count"))
     }
 
-    async fn get_job_count_since(&self, since: chrono::DateTime<chrono::Utc>) -> Result<i64, FactoryError> {
+    async fn get_job_count_since(&self, since: chrono::DateTime<chrono::Utc>) -> Result<i64, AiomeError> {
         let since_str = since.to_rfc3339();
         let row = sqlx::query("SELECT COUNT(*) as count FROM jobs WHERE created_at >= ?")
             .bind(since_str)
             .fetch_one(&self.pool)
             .await
-            .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to count jobs since: {}", e) })?;
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to count jobs since: {}", e) })?;
         Ok(row.get("count"))
     }
 
-    async fn fetch_all_karma(&self, limit: i64) -> Result<Vec<serde_json::Value>, FactoryError> {
+    async fn fetch_all_karma(&self, limit: i64) -> Result<Vec<serde_json::Value>, AiomeError> {
         let rows = sqlx::query(
             "SELECT * FROM karma_logs ORDER BY created_at DESC LIMIT ?"
         )
         .bind(limit)
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| FactoryError::Infrastructure { reason: e.to_string() })?;
+        .map_err(|e| AiomeError::Infrastructure { reason: e.to_string() })?;
 
         let mut karmas = Vec::new();
         for row in rows {
@@ -1046,7 +1044,7 @@ impl JobQueue for SqliteJobQueue {
         Ok(karmas)
     }
 
-    async fn fetch_top_performing_jobs(&self, limit: i64) -> Result<Vec<Job>, FactoryError> {
+    async fn fetch_top_performing_jobs(&self, limit: i64) -> Result<Vec<Job>, AiomeError> {
         let rows = sqlx::query(
             "SELECT j.* FROM jobs j 
              JOIN sns_metrics_history s ON j.id = s.job_id 
@@ -1057,7 +1055,7 @@ impl JobQueue for SqliteJobQueue {
         .bind(limit)
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| FactoryError::Infrastructure { reason: e.to_string() })?;
+        .map_err(|e| AiomeError::Infrastructure { reason: e.to_string() })?;
 
         let mut jobs = Vec::new();
         for r in rows {
@@ -1078,6 +1076,7 @@ impl JobQueue for SqliteJobQueue {
 
             jobs.push(Job {
                 id,
+                category: r.get("category"),
                 topic,
                 style,
                 karma_directives,
@@ -1097,23 +1096,23 @@ impl JobQueue for SqliteJobQueue {
         Ok(jobs)
     }
 
-    async fn record_soul_mutation(&self, old_hash: &str, new_hash: &str, reason: &str) -> Result<(), FactoryError> {
+    async fn record_soul_mutation(&self, old_hash: &str, new_hash: &str, reason: &str) -> Result<(), AiomeError> {
         sqlx::query("INSERT INTO soul_mutation_history (old_hash, new_hash, mutation_reason) VALUES (?, ?, ?)")
             .bind(old_hash)
             .bind(new_hash)
             .bind(reason)
             .execute(&self.pool)
             .await
-            .map_err(|e| FactoryError::Infrastructure { reason: e.to_string() })?;
+            .map_err(|e| AiomeError::Infrastructure { reason: e.to_string() })?;
         Ok(())
     }
 
-    async fn fetch_job_retry_count(&self, job_id: &str) -> Result<i64, FactoryError> {
+    async fn fetch_job_retry_count(&self, job_id: &str) -> Result<i64, AiomeError> {
         let row = sqlx::query("SELECT retry_count FROM jobs WHERE id = ?")
             .bind(job_id)
             .fetch_optional(&self.pool)
             .await
-            .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to fetch retry count: {}", e) })?;
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to fetch retry count: {}", e) })?;
         
         if let Some(r) = row {
             Ok(r.get("retry_count"))
@@ -1122,21 +1121,21 @@ impl JobQueue for SqliteJobQueue {
         }
     }
 
-    async fn reset_job_retry_count(&self, job_id: &str) -> Result<(), FactoryError> {
+    async fn reset_job_retry_count(&self, job_id: &str) -> Result<(), AiomeError> {
         sqlx::query("UPDATE jobs SET retry_count = 0 WHERE id = ?")
             .bind(job_id)
             .execute(&self.pool)
             .await
-            .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to reset retry count: {}", e) })?;
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to reset retry count: {}", e) })?;
         Ok(())
     }
 
-    async fn increment_job_retry_count(&self, job_id: &str) -> Result<bool, FactoryError> {
+    async fn increment_job_retry_count(&self, job_id: &str) -> Result<bool, AiomeError> {
         let row = sqlx::query("UPDATE jobs SET retry_count = retry_count + 1 WHERE id = ? RETURNING retry_count")
             .bind(job_id)
             .fetch_one(&self.pool)
             .await
-            .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to increment job retry count: {}", e) })?;
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to increment job retry count: {}", e) })?;
             
         let count: i64 = row.get("retry_count");
         if count >= 3 {
@@ -1149,7 +1148,7 @@ impl JobQueue for SqliteJobQueue {
         }
     }
 
-    async fn fetch_unincorporated_karma(&self, limit: i64, current_soul_hash: &str) -> Result<Vec<serde_json::Value>, FactoryError> {
+    async fn fetch_unincorporated_karma(&self, limit: i64, current_soul_hash: &str) -> Result<Vec<serde_json::Value>, AiomeError> {
         let rows = sqlx::query(
             "SELECT id, lesson, related_skill, karma_type, weight FROM karma_logs 
              WHERE soul_version_hash IS NULL OR soul_version_hash != ? 
@@ -1159,7 +1158,7 @@ impl JobQueue for SqliteJobQueue {
         .bind(limit)
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to fetch unincorporated karma: {}", e) })?;
+        .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to fetch unincorporated karma: {}", e) })?;
 
         let mut results = Vec::new();
         for row in rows {
@@ -1174,7 +1173,7 @@ impl JobQueue for SqliteJobQueue {
         Ok(results)
     }
 
-    async fn mark_karma_as_incorporated(&self, karma_ids: Vec<String>, new_soul_hash: &str) -> Result<(), FactoryError> {
+    async fn mark_karma_as_incorporated(&self, karma_ids: Vec<String>, new_soul_hash: &str) -> Result<(), AiomeError> {
         if karma_ids.is_empty() { return Ok(()); }
         
         // SQLite supports `IN (...)` with many parameters, but here we build it manually or use QueryBuilder
@@ -1191,12 +1190,12 @@ impl JobQueue for SqliteJobQueue {
         query_builder.build()
             .execute(&self.pool)
             .await
-            .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to mark karma as incorporated: {}", e) })?;
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to mark karma as incorporated: {}", e) })?;
         
         Ok(())
     }
 
-    async fn store_immune_rule(&self, rule: &factory_core::contracts::ImmuneRule) -> Result<(), FactoryError> {
+    async fn store_immune_rule(&self, rule: &aiome_core::contracts::ImmuneRule) -> Result<(), AiomeError> {
         sqlx::query("INSERT INTO immune_rules (id, pattern, severity, action, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING")
             .bind(&rule.id)
             .bind(&rule.pattern)
@@ -1205,19 +1204,19 @@ impl JobQueue for SqliteJobQueue {
             .bind(&rule.created_at)
             .execute(&self.pool)
             .await
-            .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to store immune rule: {}", e) })?;
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to store immune rule: {}", e) })?;
         Ok(())
     }
 
-    async fn fetch_active_immune_rules(&self) -> Result<Vec<factory_core::contracts::ImmuneRule>, FactoryError> {
+    async fn fetch_active_immune_rules(&self) -> Result<Vec<aiome_core::contracts::ImmuneRule>, AiomeError> {
         let rows = sqlx::query("SELECT id, pattern, severity, action, created_at FROM immune_rules ORDER BY created_at DESC")
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to fetch immune rules: {}", e) })?;
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to fetch immune rules: {}", e) })?;
 
         let mut rules = Vec::new();
         for r in rows {
-            rules.push(factory_core::contracts::ImmuneRule {
+            rules.push(aiome_core::contracts::ImmuneRule {
                 id: r.try_get("id").unwrap_or_else(|_| "".to_string()),
                 pattern: r.try_get("pattern").unwrap_or_else(|_| "".to_string()),
                 severity: r.try_get::<i64, _>("severity").unwrap_or(50) as u8,
@@ -1228,7 +1227,7 @@ impl JobQueue for SqliteJobQueue {
         Ok(rules)
     }
 
-    async fn record_arena_match(&self, match_data: &factory_core::contracts::ArenaMatch) -> Result<(), FactoryError> {
+    async fn record_arena_match(&self, match_data: &aiome_core::contracts::ArenaMatch) -> Result<(), AiomeError> {
         sqlx::query("INSERT INTO arena_history (id, skill_a, skill_b, topic, winner, reasoning, created_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING")
             .bind(&match_data.id)
             .bind(&match_data.skill_a)
@@ -1239,36 +1238,36 @@ impl JobQueue for SqliteJobQueue {
             .bind(&match_data.created_at)
             .execute(&self.pool)
             .await
-            .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to record arena match: {}", e) })?;
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to record arena match: {}", e) })?;
         Ok(())
     }
 
     // --- Phase 12-F: Karma Federation ---
 
-    async fn export_federated_data(&self, since: Option<&str>) -> Result<(Vec<factory_core::contracts::FederatedKarma>, Vec<factory_core::contracts::ImmuneRule>, Vec<factory_core::contracts::ArenaMatch>), FactoryError> {
+    async fn export_federated_data(&self, since: Option<&str>) -> Result<(Vec<aiome_core::contracts::FederatedKarma>, Vec<aiome_core::contracts::ImmuneRule>, Vec<aiome_core::contracts::ArenaMatch>), AiomeError> {
         let since_ts = since.unwrap_or("1970-01-01T00:00:00");
 
         let karmas = sqlx::query("SELECT id, job_id, karma_type, related_skill, lesson, weight, soul_version_hash, created_at FROM karma_logs WHERE created_at > ?")
             .bind(since_ts)
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| FactoryError::Infrastructure { reason: format!("Export Karma failed: {}", e) })?;
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Export Karma failed: {}", e) })?;
 
         let rules = sqlx::query("SELECT id, pattern, severity, action, created_at FROM immune_rules WHERE created_at > ?")
             .bind(since_ts)
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| FactoryError::Infrastructure { reason: format!("Export Rules failed: {}", e) })?;
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Export Rules failed: {}", e) })?;
 
         let matches = sqlx::query("SELECT id, skill_a, skill_b, topic, winner, reasoning, created_at FROM arena_history WHERE created_at > ?")
             .bind(since_ts)
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| FactoryError::Infrastructure { reason: format!("Export Matches failed: {}", e) })?;
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Export Matches failed: {}", e) })?;
 
         let mut fed_karmas = Vec::new();
         for r in karmas {
-            fed_karmas.push(factory_core::contracts::FederatedKarma {
+            fed_karmas.push(aiome_core::contracts::FederatedKarma {
                 id: r.get("id"),
                 job_id: try_get_optional_string(&r, "job_id"),
                 karma_type: r.get("karma_type"),
@@ -1282,7 +1281,7 @@ impl JobQueue for SqliteJobQueue {
 
         let mut fed_rules = Vec::new();
         for r in rules {
-            fed_rules.push(factory_core::contracts::ImmuneRule {
+            fed_rules.push(aiome_core::contracts::ImmuneRule {
                 id: r.get("id"),
                 pattern: r.get("pattern"),
                 severity: r.get::<i64, _>("severity") as u8,
@@ -1293,7 +1292,7 @@ impl JobQueue for SqliteJobQueue {
 
         let mut fed_matches = Vec::new();
         for r in matches {
-            fed_matches.push(factory_core::contracts::ArenaMatch {
+            fed_matches.push(aiome_core::contracts::ArenaMatch {
                 id: r.get("id"),
                 skill_a: r.get("skill_a"),
                 skill_b: r.get("skill_b"),
@@ -1307,49 +1306,49 @@ impl JobQueue for SqliteJobQueue {
         Ok((fed_karmas, fed_rules, fed_matches))
     }
 
-    async fn import_federated_data(&self, karmas: Vec<factory_core::contracts::FederatedKarma>, rules: Vec<factory_core::contracts::ImmuneRule>, matches: Vec<factory_core::contracts::ArenaMatch>) -> Result<(), FactoryError> {
+    async fn import_federated_data(&self, karmas: Vec<aiome_core::contracts::FederatedKarma>, rules: Vec<aiome_core::contracts::ImmuneRule>, matches: Vec<aiome_core::contracts::ArenaMatch>) -> Result<(), AiomeError> {
         let mut tx = self.pool.begin().await
-            .map_err(|e| FactoryError::Infrastructure { reason: format!("Import Tx start failed: {}", e) })?;
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Import Tx start failed: {}", e) })?;
 
         for k in karmas {
             sqlx::query("INSERT INTO karma_logs (id, job_id, karma_type, related_skill, lesson, weight, soul_version_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING")
                 .bind(&k.id).bind(&k.job_id).bind(&k.karma_type).bind(&k.related_skill).bind(&k.lesson).bind(k.weight as i64).bind(&k.soul_version_hash).bind(&k.created_at)
-                .execute(&mut *tx).await.map_err(|e| FactoryError::Infrastructure { reason: format!("Import Karma failed: {}", e) })?;
+                .execute(&mut *tx).await.map_err(|e| AiomeError::Infrastructure { reason: format!("Import Karma failed: {}", e) })?;
         }
 
         for r in rules {
             sqlx::query("INSERT INTO immune_rules (id, pattern, severity, action, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING")
                 .bind(&r.id).bind(&r.pattern).bind(r.severity as i64).bind(&r.action).bind(&r.created_at)
-                .execute(&mut *tx).await.map_err(|e| FactoryError::Infrastructure { reason: format!("Import Rule failed: {}", e) })?;
+                .execute(&mut *tx).await.map_err(|e| AiomeError::Infrastructure { reason: format!("Import Rule failed: {}", e) })?;
         }
 
         for m in matches {
             sqlx::query("INSERT INTO arena_history (id, skill_a, skill_b, topic, winner, reasoning, created_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING")
                 .bind(&m.id).bind(&m.skill_a).bind(&m.skill_b).bind(&m.topic).bind(&m.winner).bind(&m.reasoning).bind(&m.created_at)
-                .execute(&mut *tx).await.map_err(|e| FactoryError::Infrastructure { reason: format!("Import Match failed: {}", e) })?;
+                .execute(&mut *tx).await.map_err(|e| AiomeError::Infrastructure { reason: format!("Import Match failed: {}", e) })?;
         }
 
-        tx.commit().await.map_err(|e| FactoryError::Infrastructure { reason: format!("Import Tx commit failed: {}", e) })?;
+        tx.commit().await.map_err(|e| AiomeError::Infrastructure { reason: format!("Import Tx commit failed: {}", e) })?;
         Ok(())
     }
 
-    async fn get_peer_sync_time(&self, peer_url: &str) -> Result<Option<String>, FactoryError> {
+    async fn get_peer_sync_time(&self, peer_url: &str) -> Result<Option<String>, AiomeError> {
         let row = sqlx::query("SELECT last_sync_at FROM federation_peers WHERE peer_url = ?")
             .bind(peer_url)
             .fetch_optional(&self.pool)
             .await
-            .map_err(|e| FactoryError::Infrastructure { reason: format!("Get Peer sync time failed: {}", e) })?;
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Get Peer sync time failed: {}", e) })?;
         
         Ok(row.map(|r| r.get("last_sync_at")))
     }
 
-    async fn update_peer_sync_time(&self, peer_url: &str, sync_time: &str) -> Result<(), FactoryError> {
+    async fn update_peer_sync_time(&self, peer_url: &str, sync_time: &str) -> Result<(), AiomeError> {
         sqlx::query("INSERT INTO federation_peers (peer_url, last_sync_at) VALUES (?, ?) ON CONFLICT(peer_url) DO UPDATE SET last_sync_at = excluded.last_sync_at")
             .bind(peer_url)
             .bind(sync_time)
             .execute(&self.pool)
             .await
-            .map_err(|e| FactoryError::Infrastructure { reason: format!("Update Peer sync time failed: {}", e) })?;
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Update Peer sync time failed: {}", e) })?;
         Ok(())
     }
 }
@@ -1357,18 +1356,18 @@ impl JobQueue for SqliteJobQueue {
 impl SqliteJobQueue {
     // --- Watchtower Memory Distillation Methods ---
 
-    pub async fn insert_chat_message(&self, channel_id: &str, role: &str, content: &str) -> Result<(), FactoryError> {
+    pub async fn insert_chat_message(&self, channel_id: &str, role: &str, content: &str) -> Result<(), AiomeError> {
         sqlx::query("INSERT INTO chat_history (channel_id, role, content) VALUES (?, ?, ?)")
             .bind(channel_id)
             .bind(role)
             .bind(content)
             .execute(&self.pool)
             .await
-            .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to insert chat history: {}", e) })?;
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to insert chat history: {}", e) })?;
         Ok(())
     }
 
-    pub async fn fetch_chat_history(&self, channel_id: &str, limit: i64) -> Result<Vec<serde_json::Value>, FactoryError> {
+    pub async fn fetch_chat_history(&self, channel_id: &str, limit: i64) -> Result<Vec<serde_json::Value>, AiomeError> {
         // Fetch the newest `limit` messages, but we need them in chronological order
         // So we order by id DESC, limit, and then reverse the result in memory.
         let rows = sqlx::query(
@@ -1378,7 +1377,7 @@ impl SqliteJobQueue {
         .bind(limit)
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to fetch chat history: {}", e) })?;
+        .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to fetch chat history: {}", e) })?;
 
         let mut messages = Vec::new();
         for row in rows {
@@ -1396,12 +1395,12 @@ impl SqliteJobQueue {
         Ok(messages)
     }
 
-    pub async fn get_chat_memory_summary(&self, channel_id: &str) -> Result<Option<String>, FactoryError> {
+    pub async fn get_chat_memory_summary(&self, channel_id: &str) -> Result<Option<String>, AiomeError> {
         let row = sqlx::query("SELECT summary FROM chat_memory_summaries WHERE channel_id = ?")
             .bind(channel_id)
             .fetch_optional(&self.pool)
             .await
-            .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to get chat memory summary: {}", e) })?;
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to get chat memory summary: {}", e) })?;
 
         if let Some(r) = row {
             use sqlx::Row;
@@ -1411,7 +1410,7 @@ impl SqliteJobQueue {
         }
     }
 
-    pub async fn update_chat_memory_summary(&self, channel_id: &str, summary: &str) -> Result<(), FactoryError> {
+    pub async fn update_chat_memory_summary(&self, channel_id: &str, summary: &str) -> Result<(), AiomeError> {
         sqlx::query(
             "INSERT INTO chat_memory_summaries (channel_id, summary, updated_at) 
              VALUES (?, ?, datetime('now'))
@@ -1421,19 +1420,19 @@ impl SqliteJobQueue {
         .bind(summary)
         .execute(&self.pool)
         .await
-        .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to update chat memory summary: {}", e) })?;
+        .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to update chat memory summary: {}", e) })?;
         Ok(())
     }
 
     /// Fetches all undistilled chats spanning all channels. 
     /// Returns a map of channel_id to a list of (id, role, content)
-    pub async fn fetch_undistilled_chats_by_channel(&self) -> Result<std::collections::HashMap<String, Vec<(i64, String, String)>>, FactoryError> {
+    pub async fn fetch_undistilled_chats_by_channel(&self) -> Result<std::collections::HashMap<String, Vec<(i64, String, String)>>, AiomeError> {
         let rows = sqlx::query(
             "SELECT id, channel_id, role, content FROM chat_history WHERE is_distilled = 0 ORDER BY channel_id ASC, id ASC"
         )
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to fetch undistilled chats: {}", e) })?;
+        .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to fetch undistilled chats: {}", e) })?;
 
         let mut map = std::collections::HashMap::new();
         for row in rows {
@@ -1447,37 +1446,37 @@ impl SqliteJobQueue {
         Ok(map)
     }
 
-    pub async fn mark_chats_as_distilled(&self, channel_id: &str, up_to_id: i64) -> Result<(), FactoryError> {
+    pub async fn mark_chats_as_distilled(&self, channel_id: &str, up_to_id: i64) -> Result<(), AiomeError> {
         sqlx::query("UPDATE chat_history SET is_distilled = 1 WHERE channel_id = ? AND id <= ?")
             .bind(channel_id)
             .bind(up_to_id)
             .execute(&self.pool)
             .await
-            .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to mark chats as distilled: {}", e) })?;
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to mark chats as distilled: {}", e) })?;
         Ok(())
     }
 
-    pub async fn purge_old_distilled_chats(&self, days: i64) -> Result<u64, FactoryError> {
+    pub async fn purge_old_distilled_chats(&self, days: i64) -> Result<u64, AiomeError> {
         let result = sqlx::query(
             "DELETE FROM chat_history WHERE is_distilled = 1 AND created_at < datetime('now', ? || ' days')"
         )
         .bind(format!("-{}", days))
         .execute(&self.pool)
         .await
-        .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to purge old distilled chats: {}", e) })?;
+        .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to purge old distilled chats: {}", e) })?;
 
         Ok(result.rows_affected())
     }
 
     // --- Consolidated Inherent Methods ---
-    pub async fn fetch_skills_for_distillation(&self, threshold: i64) -> Result<Vec<String>, FactoryError> {
+    pub async fn fetch_skills_for_distillation(&self, threshold: i64) -> Result<Vec<String>, AiomeError> {
         let rows = sqlx::query(
             "SELECT related_skill FROM karma_logs GROUP BY related_skill HAVING COUNT(id) > ?"
         )
         .bind(threshold)
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to fetch skills for distillation: {}", e) })?;
+        .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to fetch skills for distillation: {}", e) })?;
 
         let mut skills = Vec::new();
         for r in rows {
@@ -1486,14 +1485,14 @@ impl SqliteJobQueue {
         Ok(skills)
     }
 
-    pub async fn fetch_raw_karma_for_skill(&self, skill: &str) -> Result<Vec<(String, String)>, FactoryError> {
+    pub async fn fetch_raw_karma_for_skill(&self, skill: &str) -> Result<Vec<(String, String)>, AiomeError> {
         let rows = sqlx::query(
             "SELECT id, lesson FROM karma_logs WHERE related_skill = ?"
         )
         .bind(skill)
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to fetch raw karma for skill: {}", e) })?;
+        .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to fetch raw karma for skill: {}", e) })?;
 
         let mut karma = Vec::new();
         for r in rows {
@@ -1505,13 +1504,13 @@ impl SqliteJobQueue {
     }
 
 
-    pub async fn apply_distilled_karma(&self, skill: &str, distilled_lesson: &str, old_karma_ids: &[String], soul_hash: &str) -> Result<(), FactoryError> {
+    pub async fn apply_distilled_karma(&self, skill: &str, distilled_lesson: &str, old_karma_ids: &[String], soul_hash: &str) -> Result<(), AiomeError> {
         let mut tx = self.pool.begin().await
-            .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to start tx for distillation: {}", e) })?;
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to start tx for distillation: {}", e) })?;
 
         for id in old_karma_ids {
             sqlx::query("DELETE FROM karma_logs WHERE id = ?").bind(id).execute(&mut *tx).await
-                .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to delete old karma {}: {}", id, e) })?;
+                .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to delete old karma {}: {}", id, e) })?;
         }
 
         let new_id = uuid::Uuid::new_v4().to_string();
@@ -1525,22 +1524,22 @@ impl SqliteJobQueue {
             .bind(soul_hash)
             .execute(&mut *tx)
             .await
-            .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to insert synthesized karma: {}", e) })?;
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to insert synthesized karma: {}", e) })?;
 
         tx.commit().await
-            .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to commit distlillation tx: {}", e) })?;
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to commit distlillation tx: {}", e) })?;
 
         Ok(())
     }
 
 
 
-    pub async fn increment_oracle_retry_count(&self, record_id: i64) -> Result<bool, FactoryError> {
+    pub async fn increment_oracle_retry_count(&self, record_id: i64) -> Result<bool, AiomeError> {
         let row = sqlx::query("UPDATE sns_metrics_history SET retry_count = retry_count + 1 WHERE id = ? RETURNING retry_count")
             .bind(record_id)
             .fetch_one(&self.pool)
             .await
-            .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to increment oracle retry count: {}", e) })?;
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to increment oracle retry count: {}", e) })?;
             
         let count: i64 = row.get("retry_count");
         if count >= 3 {
@@ -1553,11 +1552,11 @@ impl SqliteJobQueue {
         }
     }
 
-    pub async fn get_global_api_failures(&self) -> Result<i64, FactoryError> {
+    pub async fn get_global_api_failures(&self) -> Result<i64, AiomeError> {
         let row = sqlx::query("SELECT value FROM system_state WHERE key = 'consecutive_api_failures'")
             .fetch_optional(&self.pool)
             .await
-            .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to read system_state: {}", e) })?;
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to read system_state: {}", e) })?;
         
         if let Some(r) = row {
             let val_str: String = r.try_get("value").unwrap_or_default();
@@ -1567,7 +1566,7 @@ impl SqliteJobQueue {
         }
     }
 
-    pub async fn record_global_api_failure(&self) -> Result<i64, FactoryError> {
+    pub async fn record_global_api_failure(&self) -> Result<i64, AiomeError> {
         let current = self.get_global_api_failures().await?;
         let next = current + 1;
         
@@ -1579,12 +1578,12 @@ impl SqliteJobQueue {
         .bind(next.to_string())
         .execute(&self.pool)
         .await
-        .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to update system_state: {}", e) })?;
+        .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to update system_state: {}", e) })?;
         
         Ok(next)
     }
 
-    pub async fn record_global_api_success(&self) -> Result<(), FactoryError> {
+    pub async fn record_global_api_success(&self) -> Result<(), AiomeError> {
         sqlx::query(
             "INSERT INTO system_state (key, value, updated_at) 
              VALUES ('consecutive_api_failures', '0', datetime('now'))
@@ -1592,26 +1591,26 @@ impl SqliteJobQueue {
         )
         .execute(&self.pool)
         .await
-        .map_err(|e| FactoryError::Infrastructure { reason: format!("Failed to reset system_state: {}", e) })?;
+        .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to reset system_state: {}", e) })?;
         
         Ok(())
     }
 
-    pub async fn fetch_unfederated_data(&self) -> Result<(Vec<factory_core::contracts::FederatedKarma>, Vec<factory_core::contracts::ImmuneRule>), FactoryError> {
+    pub async fn fetch_unfederated_data(&self) -> Result<(Vec<aiome_core::contracts::FederatedKarma>, Vec<aiome_core::contracts::ImmuneRule>), AiomeError> {
         let karmas = sqlx::query("SELECT id, job_id, karma_type, related_skill, lesson, weight, soul_version_hash, created_at FROM karma_logs WHERE is_federated = 0")
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| FactoryError::Infrastructure { reason: format!("Fetch unfederated karma failed: {}", e) })?;
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Fetch unfederated karma failed: {}", e) })?;
 
         let rules = sqlx::query("SELECT id, pattern, severity, action, created_at FROM immune_rules WHERE is_federated = 0")
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| FactoryError::Infrastructure { reason: format!("Fetch unfederated rules failed: {}", e) })?;
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Fetch unfederated rules failed: {}", e) })?;
 
         let mut fed_karmas = Vec::new();
         for r in karmas {
             use sqlx::Row;
-            fed_karmas.push(factory_core::contracts::FederatedKarma {
+            fed_karmas.push(aiome_core::contracts::FederatedKarma {
                 id: r.get("id"),
                 job_id: try_get_optional_string(&r, "job_id"),
                 karma_type: r.get("karma_type"),
@@ -1626,7 +1625,7 @@ impl SqliteJobQueue {
         let mut fed_rules = Vec::new();
         for r in rules {
             use sqlx::Row;
-            fed_rules.push(factory_core::contracts::ImmuneRule {
+            fed_rules.push(aiome_core::contracts::ImmuneRule {
                 id: r.get("id"),
                 pattern: r.get("pattern"),
                 severity: r.get::<i64, _>("severity") as u8,
@@ -1638,9 +1637,9 @@ impl SqliteJobQueue {
         Ok((fed_karmas, fed_rules))
     }
 
-    pub async fn mark_as_federated(&self, karma_ids: Vec<String>, rule_ids: Vec<String>) -> Result<(), FactoryError> {
+    pub async fn mark_as_federated(&self, karma_ids: Vec<String>, rule_ids: Vec<String>) -> Result<(), AiomeError> {
         let mut tx = self.pool.begin().await
-            .map_err(|e| FactoryError::Infrastructure { reason: format!("Mark federated Tx failed: {}", e) })?;
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Mark federated Tx failed: {}", e) })?;
 
         for id in karma_ids {
             sqlx::query("UPDATE karma_logs SET is_federated = 1 WHERE id = ?").bind(id).execute(&mut *tx).await.ok();
@@ -1649,7 +1648,7 @@ impl SqliteJobQueue {
             sqlx::query("UPDATE immune_rules SET is_federated = 1 WHERE id = ?").bind(id).execute(&mut *tx).await.ok();
         }
 
-        tx.commit().await.map_err(|e| FactoryError::Infrastructure { reason: format!("Mark federated commit failed: {}", e) })?;
+        tx.commit().await.map_err(|e| AiomeError::Infrastructure { reason: format!("Mark federated commit failed: {}", e) })?;
         Ok(())
     }
 }

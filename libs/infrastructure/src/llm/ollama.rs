@@ -1,0 +1,54 @@
+/*
+ * Aiome - The Autonomous AI Operating System
+ */
+
+use async_trait::async_trait;
+use aiome_core::llm_provider::LlmProvider;
+use aiome_core::error::AiomeError;
+use serde_json::json;
+
+#[derive(Debug)]
+pub struct OllamaProvider {
+    pub base_url: String,
+    pub model: String,
+    client: reqwest::Client,
+}
+
+impl OllamaProvider {
+    pub fn new(base_url: String, model: String) -> Self {
+        Self {
+            base_url,
+            model,
+            client: reqwest::Client::new(),
+        }
+    }
+}
+
+#[async_trait]
+impl LlmProvider for OllamaProvider {
+    async fn complete(&self, prompt: &str, system: Option<&str>) -> Result<String, AiomeError> {
+        let url = format!("{}/api/generate", self.base_url);
+        
+        let payload = json!({
+            "model": self.model,
+            "prompt": prompt,
+            "system": system,
+            "stream": false
+        });
+
+        let res = self.client.post(&url)
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e| AiomeError::Infrastructure { reason: e.to_string() })?;
+
+        let body: serde_json::Value = res.json().await
+            .map_err(|e| AiomeError::Infrastructure { reason: e.to_string() })?;
+
+        Ok(body["response"].as_str().unwrap_or("").to_string())
+    }
+
+    fn name(&self) -> &str {
+        "Ollama"
+    }
+}

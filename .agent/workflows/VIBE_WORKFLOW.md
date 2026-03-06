@@ -1,6 +1,6 @@
-# ⚡ Antigravity Vibe Workflow
+# ⚡ Aiome Vibe Workflow
 
-Everything Antigravity + Golden Rule + GitHub MCP を統合した、究極のバイブコーディングフロー。
+Everything Aiome + Golden Rule + GitHub MCP を統合した、究極のバイブコーディングフロー。
 
 ## 🎯 哲学
 

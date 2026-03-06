@@ -10,30 +10,23 @@
 
 use std::path::PathBuf;
 use tokio::fs;
-use rig::providers::gemini;
-use rig::prelude::*;
-use rig::completion::Prompt;
-use factory_core::traits::JobQueue;
-use secrecy::{SecretString, ExposeSecret};
-
+use aiome_core::traits::JobQueue;
+use aiome_core::llm_provider::LlmProvider;
+use std::sync::Arc;
 use tracing::info;
 
 pub struct SoulMutator {
-    gemini_api_key: SecretString,
-    model_name: String,
+    provider: Arc<dyn LlmProvider>,
 }
 
 impl SoulMutator {
-    pub fn new(gemini_api_key: &str, model_name: &str, _workspace_dir: PathBuf) -> Self {
-        Self {
-            gemini_api_key: SecretString::new(gemini_api_key.into()),
-            model_name: model_name.to_string(),
-        }
+    pub fn new(provider: Arc<dyn LlmProvider>, _workspace_dir: PathBuf) -> Self {
+        Self { provider }
     }
 
     /// 魂の変異（Transmigration）を試行する。
     pub async fn transmute(&self, job_queue: &dyn JobQueue) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
-        info!("🧬 [SoulMutator] Starting Transmigration phase...");
+        info!("🧬 [SoulMutator] Starting Transmigration phase using {}...", self.provider.name());
 
         let root_dir = std::env::current_dir()?;
         let soul_path = root_dir.join("SOUL.md");
@@ -71,24 +64,19 @@ impl SoulMutator {
         }
 
         // 4. Mutation Loop
-        let client = gemini::Client::new(self.gemini_api_key.expose_secret())
-             .map_err(|e| format!("Gemini Init Error: {}", e))?;
-
         let preamble = format!(
-            "AI の魂の進化プロセスの継続。EVOLVING_SOUL.md を更新せよ。\n\nマスターソウル:\n{}\n\n成功体験:\n{}\n\n最近の課題:\n{}",
+            "AI の魂の進化プロセスの継続。EVOLVING_SOUL.md を更新せよ。\n\nユーザーソウル:\n{}\n\n成功体験:\n{}\n\n最近の課題:\n{}",
             master_soul,
             top_jobs_text.join("\n"),
             karma_text
         );
 
-        let agent = client.agent(&self.model_name).preamble(&preamble).build();
         let prompt_text = format!("現在のあなたの進化状況を反映した、最新の EVOLVING_SOUL.md を生成せよ。\n\n現在の内容:\n{}", current_evolving_soul);
 
-        let response: String = agent.prompt(prompt_text).await
+        let response = self.provider.complete(&prompt_text, Some(&preamble)).await
             .map_err(|e| format!("Mutation LLM failed: {}", e))?;
 
         let mut new_soul_content = response;
-        // Remove ```markdown wrapping if the LLM included it
         if new_soul_content.starts_with("```markdown") {
             new_soul_content = new_soul_content.trim_start_matches("```markdown").trim().to_string();
         } else if new_soul_content.starts_with("```") {

@@ -60,7 +60,7 @@ pub struct ProjectSummary {
     pub title: String,
     pub style: Option<String>,
     pub created_at: String,
-    pub thumbnail_url: Option<String>,
+    pub preview_url: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

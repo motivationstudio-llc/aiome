@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Play, RotateCw, FileVideo } from 'lucide-react';
+import { ExternalLink, RotateCw, Package } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 
 export interface ProjectSummary {
@@ -7,7 +7,7 @@ export interface ProjectSummary {
     title: string;
     style: string | null;
     created_at: string;
-    thumbnail_url: string | null;
+    preview_url: string | null;
 }
 
 export function Warehouse({ onRemix }: { onRemix: (project: ProjectSummary) => void }) {
@@ -70,12 +70,12 @@ export function Warehouse({ onRemix }: { onRemix: (project: ProjectSummary) => v
                         key={project.id}
                         className="group relative bg-gray-900/50 border border-gray-800 hover:border-sonar-green/50 rounded-xl overflow-hidden transition-all duration-300 hover:shadow-[0_0_20px_rgba(0,255,65,0.1)]"
                     >
-                        {/* Thumbnail Area */}
+                        {/* Resource Preview Area */}
                         <div className="aspect-video bg-black relative">
-                            {project.thumbnail_url ? (
-                                project.thumbnail_url.endsWith('.mp4') ? (
+                            {project.preview_url ? (
+                                project.preview_url.match(/\.(mp4|webm)$/i) ? (
                                     <video
-                                        src={`http://localhost:3000${project.thumbnail_url}`}
+                                        src={`http://localhost:3000${project.preview_url}`}
                                         className="w-full h-full object-cover opacity-60 group-hover:opacity-100 transition-opacity"
                                         muted
                                         loop
@@ -87,21 +87,21 @@ export function Warehouse({ onRemix }: { onRemix: (project: ProjectSummary) => v
                                     />
                                 ) : (
                                     <img
-                                        src={`http://localhost:3000${project.thumbnail_url}`}
+                                        src={`http://localhost:3000${project.preview_url}`}
                                         alt={project.title}
                                         className="w-full h-full object-cover opacity-60 group-hover:opacity-100 transition-opacity"
                                     />
                                 )
                             ) : (
                                 <div className="w-full h-full flex items-center justify-center text-gray-700">
-                                    <FileVideo size={48} strokeWidth={1} />
+                                    <Package size={48} strokeWidth={1} />
                                 </div>
                             )}
 
                             {/* Overlay Actions */}
                             <div className="absolute inset-0 bg-black/60 flex items-center justify-center gap-4 opacity-0 group-hover:opacity-100 transition-opacity backdrop-blur-sm">
                                 <button className="p-3 bg-white text-black rounded-full hover:bg-sonar-green hover:scale-110 transition-all">
-                                    <Play size={24} fill="currentColor" />
+                                    <ExternalLink size={24} />
                                 </button>
                                 <button
                                     onClick={() => onRemix(project)}
@@ -126,7 +126,7 @@ export function Warehouse({ onRemix }: { onRemix: (project: ProjectSummary) => v
                             </div>
                             <div className="flex justify-between items-end">
                                 <span className="text-xs text-sonar-green font-mono">
-                                    ID: {project.id.substring(0, 6)}
+                                    REF: {project.id.substring(0, 6)}
                                 </span>
                                 <span className="text-xs text-gray-600 font-mono">
                                     {new Date(project.created_at).toLocaleDateString()}

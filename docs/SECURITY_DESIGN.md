@@ -1,170 +1,64 @@
-# ShortsFactory セキュリティ設計思想
+# Aiome Security Design Doctrine
 
-> 本ドキュメントは Aiome (ShortsFactory) のセキュリティアーキテクチャを定義する。
-> 商用化を見据えた設計判断の根拠と、各防御層の責務を記録する。
+> This document defines the security architecture for Aiome. It records the rationale for design decisions and the responsibilities of each defense layer.
 
-## 1. 基本思想: LLM を信頼しない
+## 1. Core Principle: Zero-Trust for LLM
 
-従来のエージェントフレームワーク（Aiome, LangChain 等）は LLM に実行権限を与える。
-ShortsFactory はその逆で、**LLM は「考えるだけ」、実行はすべて Rust の厳格な管理下**に置く。
+Unlike traditional agent frameworks that grant execution privileges to the LLM, Aiome operates on a **Zero-Trust** basis: **The LLM is restricted to "deliberation" while all execution is strictly managed by Rust-enforced guardrails.**
 
 ```
-従来:  [LLM] → 任意コード実行 → 💀 暴走リスク
-本設計: [LLM] → Rust検証レイヤー → 許可されたツールのみ実行 → ✅
+Traditional:  [LLM] → Arbitrary Code Execution → 💀 Risk of Hallucination/Malice
+Aiome:        [LLM] → Rust Validation Layer → Whitelisted Tool Execution → ✅
 ```
 
-## 2. 脅威モデル
+## 2. Threat Model
 
-### 2.1 対象外の脅威
+### 2.1 Out-of-Scope Threats
+- **DDoS (Internal)**: Most services are bound to `localhost` and are not exposed to the internet.
+- **MITM**: Local inter-process communication (LDC/UDS) is used between trusted components.
 
-| 脅威 | 理由 |
-|---|---|
-| DDoS | 全サービスが `localhost` バインド。インターネット非公開 |
-| 中間者攻撃 (MITM) | ローカル通信のみ。TLS 不要 |
-| SQLインジェクション | SQLite は `infrastructure` 層で Parameterized Query を使用 |
+### 2.2 Addressed Threats
 
-### 2.2 対処すべき脅威
-
-| # | 脅威 | 攻撃経路 | 深刻度 | 対策レイヤー |
+| # | Threat | Vector | Severity | Mitigation Layer |
 |---|---|---|---|---|
-| 1 | プロンプトインジェクション | ユーザー入力 → LLM | 🔴高 | Guardrails |
-| 2 | LLM出力の暴走 | LLM → ツール実行 | 🔴高 | SecurityPolicy + 出力バリデーション (Phase 2) |
-| 3 | 外部Skillマルウェア | Skillマーケット → ランタイム | 🔴高 | 原理的に排除（外部Skill非対応） |
-| 4 | 依存クレート脆弱性 | サプライチェーン | 🟡中 | Sentinel (`cargo audit`) |
-| 5 | シークレット漏洩 | コードへのハードコード | 🟡中 | Sentinel (Secret Scan) |
-| 6 | ComfyUI ワークフロー改ざん | ワークフローJSON改変 | 🟡中 | ハッシュ検証 (Phase 2) |
-| 7 | モデル汚染 | 不正なOllamaモデル | 🟡中 | SHA256検証 (将来) |
-| 8 | ディスク枯渇 | 動画ファイル蓄積 | 🟢低 | ディスク監視 (Phase 3) |
-| 9 | **カルマ汚染 (Karma Poisoning)** | **悪意あるノードからのFederation経由バッドカルマ注入** | 🔴高 | **Rate Limiting + FEDERATION_SECRET Bearer認証 + node_id 管理** |
-| 10 | **Federation層のDDoS** | **外部ノードからの大量の同期リクエスト** | 🔴高 | **Rate Limiting (1ピア/10回/分) + Random Jitter** |
+| 1 | Prompt Injection | User Input → LLM | 🔴 High | Input Guardrails |
+| 2 | LLM Output Hallucination | LLM → Tool Execution | 🔴 High | OutputValidator + Formal Schema |
+| 3 | Secret Leakage | API Keys in Memory | 🔴 High | **Abyss Vault (Key Proxy) + mlockall / zeroize** |
+| 4 | Supply Chain Vulnerability | Dependencies | 🟡 Mid | `cargo audit` + Sentinel |
+| 5 | Resource Exhaustion | Infinite Loop / Spams | 🟡 Mid | Rate Limiting + WASM Timeout & Circuit Breaker |
+| 6 | **Karma Poisoning** | **Malicious Federation Sync** | 🔴 High | **Bearer Auth + Node Reputation System** |
 
-## 3. 防御アーキテクチャ: 多層防御
+## 3. Defense Architecture
 
-```
-┌─────────────────────────────────────────────────┐
-│                   CI / ビルド時                    │
-│  ┌─────────────┐ ┌──────────┐ ┌──────────────┐  │
-│  │ cargo audit  │ │ clippy   │ │ Secret Scan  │  │
-│  │ (脆弱性DB)   │ │ (Lint)   │ │ (Sentinel)   │  │
-│  └─────────────┘ └──────────┘ └──────────────┘  │
-├─────────────────────────────────────────────────┤
-│                   ランタイム                       │
-│  ┌─────────────────────────────────────────────┐ │
-│  │ Layer 1: Guardrails (入力検証)               │ │
-│  │  - プロンプトインジェクション検知              │ │
-│  │  - XSS / コマンドインジェクション検知          │ │
-│  │  - 入力長制限 (DoS防止)                      │ │
-│  │  - 制御文字サニタイズ                         │ │
-│  ├─────────────────────────────────────────────┤ │
-│  │ Layer 2: SecurityPolicy (実行制御)           │ │
-│  │  - ToolRegistry (ホワイトリスト方式)          │ │
-│  │  - Network Allowlist (ローカル通信のみ)       │ │
-│  │  - 外部Skillインストール禁止                  │ │
-│  ├─────────────────────────────────────────────┤ │
-│  │ Layer 3: Audit Log (監査記録)                │ │
-│  │  - 全ツール呼び出しを記録                     │ │
-│  │  - 異常パターン検知                           │ │
-│  └─────────────────────────────────────────────┘ │
-├─────────────────────────────────────────────────┤
-│                   Rust コンパイラ                   │
-│  - メモリ安全性保証                               │
-│  - 型安全性 (NewType, Enum)                       │
-│  - unsafe 禁止 (CI で検出)                        │
-└─────────────────────────────────────────────────┘
-```
+### Layer 1: Guardrails (Input Validation)
+- Detects prompt injections and command injections.
+- Sanitizes control characters and enforces length limits.
 
-## 4. 産業用安全層（監査レポート対応）
+### Layer 2: SecurityPolicy (Execution Control)
+- **Whitelisting**: Only registered tools in the `ToolRegistry` can be executed.
+- **Sandboxing**: Filesystem access is restricted via `PathSandbox`. WASM execution is strictly walled off from wildcard host access.
+- **Abyss Vault**: ALL LLM and remote API calls are routed through an isolated Key Proxy process utilizing `mlockall` and exact endpoint routing to prevent SSRF and memory leakage.
 
-外部監査で指摘された4つの致命的リスクに対応する防御層。
+### Layer 3: Audit Log
+- Every tool invocation and systemic decision is logged for post-hoc analysis.
+- **Hash Chains**: All operational logs in SQLite are cryptographically linked using SHA-256 hash chains, enabling immediate detection of deletion or tampering efforts.
 
-### 4.1 OutputValidator — LLM出力の自己修復パース
+## 4. Operational Safety Layers
 
-| 項目 | 内容 |
-|---|---|
-| 脅威 | LLMが不正なJSON（型ミス、フィールド欠落）を返すと工場が停止 |
-| 対策 | パース失敗時に「修正プロンプト」を自動生成し、LLMに再送信 |
-| 実装 | `libs/shared/src/output_validator.rs` (6テスト) |
+- **OutputValidator**: Automatically retries parsing when LLM returns invalid JSON schema.
+- **PathSandbox**: Prevents directory traversal by enforcing canonical path prefix checks.
+- **ZombieKiller**: Monitors and terminates hung external processes/subprocesses.
+- **Karma Federation**: Synchronizes "learned lessons" across nodes using signed and authenticated payloads.
 
-### 4.2 PathSandbox — ディレクトリ・トラバーサル防止
+## 5. Comparison with Traditional Systems
 
-| 項目 | 内容 |
-|---|---|
-| 脅威 | LLMが `../../System/Library/` 等を出力パスに指定 |
-| 対策 | `canonicalize()` + 許可ディレクトリのプレフィックス照合 |
-| 実装 | `libs/shared/src/sandbox.rs` (6テスト) |
-
-### 4.3 ZombieKiller — 外部プロセスの強制終了
-
-| 項目 | 内容 |
-|---|---|
-| 脅威 | ComfyUI/FFmpegが無限ハングし、工場が永久に停止 |
-| 対策 | `tokio::time::timeout` + 強制 `kill()` + リソース解放 |
-| 実装 | `libs/shared/src/zombie_killer.rs` (4テスト) |
-
-### 4.4 TDD Enforcement — ビジネスロジック検証
-
-| 項目 | 内容 |
-|---|---|
-| 脅威 | 「動くけど正しいか分からない」Vibe Codingの産物 |
-| 対策 | テストを先に書き、`cargo test` をパスしないコードはデプロイ禁止 |
-| 実装 | CI + ローカル開発ガイドで強制 |
+| Criteria | Existing Frameworks | Aiome |
+|---|---|---|
+| LLM Privileges | Full Access | Whitelisted Only |
+| Plugin Loading | Dynamic/Remote | Compile-time / WASM Sandbox |
+| Memory Safety | GC-based (Python/JS) | Ownership-based (Rust) |
+| Validation | Middleware Dependent | Hardened Core Implementation |
 
 ---
-
-## 5. 従来システムとの比較
-
-| 評価軸 | Aiome / LangChain | ShortsFactory |
-|---|---|---|
-| LLMの実行権限 | フルアクセス | ホワイトリスト制限 |
-| 外部プラグイン | ZIP等で動的ロード | **非対応（原理的に排除）** |
-| メモリ安全性 | Python (GC依存) | Rust (コンパイル時保証) |
-| 入力バリデーション | フレームワーク依存 | Guardrails (自前15テスト) |
-| サプライチェーン | pip (脆弱性多い) | cargo audit + Sentinel |
-
-## 6. 商用化に向けたロードマップ
-
-### 現在の達成度: 80点 (プロトタイプ優秀)
-
-### 残りの20点を埋める施策
-
-| # | 施策 | 対応フェーズ | 効果 |
-|---|---|---|---|
-| 1 | `thiserror` によるエラー型定義 | Phase 2 | エラーパスの網羅性向上 |
-| 2 | 設定ファイル外部化 (`config.toml`) | Phase 2 | ユーザーがカスタマイズ可能に |
-| 3 | 統合テスト追加 (カバレッジ 80%+) | Phase 2-3 | 品質保証 |
-| 4 | LLM出力バリデーション | Phase 2 | LLM暴走の最終防壁 |
-| 5 | ダッシュボード認証 | Phase 3 | マルチユーザー対応 |
-| 6 | ログ構造化 (JSON) + ローテーション | Phase 3 | 運用監視 |
-| 7 | ライセンス互換性チェック (`cargo-deny`) | リリース前 | 法務リスク排除 |
-
-## 7. 許可された通信先
-
-| ホスト | ポート | 用途 |
-|---|---|---|
-| `127.0.0.1` / `localhost` | `11434` | Ollama (LLM) |
-| `127.0.0.1` / `localhost` | `8188` | ComfyUI (画像/動画生成) |
-| **Federation ピアノード** | **HTTPS/443** | **Karma Federation Sync (`POST /api/v1/federation/sync`)** |
-
-> [!CAUTION]
-> Federationエンドポイント（`/api/v1/federation/sync`）は外部インターネットに公開される問呃の実行エンドポイントです。認証（Bearer `FEDERATION_SECRET`）とRate Limiting（1ピアあたら10回/分）を必ず実施すること。
-
-**上記以外の外部通信は SecurityPolicy によりブロックされる。**
-
----
-
-## 7. The Watchtower Security (Phase 9) — 外部監視層の要塞化
-
-外部インターフェース（Discord Bot）との通信を安全に保つための設計判断。
-
-| 項目 | 実装方針 | 目的 |
-|---|---|---|
-| **PGID Authority** | `setpgid(0,0)` | 子プロセスを含めた完全な強制終了 (`kill -PGID`) の保証 |
-| **Orphan Socket Fix** | 起動時の `rm /tmp/aiome.sock` | 前回のゴミによる起動失敗と権限問題の回避 |
-| **Permission 600** | `chmod 600` (macOS/Unix) | UDS へのアクセスを同一ユーザーに限定し、サイドチャネル攻撃を防止 |
-| **LDC Framing** | `LengthDelimitedCodec` | ストリーム通信におけるメッセージ境界の厳格化 |
-| **Backpressure Trap** | `try_send` によるログドロップ | 監視側が詰まっても動画生成（Core）を止めない設計 |
-
----
-
-*最終更新: 2026-02-20*
-*文書管理: Aiome Security Team*
+*Last Mutated: 2026-03-05*
+*Managed by: Aiome Sovereign Task Force*
