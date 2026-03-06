@@ -40,11 +40,13 @@ We ask that you follow responsible disclosure principles:
 
 ### Mathematical Security Guarantees (数学的セキュリティ保証)
 
-Aiome employs **Formal Verification** and **Design by Contract (DbC)** to ensure absolute isolation for autonomous agents. Our architecture guarantees safety mathematically, moving beyond traditional empirical testing:
+Aiome employs **Formal Verification**, **Model-Based Testing (MBT)**, and **Design by Contract (DbC/TypeState)** to assure absolute isolation and logical consistency for autonomous agents. Our architecture guarantees safety mathematically, moving far beyond traditional empirical testing:
 
-1. **TLA+ Spec Verification**: The `AiomeQuarantineProtocol` (defining the isolation logic before a WASM skill becomes active) has been formally verified using the **TLC Model Checker**. We guarantee with algorithmic certainty that *no invalid or potentially harmful skill can bypass the sandbox to enter an active state*.
-2. **Deterministic Tracer (Layer 3)**: Skills are dry-run in a completely deterministic, network-denied, memory-constrained WASM environment. Any resource violation or illegal syscall results in a definitive rejection.
-3. **State Machine Contracts (Layer 4)**: The transition from `UnverifiedSkill` to `VerifiedSkill` is enforced at compile/runtime using Rust's TypeState patterns and DbC macros (`#[requires]`, `#[ensures]`), making security boundary breaches virtually impossible at the SDK level.
+1. **TLA+ Spec Verification**: The `AiomeQuarantineProtocol` (WASM sandbox isolation logic) and the `SamsaraKarmaProtocol` (Hash-chain-based knowledge federation) are formally verified using the **TLC Model Checker**. We guarantee with algorithmic certainty that liveness properties hold (no deadlocks) and safety invariants are never breached.
+2. **Model-Based Testing (MBT) at CI/CD**: Formal TLA+ state transitions are mapped to concrete Rust execution paths via `TRACE_MAP`. Our integration tests automatically verify these deterministic path executions on every PR, ensuring the implementation perfectly respects the mathematical model.
+3. **TypeState Compile-Time Enforcement (Layer 3½)**: The transition from `UnverifiedSkill` to `VerifiedSkill` is enforced at compile time. Functions executing skills (`call_skill`) demand the `VerifiedSkill` type, making security boundary breaches virtually impossible at the SDK level (the compiler simply rejects them).
+4. **Deterministic Tracer (Layer 3)**: Skills are dry-run in a completely deterministic, network-denied, memory-constrained WASM environment. Any resource violation or illegal syscall results in a definitive rejection.
+
 
 ---
 For technical details on our security architecture, see [docs/SECURITY_DESIGN.md](docs/SECURITY_DESIGN.md).
