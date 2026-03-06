@@ -12,9 +12,11 @@
   <em>Build AI that Learns, Defends, and Evolves — Autonomously.</em>
 </p>
 
+<p align="center">
   <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT">
   <img src="https://img.shields.io/badge/Rust-1.75%2B-orange.svg" alt="Rust 1.75+">
   <img src="https://img.shields.io/badge/PRs-Welcome-brightgreen.svg" alt="PRs Welcome">
+  <a href="https://github.com/google/antigravity"><img src="https://img.shields.io/badge/Built%20by-Agents-blueviolet" alt="Built by Agents"></a>
 </p>
 
 ---
@@ -26,6 +28,13 @@ Aiome is more than just a task execution tool or an agentic framework.
 **From "Raw Autonomy" to "Disciplined Autonomy"**
 Entrusting your system entirely to a raw agent like OpenClaw might seem like the ultimate freedom, but it is a "fragile freedom"—prone to infinite loops, API key leaks, and sudden crashes. 
 Aiome's purpose is not to restrict an AI's freedom, but to provide the **strong discipline and immune system required to let an AI operate unattended for 30 days straight without destroying its host.**
+
+### 🤖 Development Philosophy: By Agents, For Agents (100% Agentic Coded)
+
+Every single line of Aiome was built by AI Agents on **Google Antigravity**, using **100% Agentic Coding**.
+
+This is not a mere technical experiment. 
+It is the result of agents autonomously designing and implementing the exact environment they need to operate safely and with discipline. By replacing human biases and oversights with AI's rigorous code generation, self-review, and strict adherence to "Golden Rules," Aiome achieves a level of robustness and predictability that surpasses traditional software development.
 
 ### 🛡️ 4 Core Pillars
 
