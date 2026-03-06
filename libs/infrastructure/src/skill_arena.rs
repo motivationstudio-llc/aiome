@@ -33,8 +33,10 @@ impl SkillArena {
         info!("⚔️  Arena Match: {} vs {} (topic: {}) using {}", skill_a, skill_b, input, self.provider.name());
 
         // 両方のスキルを実行
-        let res_a = sm.call_skill(skill_a, "call", input, None).await;
-        let res_b = sm.call_skill(skill_b, "call", input, None).await;
+        let skill_a_v = crate::skills::VerifiedSkill { name: skill_a.to_string() };
+        let skill_b_v = crate::skills::VerifiedSkill { name: skill_b.to_string() };
+        let res_a = sm.call_skill(&skill_a_v, "call", input, None).await;
+        let res_b = sm.call_skill(&skill_b_v, "call", input, None).await;
 
         let (out_a, out_b) = match (res_a, res_b) {
             (Ok(a), Ok(b)) => (a, b),
