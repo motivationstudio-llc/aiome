@@ -37,6 +37,16 @@ We ask that you follow responsible disclosure principles:
 - Do not access or modify data belonging to other users. (他のユーザーのデータにアクセスしたり改変したりしないでください。)
 
 ---
+
+### Mathematical Security Guarantees (数学的セキュリティ保証)
+
+Aiome employs **Formal Verification** and **Design by Contract (DbC)** to ensure absolute isolation for autonomous agents. Our architecture guarantees safety mathematically, moving beyond traditional empirical testing:
+
+1. **TLA+ Spec Verification**: The `AiomeQuarantineProtocol` (defining the isolation logic before a WASM skill becomes active) has been formally verified using the **TLC Model Checker**. We guarantee with algorithmic certainty that *no invalid or potentially harmful skill can bypass the sandbox to enter an active state*.
+2. **Deterministic Tracer (Layer 3)**: Skills are dry-run in a completely deterministic, network-denied, memory-constrained WASM environment. Any resource violation or illegal syscall results in a definitive rejection.
+3. **State Machine Contracts (Layer 4)**: The transition from `UnverifiedSkill` to `VerifiedSkill` is enforced at compile/runtime using Rust's TypeState patterns and DbC macros (`#[requires]`, `#[ensures]`), making security boundary breaches virtually impossible at the SDK level.
+
+---
 For technical details on our security architecture, see [docs/SECURITY_DESIGN.md](docs/SECURITY_DESIGN.md).
 技術的な詳細については、[docs/SECURITY_DESIGN.md](docs/SECURITY_DESIGN.md) を参照してください。
 
