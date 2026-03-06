@@ -27,3 +27,4 @@ pub mod dream_state;
 pub mod immune_system;
 pub mod skill_arena;
 pub mod llm;
+pub mod security;

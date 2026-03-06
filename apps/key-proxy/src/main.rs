@@ -81,6 +81,7 @@ async fn main() -> anyhow::Result<()> {
     let mut quotas = HashMap::new();
     quotas.insert("daemon".to_string(), 1000);
     quotas.insert("watchtower".to_string(), 100);
+    quotas.insert("api-server".to_string(), 1000);
 
     let state = AppState {
         gemini_key: Arc::new(SecretString::from(gemini_key)),
@@ -140,6 +141,14 @@ async fn handle_llm_complete(
 
     // 6. Zeroize usage
     let mut api_key = state.gemini_key.expose_secret().clone();
+    
+    // DEMO MOCK MODE
+    if api_key == "mock_key_for_testing" {
+        api_key.zeroize();
+        return Json(ProxyResponse { 
+            result: format!("I am OpenClaw. I hear you loud and clear. Your prompt was: '{}'. Currently operating in Mock Offline Mode inside the Aiome Abyss Vault.", payload.prompt)
+        }).into_response();
+    }
     
     let gemini_payload = serde_json::json!({
         "contents": [{

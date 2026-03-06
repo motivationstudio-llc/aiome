@@ -173,6 +173,16 @@ cargo run -p watchtower
 
 > **Note**: `command-center` は UDS ソケットを通じて `watchtower` と通信します。対話機能（Discord連携）を有効にするには、両方のプロセスを同時に実行してください。
 
+### シナジー体感デモ (Synergy Demonstration)
+Aiome 管理コンソールでは、OpenClaw との相乗効果を視覚的に体験できます。
+
+1. **Dashboard 起動**: `cargo run -p api-server` を実行。
+2. **アクセス**: ブラウザで `http://localhost:3015` を開く。
+3. **Synergy Panel**: サイドバーの **"Agency Synergy"** から以下のデモを試せます：
+    - **Evolution Pulse**: タスク失敗から教訓（Karma）が蒸留される過程の視覚化。
+    - **Security Shield**: Abyss Vault による API キー強奪試行の物理的阻止。
+    - **Swarm Sync**: 他ノードとの免疫知識（Collective Intelligence）の同期。
+
 #### 🔑 主な環境変数 (.env)
 - `DISCORD_TOKEN`: Watchtower integration 用。
 - `OLLAMA_BASE_URL`: LLM接続用 (デフォルト: `http://localhost:11434`)。
