@@ -39,9 +39,14 @@ Aiome:        [LLM] → Rust Validation Layer → Whitelisted Tool Execution →
 - **Sandboxing**: Filesystem access is restricted via `PathSandbox`. WASM execution is strictly walled off from wildcard host access.
 - **Abyss Vault**: ALL LLM and remote API calls are routed through an isolated Key Proxy process utilizing `mlockall` and exact endpoint routing to prevent SSRF and memory leakage.
 
-### Layer 3: Audit Log
+### Layer 3: Audit Log & Hash Chains
 - Every tool invocation and systemic decision is logged for post-hoc analysis.
 - **Hash Chains**: All operational logs in SQLite are cryptographically linked using SHA-256 hash chains, enabling immediate detection of deletion or tampering efforts.
+
+### Layer 4: Build Isolation & Formal TDD Forge (S-Rank Defense)
+- **OS-Native Sandbox**: Autonomous compilation (`cargo build`) executed by the agent is forcibly containerized using OS-native guardrails (`sandbox-exec` / `bwrap`) to prevent supply chain attacks during the Forge process.
+- **Fail-Forward Training**: Instead of terminating agents when code fails to compile, the system employs TDD-based reinforcement loops without permanent Karma penalties, allowing self-healing code generation.
+- **Core State Actor**: Safe integration with Node.js NAPI layer uses a strictly serial MPSC Channel Actor Model, preventing async/sync deadlock scenarios inherently.
 
 ## 4. Operational Safety Layers
 

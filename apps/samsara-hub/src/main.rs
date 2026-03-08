@@ -16,6 +16,7 @@ use axum::{
     http::{StatusCode, HeaderMap},
     error_handling::HandleErrorLayer,
 };
+use tokio_util::sync::CancellationToken;
 use std::sync::Arc;
 use tokio::sync::broadcast;
 use sqlx::SqlitePool;
@@ -25,7 +26,7 @@ use tower_http::cors::CorsLayer;
 use secrecy::ExposeSecret;
 use tower::{ServiceBuilder, limit::RateLimitLayer, buffer::BufferLayer};
 use std::time::Duration;
-use futures_util::SinkExt;
+// use futures_util::SinkExt; // Removed unused import
 use serde::{Deserialize, Serialize};
 
 struct HubState {
@@ -79,6 +80,8 @@ async fn main() -> anyhow::Result<()> {
     // Create broadcast channel for real-time rule notification
     let (tx, _) = broadcast::channel(100);
     let state = Arc::new(HubState { pool, secret, tx });
+    
+    let token = CancellationToken::new();
 
     // Secure CORS Policy: Restrict to specific trusted origins or localhost for development
     let cors = CorsLayer::new()
@@ -108,9 +111,41 @@ async fn main() -> anyhow::Result<()> {
     info!("🏔️ Samsara Hub (The Validator) listening on {}", addr);
     
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app).await?;
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal(token))
+        .await?;
 
     Ok(())
+}
+
+async fn shutdown_signal(token: CancellationToken) {
+    let ctrl_c = async {
+        tokio::signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl+C handler");
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("failed to install signal handler")
+            .recv()
+            .await;
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {
+            info!("🔴 [samsara-hub] Received Ctrl+C signal. Initiating graceful shutdown...");
+        },
+        _ = terminate => {
+            info!("🔴 [samsara-hub] Received Terminate signal. Initiating graceful shutdown...");
+        },
+    }
+    
+    token.cancel();
 }
 
 async fn init_hub_db(pool: &SqlitePool) -> anyhow::Result<()> {

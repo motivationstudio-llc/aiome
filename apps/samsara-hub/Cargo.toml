@@ -27,3 +27,4 @@ subtle = "2.5.0"
 axum-extra = { version = "0.12.5", features = ["typed-header"] }
 tokio-tungstenite = "0.28.0"
 futures-util = "0.3.32"
+tokio-util = { version = "0.7", features = ["rt"] }

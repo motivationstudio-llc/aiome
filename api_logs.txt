@@ -1,0 +1,17 @@
+warning: unused import: `tower_http::cors::CorsLayer`
+  --> apps/api-server/src/main.rs:20:5
+   |
+20 | use tower_http::cors::CorsLayer;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `WasmSkillManager`
+   --> apps/api-server/src/main.rs:434:51
+    |
+434 |     use infrastructure::skills::{UnverifiedSkill, WasmSkillManager};
+    |                                                   ^^^^^^^^^^^^^^^^
+
+warning: `api-server` (bin "api-server") generated 2 warnings (run `cargo fix --bin "api-server" -p api-server` to apply 2 suggestions)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.20s
+     Running `target/debug/api-server`

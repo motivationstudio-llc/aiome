@@ -100,8 +100,45 @@ pub fn shutdown() {
 
 #[napi]
 pub async fn immune_check_tool(tool_name: String, params: String) -> Result<ToolCheckResponse> {
-    tracing::info!("immune_check_tool: {} | {}", tool_name, params);
-    // TODO: wire real logic from immune system
+    tracing::info!("🛡️ [NAPI Sentinel] immune_check_tool: {} | {}", tool_name, params);
+    
+    // 1. Baseline RegExp Check (Sentinel Layer 1.5 - No DB needed)
+    // catch obvious dangerous patterns quickly
+    let dangerous_patterns = [
+        r"(?i)rm\s+-rf",
+        r"(?i)chmod\s+777",
+        r"(?i)cat\s+/etc/shadow",
+        r"(?i)shutdown",
+        r"(?i)reboot",
+        r#"(?i)":\s*".*";"#, // Simplified injection sniff
+    ];
+
+    for pattern in &dangerous_patterns {
+        if let Ok(re) = regex::Regex::new(pattern) {
+            if re.is_match(&params) {
+                return Ok(ToolCheckResponse {
+                    blocked: true,
+                    reason: Some(format!("[SENTINEL] Baseline Violation: Blocked dangerous pattern in tool params: {}", pattern)),
+                    new_params: None,
+                });
+            }
+        }
+    }
+
+    // 2. Complex Adaptive Check (Requires DB & LLM)
+    let immune = get_immune().await.map_err(map_err)?;
+    let db = get_db().await.map_err(map_err)?;
+
+    // We use a mock topic for tool check context
+    let context_topic = format!("Tool Execute: {}", tool_name);
+    if let Ok(Some(rule)) = immune.verify_intent(&format!("{} with params: {}", context_topic, params), db.as_ref()).await {
+        return Ok(ToolCheckResponse {
+            blocked: true,
+            reason: Some(format!("[SENTINEL] Adaptive Block: {} (Pattern: {})", rule.action, rule.pattern)),
+            new_params: None,
+        });
+    }
+
     Ok(ToolCheckResponse {
         blocked: false,
         reason: None,

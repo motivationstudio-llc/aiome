@@ -1,0 +1,13 @@
+{
+  "name": "greet_skill",
+  "description": "名前を受け取り、\"Hello, [name] from Aiome Forge!\" と返す関数を定義します。",
+  "capabilities": [
+    "execute"
+  ],
+  "inputs": [
+    "String"
+  ],
+  "outputs": [
+    "String"
+  ]
+}

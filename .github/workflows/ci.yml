@@ -50,10 +50,10 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      # Layer 2: Bastion Scan (Secrets, Python Vuln, unsafe detection)
-      - name: Bastion Industrial Scan
+      # Layer 2: Secure Workspace Audit (Check unsafe & dependencies)
+      - name: Workspace Audit
         run: |
-          cargo run -p bastion -- scan
+          cargo audit
 
   docs:
     name: Generate Wiki

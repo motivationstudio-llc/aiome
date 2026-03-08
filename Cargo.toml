@@ -31,7 +31,7 @@ config = "0.14"
 schemars = "0.8"
 unicode-normalization = "0.1"
 nix = { version = "0.27", features = ["process", "signal", "user", "fs"] }
-tokio-util = { version = "0.7", features = ["codec", "io"] }
+tokio-util = { version = "0.7", features = ["codec", "io", "rt"] }
 secrecy = { version = "0.8", features = ["serde"] }
 jsonschema = "0.17"
 tower = { version = "0.4", features = ["limit"] }

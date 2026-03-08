@@ -6,10 +6,9 @@ use futures::stream::Stream;
 use core::convert::Infallible;
 use aiome_core::llm_provider::LlmProvider;
 use aiome_core::traits::JobQueue;
-use aiome_core::error::AiomeError;
 use infrastructure::skills::UnverifiedSkill;
 use std::sync::Arc;
-use tokio::time::{timeout, Duration};
+use tokio::time::{timeout, Duration, interval};
 use futures::StreamExt;
 use tracing::info;
 
@@ -24,35 +23,38 @@ pub async fn trigger_agent_chat_stream(
     let ollama_model = std::env::var("OLLAMA_MODEL").unwrap_or_else(|_| "qwen2.5:0.5b".to_string());
     let provider = Arc::new(aiome_core::llm_provider::OllamaProvider::new(ollama_host, ollama_model));
 
-    let karmas: Vec<serde_json::Value> = state.job_queue.fetch_all_karma(3).await.unwrap_or_default();
-    let karma_str = karmas.iter().map(|k| format!("- {}", k["lesson"].as_str().unwrap_or(""))).collect::<Vec<_>>().join("\n");
-
-    let history_len = payload.history.len();
-    let start_idx = if history_len > 10 { history_len - 10 } else { 0 };
-    
-    let mut current_history = Vec::new();
-    for msg in &payload.history[start_idx..] {
-        let prefix = if msg.role == "user" { "USER: " } else { "AI: " };
-        current_history.push(format!("{}{}", prefix, msg.content));
-    }
-
-    let system_instructions = format!(
-        "あなたはOpenClaw、Aiome OSの高度なコーディングAIです。日本語で短く答えてください。\n\
-        [スキル] [CallSkill: 名, {{引数}}]\n\
-        - fs_reader: {{\"path\":\"パス\"}}\n\
-        - terminal_exec: {{\"cmd\":\"コマンド\"}}\n\
-        ルール: スキルは [CallSkill] 形式を使用。1ターン1アクション。\n\
-        現在のディレクトリ: {}\n\
-        過去の教訓: {}\n",
-        std::env::current_dir().unwrap_or_default().display(),
-        karma_str
-    );
-
-    let max_turns = 15;
-    let mut turn = 0;
-    let original_prompt = payload.prompt.clone();
-
     let stream = async_stream::stream! {
+        // Discovery H: Guardrails check (Security Layer 0)
+        if let shared::guardrails::ValidationResult::Blocked(reason) = shared::guardrails::validate_input(&payload.prompt) {
+            yield Ok(Event::default().event("security_block").data(format!("🚨 [GUARDRAIL BLOCK] {}", reason)));
+            return;
+        }
+
+        // Discovery B: Immune System check (Security Layer 1)
+        let immune_system = infrastructure::immune_system::AdaptiveImmuneSystem::new(provider.clone());
+        if let Ok(Some(rule)) = immune_system.verify_intent(&payload.prompt, state.job_queue.as_ref()).await {
+            yield Ok(Event::default().event("security_block").data(format!("🚨 [SENTINEL BLOCK] {}\nPattern: {}", rule.action, rule.pattern)));
+            return;
+        }
+
+        let karmas: Vec<serde_json::Value> = state.job_queue.fetch_all_karma(3).await.unwrap_or_default();
+        let karma_str = karmas.iter().map(|k| format!("- {}", k["lesson"].as_str().unwrap_or(""))).collect::<Vec<_>>().join("\n");
+
+        let history_len = payload.history.len();
+        let start_idx = if history_len > 10 { history_len - 10 } else { 0 };
+        
+        let mut current_history = Vec::new();
+        for msg in &payload.history[start_idx..] {
+            let prefix = if msg.role == "user" { "USER: " } else { "AI: " };
+            current_history.push(format!("{}{}", prefix, msg.content));
+        }
+
+        let system_instructions = crate::build_system_instructions(&state, &karma_str);
+
+        let max_turns = 15;
+        let mut turn = 0;
+        let original_prompt = payload.prompt.clone();
+
         while turn < max_turns {
             let full_prompt = format!(
                 "{}\n{}\nUSER: {}\nAI: ", 
@@ -62,6 +64,9 @@ pub async fn trigger_agent_chat_stream(
             );
 
             yield Ok(Event::default().event("turn_start").data(turn.to_string()));
+
+            // Phase 13-A: Acquire LLM semaphore
+            let _llm_permit = state.llm_semaphore.acquire().await.ok();
 
             if let Ok(Ok(mut llm_stream)) = timeout(Duration::from_secs(300), provider.stream_complete(&full_prompt, None)).await {
                 
@@ -112,31 +117,37 @@ pub async fn trigger_agent_chat_stream(
                         info!("🛠️ [AgentStreamLoop] Executing skill: {}", skill_name);
                         yield Ok(Event::default().event("tool_exec").data(format!("Executing {}", skill_name)));
 
-                        let test_payload = state.wasm_skill_manager.get_metadata(&skill_name)
-                            .and_then(|m| m.inputs.first().cloned())
-                            .unwrap_or_else(|| "{}".to_string());
+                        if skill_name.starts_with("forge_") {
+                            // Phase 12-C: SSE Heartbeat implementation for long-running forge tasks
+                            let mut heartbeat_ticker = interval(Duration::from_secs(5));
+                            let forge_future = crate::skill_handler::execute_forge_command(&skill_name, &skill_input, &state);
+                            tokio::pin!(forge_future);
 
-                        let unverified = UnverifiedSkill { 
-                            name: skill_name.to_string(), 
-                            input_test_payload: test_payload 
-                        };
-                        
-                        if let Ok(v) = unverified.verify(&state.wasm_skill_manager).await {
-                            if let Ok(res) = state.wasm_skill_manager.call_skill(&v, "call", &skill_input, None).await {
-                                let limited_res = if res.len() > 3000 {
-                                    format!("{}... [Truncated for brevity]", &res[..3000])
-                                } else {
-                                    res
-                                };
-                                skill_results.push(format!("[{} Result: {}]", skill_name, limited_res));
-                                yield Ok(Event::default().event("tool_result").data(format!("{}: Success", skill_name)));
-                            } else {
-                                skill_results.push(format!("[{} Error: Execution failed]", skill_name));
-                                yield Ok(Event::default().event("tool_result").data(format!("{}: Execution failed", skill_name)));
+                            loop {
+                                tokio::select! {
+                                    _ = heartbeat_ticker.tick() => {
+                                        yield Ok(Event::default().event("heartbeat").data("build in progress..."));
+                                    }
+                                    res = &mut forge_future => {
+                                        match res {
+                                            Ok(out) => {
+                                                skill_results.push(out.clone());
+                                                yield Ok(Event::default().event("tool_result").data(out));
+                                            }
+                                            Err(e) => {
+                                                skill_results.push(format!("[{} Error: {}]", skill_name, e));
+                                                yield Ok(Event::default().event("tool_result").data(format!("Error: {}", e)));
+                                            }
+                                        }
+                                        break;
+                                    }
+                                }
                             }
                         } else {
-                            skill_results.push(format!("[{} Error: Verification failed or Skill not found]", skill_name));
-                            yield Ok(Event::default().event("tool_result").data(format!("{}: Verification failed", skill_name)));
+                            let out = crate::skill_handler::execute_wasm_skill(&skill_name, &skill_input, &state).await;
+                            skill_results.push(out.clone());
+                            let status = if out.contains("Error:") { "failed" } else { "Success" };
+                            yield Ok(Event::default().event("tool_result").data(format!("{}: {}", skill_name, status)));
                         }
                     }
 

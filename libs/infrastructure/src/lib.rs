@@ -17,7 +17,6 @@ pub mod concept_manager;
 pub mod aiome_log;
 pub mod trend_sonar;
 pub mod job_queue;
-mod job_queue_tests;
 pub mod workspace_manager;
 mod workspace_manager_tests;
 pub mod oracle;

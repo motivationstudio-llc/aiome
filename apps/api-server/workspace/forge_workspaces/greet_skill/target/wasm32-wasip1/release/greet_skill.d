@@ -1,0 +1,1 @@
+/Users/motista/Desktop/antigravity/modular-open-claw/apps/api-server/workspace/forge_workspaces/greet_skill/target/wasm32-wasip1/release/greet_skill.wasm: /Users/motista/Desktop/antigravity/modular-open-claw/apps/api-server/workspace/forge_workspaces/greet_skill/src/lib.rs

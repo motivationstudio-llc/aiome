@@ -1,0 +1,4 @@
+(version 1)
+(allow default)
+(deny file-write* (subpath "/Users/motista/Desktop/antigravity/modular-open-claw"))
+(allow file-write* (subpath "/Users/motista/Desktop/antigravity/modular-open-claw/apps/api-server/workspace/forge_workspaces/greet_skill"))

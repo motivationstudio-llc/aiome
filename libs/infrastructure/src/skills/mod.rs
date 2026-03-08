@@ -14,7 +14,7 @@ use std::time::Duration;
 use tracing::{info, error};
 use extism::{Manifest, Plugin, Function, Val, ValType, UserData};
 use jsonschema::JSONSchema;
-use crate::security::{BastionGuard, PermissionManifest};
+use crate::security::BastionGuard;
 pub mod forge;
 use contracts::requires;
 
@@ -73,19 +73,22 @@ pub struct SkillMetadata {
 
 pub struct WasmSkillManager {
     skills_dir: PathBuf,
+    allowed_root: PathBuf,
     memory_limit_bytes: u64,
     timeout: Duration,
     wasm_cache: std::sync::RwLock<HashMap<String, Vec<u8>>>,
 }
 
 impl WasmSkillManager {
-    pub fn new<P: AsRef<Path>>(skills_dir: P, _allowed_root: P) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+    pub fn new<P: AsRef<Path>>(skills_dir: P, allowed_root: P) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let skills_dir = skills_dir.as_ref().to_path_buf();
+        let allowed_root = allowed_root.as_ref().to_path_buf();
         if !skills_dir.exists() {
             std::fs::create_dir_all(&skills_dir)?;
         }
         Ok(Self { 
             skills_dir, 
+            allowed_root,
             memory_limit_bytes: 10 * 1024 * 1024, // 10MB default
             timeout: Duration::from_millis(5000), // 5s default
             wasm_cache: std::sync::RwLock::new(HashMap::new()),
@@ -96,6 +99,28 @@ impl WasmSkillManager {
         self.memory_limit_bytes = memory_bytes;
         self.timeout = timeout;
         self
+    }
+
+    /// スキルキャッシュをクリアし、最新のスキル一覧を再取得する
+    pub fn hot_reload_skills(&self) -> Vec<String> {
+        let skills = self.list_skills();
+        // Discovery C: Fix RwLock poisoning crash
+        let mut cache = self.wasm_cache.write().unwrap_or_else(|e| e.into_inner());
+        
+        // 存在しないスキルのキャッシュを削除
+        cache.retain(|name, _| skills.contains(name));
+        
+        info!("🔄 [WasmSkillManager] Hot-reloaded {} skills and cleared stale cache.", skills.len());
+        skills
+    }
+
+    /// 特定のスキルのキャッシュのみを無効化する
+    pub fn invalidate_cache(&self, skill_name: &str) {
+        // Discovery C: Fix RwLock poisoning crash
+        let mut cache = self.wasm_cache.write().unwrap_or_else(|e| e.into_inner());
+        if cache.remove(skill_name).is_some() {
+            info!("🧹 [WasmSkillManager] Invalidated cache for skill: {}", skill_name);
+        }
     }
 
     /// 全スキルのメタデータを一覧取得する (Self-Wiring 用)
@@ -183,167 +208,148 @@ impl WasmSkillManager {
         };
 
         // 厳密なサンドボックス設定
-        let mut manifest = Manifest::new([extism::Wasm::data(wasm_data)]);
-        
-        // 1. WASI Jail Bindings: Sandboxのルートのみをバインド
-        if let Some(parent) = self.skills_dir.parent() {
-            let jail_root = std::fs::canonicalize(parent)?;
-            manifest = manifest.with_allowed_path(jail_root.to_string_lossy().to_string(), "/mnt");
-        }
-
-        // 2. Network: Whitelist-based isolation (Zero Trust)
-        // Wildcard '*' is strictly forbidden for security reasons.
+        // Phase 13-A: Wrap EVERYTHING in ONE spawn_blocking because extism types are NOT Send
+        let input_str = input.to_string();
+        let func_name_str = func_name.to_string();
+        let skill_name_str = skill_name.to_string();
+        let wasm_path_clone = wasm_path.clone();
+        let configs_clone = configs.clone();
         let metadata = self.get_metadata(skill_name);
-        if let Some(meta) = metadata {
-            for host in &meta.allowed_hosts {
-                if host == "*" {
-                    error!("🛑 [WasmSkillManager] Wildcard network access is strictly FORBIDDEN for skill '{}'", skill_name);
-                    return Err(format!("Security Violation: Wildcard network access ('*') is not allowed for skill '{}'. Please specify explicit hosts.", skill_name).into());
-                }
-                manifest = manifest.with_allowed_host(host);
-            }
-        }
+        let allowed_root_clone = self.allowed_root.clone();
+        let timeout = self.timeout;
+        let skills_dir_parent = self.skills_dir.parent().map(|p| p.to_path_buf());
 
-        // 3. Resource Limits & Timeouts
-        manifest = manifest.with_timeout(self.timeout);
+        let result = tokio::task::spawn_blocking(move || {
+            // 1. Build Manifest (Inside closure)
+            let wasm = if wasm_path_clone.exists() {
+                extism::Wasm::file(&wasm_path_clone)
+            } else {
+                // Fallback to data if file isn't found (should be handled by caller usually)
+                extism::Wasm::data(wasm_data)
+            };
 
-        // 3. Credential Injection via Config memory
-        if let Some(cfg) = configs {
-            for (key, value) in cfg {
-                manifest = manifest.with_config(std::iter::once((key, value)));
-            }
-        }
-
-        // 3. Host Functions: Aiome OS Sentinel Bindings
-        // Register 'host_exec' for terminal_exec skill
-        let host_exec_permissions = self.get_metadata(skill_name)
-            .map(|m| m.permissions.clone())
-            .unwrap_or_default();
+            let mut manifest = Manifest::new([wasm])
+                .with_timeout(timeout);
             
-        let host_exec_fn = Function::new(
-            "host_exec",
-            [ValType::I64],
-            [ValType::I64],
-            UserData::new(()),
-            move |plugin, inputs, outputs, _user_data| {
-                let cmd_ptr = inputs[0].i64().unwrap() as u64;
-                let handle = plugin.memory_handle(cmd_ptr).ok_or_else(|| extism::Error::msg("Invalid memory handle"))?;
-                let cmd_str: String = plugin.memory_str(handle).map_err(|e: extism::Error| e)?.to_string();
-                
-                info!("🛡️ [WasmSkillManager] host_exec called with: {}", cmd_str);
-                
-                // Host function execution through Bastion Guard
-                let guard = BastionGuard::new(host_exec_permissions.clone());
-                
-                match guard.safe_exec(&cmd_str) {
-                    Ok(stdout) => {
-                        let mem = plugin.memory_alloc(stdout.len() as u64)?;
-                        plugin.memory_bytes_mut(mem)?.copy_from_slice(stdout.as_bytes());
-                        outputs[0] = Val::I64(mem.offset() as i64);
-                    },
-                    Err(e) => {
-                        let err_msg = format!("Bastion Guard Error: {}", e);
-                        let mem = plugin.memory_alloc(err_msg.len() as u64)?;
-                        plugin.memory_bytes_mut(mem)?.copy_from_slice(err_msg.as_bytes());
-                        outputs[0] = Val::I64(mem.offset() as i64);
+            // Apply Sandbox Roots
+            if let Some(parent) = skills_dir_parent {
+                if let Ok(jail_root) = std::fs::canonicalize(parent) {
+                    manifest = manifest.with_allowed_path(jail_root.to_string_lossy().to_string(), "/mnt");
+                }
+            }
+
+            // Apply Network Whitelist
+            if let Some(meta) = metadata.as_ref() {
+                for host in &meta.allowed_hosts {
+                    // Wildcard check is done here again for depth safety
+                    if host != "*" {
+                        manifest = manifest.with_allowed_host(host);
                     }
                 }
-                Ok(())
             }
-        );
 
-        // Register 'host_write' for fs_writer skill
-        let allowed_root_clone = if let Some(parent) = self.skills_dir.parent() {
-            std::fs::canonicalize(parent).unwrap_or_else(|_| parent.to_path_buf())
-        } else {
-            self.skills_dir.clone()
-        };
-        let host_write_permissions = self.get_metadata(skill_name)
-            .map(|m| m.permissions.clone())
-            .unwrap_or_default();
-            
-        let skill_name_for_write = skill_name.to_string();
-        let host_write_fn = Function::new(
-            "host_write",
-            [ValType::I64],
-            [ValType::I64],
-            UserData::new(()),
-            move |plugin, inputs, outputs, _user_data| {
-                let json_ptr = inputs[0].i64().unwrap() as u64;
-                let handle = plugin.memory_handle(json_ptr).ok_or_else(|| extism::Error::msg("Invalid memory handle for host_write"))?;
-                let req_str = plugin.memory_str(handle).map_err(|e: extism::Error| e)?;
-                
-                // Permission Check
-                if !host_write_permissions.allow_filesystem_write {
-                    error!("🛡️ [WasmSkillManager] Skill '{}' attempted write but lacks allow_filesystem_write permission", skill_name_for_write);
-                    let res_json = serde_json::json!({ "success": false, "path": "", "error": "Security Violation: Field writing is not permitted for this skill." }).to_string();
+            // Apply Configs
+            if let Some(cfg) = configs_clone {
+                for (k, v) in cfg {
+                    manifest = manifest.with_config(vec![(k, v)].into_iter());
+                }
+            }
+
+            // 2. Build Host Functions
+            let host_exec_permissions = metadata.as_ref().map(|m| m.permissions.clone()).unwrap_or_default();
+            let host_exec_fn = Function::new(
+                "host_exec",
+                [ValType::I64],
+                [ValType::I64],
+                UserData::new(()),
+                move |plugin, inputs, outputs, _user_data| {
+                    let cmd_ptr = inputs[0].i64().unwrap() as u64;
+                    let handle = plugin.memory_handle(cmd_ptr).ok_or_else(|| extism::Error::msg("Invalid memory handle"))?;
+                    let cmd_str: String = plugin.memory_str(handle).map_err(|e: extism::Error| e)?.to_string();
+                    let guard = BastionGuard::new(host_exec_permissions.clone());
+                    match guard.safe_exec(&cmd_str) {
+                        Ok(stdout) => {
+                            let mem = plugin.memory_alloc(stdout.len() as u64)?;
+                            plugin.memory_bytes_mut(mem)?.copy_from_slice(stdout.as_bytes());
+                            outputs[0] = Val::I64(mem.offset() as i64);
+                        },
+                        Err(e) => {
+                            let err_msg = format!("Bastion Guard Error: {}", e);
+                            let mem = plugin.memory_alloc(err_msg.len() as u64)?;
+                            plugin.memory_bytes_mut(mem)?.copy_from_slice(err_msg.as_bytes());
+                            outputs[0] = Val::I64(mem.offset() as i64);
+                        }
+                    }
+                    Ok(())
+                }
+            );
+
+            let host_write_permissions = metadata.as_ref().map(|m| m.permissions.clone()).unwrap_or_default();
+            let allowed_root_for_write = allowed_root_clone.clone();
+            let host_write_fn = Function::new(
+                "host_write",
+                [ValType::I64],
+                [ValType::I64],
+                UserData::new(()),
+                move |plugin, inputs, outputs, _user_data| {
+                    let json_ptr = inputs[0].i64().unwrap() as u64;
+                    let handle = plugin.memory_handle(json_ptr).ok_or_else(|| extism::Error::msg("Invalid memory handle for host_write"))?;
+                    let req_str = plugin.memory_str(handle).map_err(|e: extism::Error| e)?;
+                    
+                    if !host_write_permissions.allow_filesystem_write {
+                        let res_json = serde_json::json!({ "success": false, "path": "", "error": "Security Violation: Field writing is not permitted for this skill." }).to_string();
+                        let mem = plugin.memory_alloc(res_json.len() as u64)?;
+                        plugin.memory_bytes_mut(mem)?.copy_from_slice(res_json.as_bytes());
+                        outputs[0] = Val::I64(mem.offset() as i64);
+                        return Ok(());
+                    }
+
+                    #[derive(serde::Deserialize)]
+                    struct WriteReq { path: String, content: String }
+                    let res_json = match serde_json::from_str::<WriteReq>(req_str) {
+                        Ok(req) => {
+                            let full_path = allowed_root_for_write.join(&req.path);
+                            let parent_dir = full_path.parent().unwrap_or(&full_path);
+                            if !parent_dir.exists() { let _ = std::fs::create_dir_all(parent_dir); }
+                            match std::fs::canonicalize(parent_dir) {
+                                Ok(canon_parent) => {
+                                    let final_path = canon_parent.join(full_path.file_name().unwrap());
+                                    if !final_path.to_string_lossy().starts_with(allowed_root_for_write.to_string_lossy().as_ref()) {
+                                        serde_json::json!({ "success": false, "path": "", "error": "Security Violation: Path traversal blocked." }).to_string()
+                                    } else {
+                                        if let Some(parent) = final_path.parent() { let _ = std::fs::create_dir_all(parent); }
+                                        match std::fs::write(&final_path, req.content) {
+                                            Ok(_) => serde_json::json!({ "success": true, "path": final_path.to_string_lossy().to_string(), "error": None::<String> }).to_string(),
+                                            Err(e) => serde_json::json!({ "success": false, "path": "", "error": format!("Write failed: {}", e) }).to_string()
+                                        }
+                                    }
+                                },
+                                Err(e) => serde_json::json!({ "success": false, "path": "", "error": format!("Parent path canonicalization failed: {}", e) }).to_string()
+                            }
+                        },
+                        Err(e) => serde_json::json!({ "success": false, "path": "", "error": format!("Invalid JSON payload: {}", e) }).to_string()
+                    };
+
                     let mem = plugin.memory_alloc(res_json.len() as u64)?;
                     plugin.memory_bytes_mut(mem)?.copy_from_slice(res_json.as_bytes());
                     outputs[0] = Val::I64(mem.offset() as i64);
-                    return Ok(());
+                    Ok(())
                 }
+            );
 
-                #[derive(serde::Deserialize)]
-                struct WriteReq { path: String, content: String }
-                
-                let res_json = match serde_json::from_str::<WriteReq>(req_str) {
-                    Ok(req) => {
-                        let full_path = allowed_root_clone.join(&req.path);
-                        
-                        let parent_dir = full_path.parent().unwrap_or(&full_path);
-                        if !parent_dir.exists() {
-                            let _ = std::fs::create_dir_all(parent_dir);
-                        }
-                        match std::fs::canonicalize(parent_dir) {
-                            Ok(canon_parent) => {
-                                let final_path = canon_parent.join(full_path.file_name().unwrap());
-                                if !final_path.to_string_lossy().starts_with(allowed_root_clone.to_string_lossy().as_ref()) {
-                                    error!("🛡️ [WasmSkillManager] Security Violation: Attempted to write outside allowed root: {:?}", final_path);
-                                    serde_json::json!({ "success": false, "path": "", "error": "Security Violation: Path traversal blocked." }).to_string()
-                                } else {
-                                    if let Some(parent) = final_path.parent() {
-                                        let _ = std::fs::create_dir_all(parent);
-                                    }
-                                    info!("🛡️ [WasmSkillManager] host_write: Writing {} bytes to {:?}", req.content.len(), final_path);
-                                    match std::fs::write(&final_path, req.content) {
-                                        Ok(_) => serde_json::json!({ "success": true, "path": final_path.to_string_lossy().to_string(), "error": None::<String> }).to_string(),
-                                        Err(e) => {
-                                            error!("🛡️ [WasmSkillManager] host_write failed: {}", e);
-                                            serde_json::json!({ "success": false, "path": "", "error": format!("Write failed: {}", e) }).to_string()
-                                        }
-                                    }
-                                }
-                            },
-                            Err(e) => serde_json::json!({ "success": false, "path": "", "error": format!("Parent path canonicalization failed: {}", e) }).to_string()
-                        }
-                    },
-                    Err(e) => serde_json::json!({ "success": false, "path": "", "error": format!("Invalid JSON payload: {}", e) }).to_string()
-                };
-
-                let mem = plugin.memory_alloc(res_json.len() as u64)?;
-                plugin.memory_bytes_mut(mem)?.copy_from_slice(res_json.as_bytes());
-                outputs[0] = Val::I64(mem.offset() as i64);
-                Ok(())
-            }
-        );
-
-        // プラグインの初期化と実行
-        info!("🚀 [WasmSkillManager] Initializing WASM plugin: {}", skill_name);
-        let functions = vec![host_exec_fn, host_write_fn];
-        let mut plugin = Plugin::new(&manifest, functions, true)
-            .map_err(|e| format!("Failed to initialize WASM plugin {}: {}", skill_name, e))?;
-        
-        info!("⚡ [WasmSkillManager] Calling function: {}::{}", skill_name, func_name);
-        
-        let result = plugin.call::<&str, String>(func_name, input)
-            .map_err(|e| {
-                error!("❌ [WasmSkillManager] Skill execution failed for {}: {}", skill_name, e);
-                if e.to_string().to_lowercase().contains("timeout") {
-                    format!("WASM execution timed out after {:?}", self.timeout)
-                } else {
-                    format!("WASM execution error: {}", e)
-                }
-            })?;
+            let functions = vec![host_exec_fn, host_write_fn];
+            let mut plugin = Plugin::new(&manifest, functions, true)
+                .map_err(|e| format!("Failed to initialize WASM plugin {}: {}", skill_name_str, e))?;
+            
+            plugin.call::<&str, String>(&func_name_str, &input_str)
+                .map_err(|e| {
+                    if e.to_string().to_lowercase().contains("timeout") {
+                        format!("WASM execution timed out")
+                    } else {
+                        format!("WASM execution error: {}", e)
+                    }
+                })
+        }).await.unwrap()?;
 
         info!("✅ [WasmSkillManager] Skill execution successful: {}", skill_name);
         Ok(result)
@@ -377,62 +383,64 @@ impl WasmSkillManager {
 
         info!("🛡️  [Layer 3 Deterministic Tracer] Starting dry-run for skill: {} (func: {})", skill_name, func_name);
 
-        // 1. Simulation Plugin の新設 (Extism Manifest の極限制限)
-        // ネットワークアクセス一切なし、WASIディスクアクセス制限 (一切バインドしない)
-        let manifest = Manifest::new([extism::Wasm::file(&wasm_path)])
-            .with_timeout(Duration::from_millis(500)); // タイムアウトも極端に短く (500ms)
+        // Phase 13-A: Wrap EVERYTHING in ONE spawn_blocking
+        let func_name_str = func_name.to_string();
+        let wasm_path_clone = wasm_path.clone();
+        let test_input_str = test_input.to_string();
+        let skill_name_str = skill_name.to_string();
 
-        // 為、ドライラン時にも同じHost関数インターフェースが必要。
-        // ただし、ドライラン時は実効的な書き込み等は行わない「モック」として登録する。
-        let host_exec_fn = Function::new(
-            "host_exec",
-            [ValType::I64],
-            [ValType::I64],
-            UserData::new(()),
-            |plugin, _inputs, outputs, _user_data| {
-                let mem = plugin.memory_alloc(0)?;
-                outputs[0] = Val::I64(mem.offset() as i64);
-                Ok(())
-            }
-        );
-        let host_write_fn = Function::new(
-            "host_write",
-            [ValType::I64],
-            [ValType::I64],
-            UserData::new(()),
-            |plugin, _inputs, outputs, _user_data| {
-                let mem = plugin.memory_alloc(0)?;
-                outputs[0] = Val::I64(mem.offset() as i64);
-                Ok(())
-            }
-        );
-        let functions = vec![host_exec_fn, host_write_fn];
+        let dry_run_success = tokio::task::spawn_blocking(move || {
+            let manifest = Manifest::new([extism::Wasm::file(&wasm_path_clone)])
+                .with_timeout(Duration::from_millis(500));
 
-        // プラグイン初期化
-        let mut plugin = match Plugin::new(&manifest, functions, true) {
-            Ok(p) => p,
-            Err(e) => {
-                error!("🚨 [Layer 3 Deterministic Tracer] Initialization violation (OOM or format error): {}", e);
-                return Ok(false);
-            }
-        };
+            let host_exec_fn = Function::new(
+                "host_exec",
+                [ValType::I64],
+                [ValType::I64],
+                UserData::new(()),
+                |plugin, _inputs, outputs, _user_data| {
+                    let mem = plugin.memory_alloc(0)?;
+                    outputs[0] = Val::I64(mem.offset() as i64);
+                    Ok(())
+                }
+            );
+            let host_write_fn = Function::new(
+                "host_write",
+                [ValType::I64],
+                [ValType::I64],
+                UserData::new(()),
+                |plugin, _inputs, outputs, _user_data| {
+                    let mem = plugin.memory_alloc(0)?;
+                    outputs[0] = Val::I64(mem.offset() as i64);
+                    Ok(())
+                }
+            );
+            let functions = vec![host_exec_fn, host_write_fn];
 
-        // 2. 実行時検証 (シミュレーション実行)
-        // OOMや非合法なSyscallが発生した場合はエラーとして返ってくる
-        info!("⚡ [Layer 3 Deterministic Tracer] Simulating execution with deterministic constraints...");
-        let dry_run_result = plugin.call::<&str, String>(&func_name, test_input);
-        
-        // 3. 全ての検証をパスした場合のみ、VerifiedSkill 型を生成
-        match dry_run_result {
-            Ok(_) => {
-                info!("✅ [Layer 3 Deterministic Tracer] Protocol behavior validated deterministically: {}", skill_name);
-                Ok(true)
+            let mut plugin = match Plugin::new(&manifest, functions, true) {
+                Ok(p) => p,
+                Err(e) => {
+                    error!("🚨 [Layer 3 Deterministic Tracer] Initialization violation (OOM or format error): {}", e);
+                    return false;
+                }
+            };
+
+            // 2. 実行時検証 (シミュレーション実行)
+            // OOMや非合法なSyscallが発生した場合はエラーとして返ってくる
+            info!("⚡ [Layer 3 Deterministic Tracer] Simulating execution with deterministic constraints...");
+            match plugin.call::<&str, String>(&func_name_str, &test_input_str) {
+                Ok(_) => {
+                    info!("✅ [Layer 3 Deterministic Tracer] Protocol behavior validated deterministically: {}", skill_name_str);
+                    true
+                },
+                Err(e) => {
+                    error!("🚨 [Layer 3 Deterministic Tracer] Deterministic Violation Detected for '{}': {}", skill_name_str, e);
+                    false
+                }
             }
-            Err(e) => {
-                error!("🚨 [Layer 3 Deterministic Tracer] Deterministic Violation Detected for '{}': {}", skill_name, e);
-                Ok(false)
-            }
-        }
+        }).await.unwrap();
+
+        Ok(dry_run_success)
     }
 
     /// ドライラン（Dry-Run）による論理検証。

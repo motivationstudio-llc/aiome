@@ -8,6 +8,7 @@ We provide security updates for the following versions:
 
 | Version | Supported          |
 | ------- | ------------------ |
+| 1.0.x   | :white_check_mark: |
 | 0.1.x   | :white_check_mark: |
 | < 0.1.0 | :x:                |
 
@@ -43,10 +44,12 @@ We ask that you follow responsible disclosure principles:
 Aiome employs **Formal Verification**, **Model-Based Testing (MBT)**, and **Design by Contract (DbC/TypeState)** to assure absolute isolation and logical consistency for autonomous agents. Our architecture guarantees safety mathematically, moving far beyond traditional empirical testing:
 
 1. **TLA+ Spec Verification**: The `AiomeQuarantineProtocol` (WASM sandbox isolation logic), `AiomeContextEngine` (FSM of the high-level agent cognition), and the `SamsaraKarmaProtocol` (Hash-chain-based knowledge federation) are formally verified using the **TLC Model Checker**. We guarantee with algorithmic certainty that liveness properties hold (no deadlocks) and safety invariants (e.g., `CompactMutex`) are never breached.
-2. **NAPI Hybrid Boundary Defense**: Our architecture separates the high-level Plugin/UI logic (Node.js) from the low-level, verified core (Rust) using a **NAPI-rs bridge**. This ensures that even if the Node.js layer is compromised, the Rust core's invariants (enforced by the TLA+ models) protect critical state (Karma/Immune rules) from unauthorized modification.
+2. **NAPI Hybrid Boundary Defense**: Our architecture separates high-level Plugin/UI logic (Node.js) from the low-level, verified core (Rust) using a **NAPI-rs bridge (Sentinel)**. This ensures that even if the Node.js layer is compromised, the Rust core's invariants (enforced by TLA+ models and TypeState) protect critical state (Karma/Immune rules) and enforce strict path/command blacklists via `immune_check_tool`.
 3. **Model-Based Testing (MBT) at CI/CD**: Formal TLA+ state transitions are mapped to concrete execution paths via `TRACE_MAP`. Our integration tests automatically verify these deterministic path executions on every PR, ensuring the implementation perfectly respects the mathematical model.
 4. **TypeState Compile-Time Enforcement (Layer 3½)**: The transition from `UnverifiedSkill` to `VerifiedSkill` is enforced at compile time. Functions executing skills (`call_skill`) demand the `VerifiedSkill` type, making security boundary breaches virtually impossible at the SDK level (the compiler simply rejects them).
 5. **Deterministic Tracer (Layer 3)**: Skills are dry-run in a completely deterministic, network-denied, memory-constrained WASM environment. Any resource violation or illegal syscall results in a definitive rejection.
+6. **OS-Native Build Isolation (The Forge Protocol)**: When the agent autonomously generates and compiles Rust code (`cargo build`), the compilation process itself is strictly isolated via OS-native sandboxing (e.g., Mac's `sandbox-exec` or Linux `bwrap`). This isolates the host operating system from any build-time supply chain attacks (e.g., malicious `build.rs` macros).
+7. **Core State Actor Concurrency**: The SQLite state engine acts as a single centralized messaging `Tokio MPSC Channel` (Actor Pattern). This mathematically prevents database lock errors and race conditions that could otherwise crash the NAPI interface layer during massive Swarm Sync traffic.
 
 
 ---

@@ -36,14 +36,19 @@ libs/shared         (Common Utils, Types)
 
 ## 📦 ディレクトリ構成
 
-- **apps/**: 実行可能なアプリケーション
+- **apps/**: 実行可能な Rust アプリケーション (Standalone)
 - **libs/**: 再利用可能なライブラリ群
   - **core**: 純粋なビジネスロジック (no IO ideally)
-  - **infrastructure**: I/Oの実装
-  - **shared**: 共通型定義
+  - **infrastructure**: I/Oの実装 (SQLite, API Request)
+  - **shared**: 共通型定義、セキュリティ境界 (Guardrails)
+  - **napi-bridge**: Node.js 向けネイティブ・バインディング層
+- **packages/**: Node.js (OpenClaw) とのハイブリッド統合用 NPM パッケージ群
+  - **sentinel**: Aiome Core に接続する NAPI アドオン
 
 ## 🧪 テスト戦略
 
 - **Unit Test**: `core` 内でロジックを徹底的にテスト
 - **Integration Test**: `api-server` でエンドポイントをテスト
 - **Mocking**: `mockall` を使用して `infrastructure` をモック化
+- **TDD Forge (Skill Generation)**: エージェントが新規スキルを作成する際は、必ず本番パブリッシュ前に隔離エンドポイント（`forge_test_run`）でJSON Assertを行うこと。
+- **Build Isolation**: エージェントによるローカルコンパイルは必ずOSネイティブサンドボックス（`sandbox-exec` 等）の厳格なプロファイル下で実行すること。

@@ -186,11 +186,11 @@ cp .env.example .env
 # ⚠️ 全ての API リクエストはこのプロキシを通過します。必ず最初に起動してください。
 GEMINI_API_KEY=your_key_here cargo run --bin key-proxy &
 
-# 4. Command Center の起動 (The Body)
-cargo run -p command-center
+# 4. Management Console (API Server) の起動 (The Body)
+cargo run --bin api-server
 
-# 5. Watchtower (Discord Client) の起動 (The Soul)
-cargo run -p watchtower
+# 5. Samsara Hub (Federation) の起動 (Collective Intelligence)
+FEDERATION_SECRET=your_secret cargo run --bin samsara-hub
 ```
 
 > **Note**: `command-center` は UDS ソケットを通じて `watchtower` と通信します。対話機能（Discord連携）を有効にするには、両方のプロセスを同時に実行してください。

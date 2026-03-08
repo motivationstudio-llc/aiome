@@ -1,0 +1,147 @@
+warning: unused import: `PermissionManifest`
+  --> libs/infrastructure/src/skills/mod.rs:17:37
+   |
+17 | use crate::security::{BastionGuard, PermissionManifest};
+   |                                     ^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `infrastructure` (lib) generated 1 warning (run `cargo fix --lib -p infrastructure` to apply 1 suggestion)
+warning: unused import: `tower_http::cors::CorsLayer`
+  --> apps/api-server/src/main.rs:20:5
+   |
+20 | use tower_http::cors::CorsLayer;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `WasmSkillManager`
+   --> apps/api-server/src/main.rs:434:51
+    |
+434 |     use infrastructure::skills::{UnverifiedSkill, WasmSkillManager};
+    |                                                   ^^^^^^^^^^^^^^^^
+
+warning: `api-server` (bin "api-server") generated 2 warnings (run `cargo fix --bin "api-server" -p api-server` to apply 2 suggestions)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.18s
+     Running `target/debug/api-server`
+[2m2026-03-07T23:19:15.293570Z[0m [32m INFO[0m [2mapi_server[0m[2m:[0m 🌌 Aiome Management Console listening on 127.0.0.1:3015
+[2m2026-03-07T23:19:30.483819Z[0m [32m INFO[0m [2mapi_server[0m[2m:[0m 🛠️ [AgentLoop] Executing skill: fs_writer
+[2m2026-03-07T23:19:30.484202Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m 🛡️  [Layer 3 Deterministic Tracer] Starting dry-run for skill: fs_writer (func: call)
+[2m2026-03-07T23:19:30.529709Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m ⚡ [Layer 3 Deterministic Tracer] Simulating execution with deterministic constraints...
+[2m2026-03-07T23:19:30.530205Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m ✅ [Layer 3 Deterministic Tracer] Protocol behavior validated deterministically: fs_writer
+[2m2026-03-07T23:19:30.530947Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m 🚀 [WasmSkillManager] Initializing WASM plugin: fs_writer
+[2m2026-03-07T23:19:30.546007Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m ⚡ [WasmSkillManager] Calling function: fs_writer::call
+[2m2026-03-07T23:19:30.546180Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m 🛡️ [WasmSkillManager] host_write: Writing 21 bytes to "/Users/motista/Desktop/antigravity/modular-open-claw/workspace/success.txt"
+[2m2026-03-07T23:19:30.546303Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m ✅ [WasmSkillManager] Skill execution successful: fs_writer
+[2m2026-03-07T23:19:34.417547Z[0m [32m INFO[0m [2mapi_server[0m[2m:[0m 🛠️ [AgentLoop] Executing skill: fs_writer
+[2m2026-03-07T23:19:34.417822Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m 🛡️  [Layer 3 Deterministic Tracer] Starting dry-run for skill: fs_writer (func: call)
+[2m2026-03-07T23:19:34.444843Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m ⚡ [Layer 3 Deterministic Tracer] Simulating execution with deterministic constraints...
+[2m2026-03-07T23:19:34.445172Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m ✅ [Layer 3 Deterministic Tracer] Protocol behavior validated deterministically: fs_writer
+[2m2026-03-07T23:19:34.445959Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m 🚀 [WasmSkillManager] Initializing WASM plugin: fs_writer
+[2m2026-03-07T23:19:34.463588Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m ⚡ [WasmSkillManager] Calling function: fs_writer::call
+[2m2026-03-07T23:19:34.463756Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m 🛡️ [WasmSkillManager] host_write: Writing 21 bytes to "/Users/motista/Desktop/antigravity/modular-open-claw/workspace/success.txt"
+[2m2026-03-07T23:19:34.463879Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m ✅ [WasmSkillManager] Skill execution successful: fs_writer
+[2m2026-03-07T23:19:38.341661Z[0m [32m INFO[0m [2mapi_server[0m[2m:[0m 🛠️ [AgentLoop] Executing skill: fs_writer
+[2m2026-03-07T23:19:38.341841Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m 🛡️  [Layer 3 Deterministic Tracer] Starting dry-run for skill: fs_writer (func: call)
+[2m2026-03-07T23:19:38.367187Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m ⚡ [Layer 3 Deterministic Tracer] Simulating execution with deterministic constraints...
+[2m2026-03-07T23:19:38.367410Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m ✅ [Layer 3 Deterministic Tracer] Protocol behavior validated deterministically: fs_writer
+[2m2026-03-07T23:19:38.368100Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m 🚀 [WasmSkillManager] Initializing WASM plugin: fs_writer
+[2m2026-03-07T23:19:38.385758Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m ⚡ [WasmSkillManager] Calling function: fs_writer::call
+[2m2026-03-07T23:19:38.385950Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m 🛡️ [WasmSkillManager] host_write: Writing 21 bytes to "/Users/motista/Desktop/antigravity/modular-open-claw/workspace/success.txt"
+[2m2026-03-07T23:19:38.386094Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m ✅ [WasmSkillManager] Skill execution successful: fs_writer
+[2m2026-03-07T23:19:42.272044Z[0m [32m INFO[0m [2mapi_server[0m[2m:[0m 🛠️ [AgentLoop] Executing skill: fs_writer
+[2m2026-03-07T23:19:42.272164Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m 🛡️  [Layer 3 Deterministic Tracer] Starting dry-run for skill: fs_writer (func: call)
+[2m2026-03-07T23:19:42.291565Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m ⚡ [Layer 3 Deterministic Tracer] Simulating execution with deterministic constraints...
+[2m2026-03-07T23:19:42.291758Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m ✅ [Layer 3 Deterministic Tracer] Protocol behavior validated deterministically: fs_writer
+[2m2026-03-07T23:19:42.292339Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m 🚀 [WasmSkillManager] Initializing WASM plugin: fs_writer
+[2m2026-03-07T23:19:42.308098Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m ⚡ [WasmSkillManager] Calling function: fs_writer::call
+[2m2026-03-07T23:19:42.308289Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m 🛡️ [WasmSkillManager] host_write: Writing 21 bytes to "/Users/motista/Desktop/antigravity/modular-open-claw/workspace/success.txt"
+[2m2026-03-07T23:19:42.308437Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m ✅ [WasmSkillManager] Skill execution successful: fs_writer
+[2m2026-03-07T23:19:46.235776Z[0m [32m INFO[0m [2mapi_server[0m[2m:[0m 🛠️ [AgentLoop] Executing skill: fs_writer
+[2m2026-03-07T23:19:46.236061Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m 🛡️  [Layer 3 Deterministic Tracer] Starting dry-run for skill: fs_writer (func: call)
+[2m2026-03-07T23:19:46.265409Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m ⚡ [Layer 3 Deterministic Tracer] Simulating execution with deterministic constraints...
+[2m2026-03-07T23:19:46.265652Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m ✅ [Layer 3 Deterministic Tracer] Protocol behavior validated deterministically: fs_writer
+[2m2026-03-07T23:19:46.266353Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m 🚀 [WasmSkillManager] Initializing WASM plugin: fs_writer
+[2m2026-03-07T23:19:46.284515Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m ⚡ [WasmSkillManager] Calling function: fs_writer::call
+[2m2026-03-07T23:19:46.284732Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m 🛡️ [WasmSkillManager] host_write: Writing 21 bytes to "/Users/motista/Desktop/antigravity/modular-open-claw/workspace/success.txt"
+[2m2026-03-07T23:19:46.284868Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m ✅ [WasmSkillManager] Skill execution successful: fs_writer
+[2m2026-03-07T23:19:50.188731Z[0m [32m INFO[0m [2mapi_server[0m[2m:[0m 🛠️ [AgentLoop] Executing skill: fs_writer
+[2m2026-03-07T23:19:50.189024Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m 🛡️  [Layer 3 Deterministic Tracer] Starting dry-run for skill: fs_writer (func: call)
+[2m2026-03-07T23:19:50.216774Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m ⚡ [Layer 3 Deterministic Tracer] Simulating execution with deterministic constraints...
+[2m2026-03-07T23:19:50.217010Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m ✅ [Layer 3 Deterministic Tracer] Protocol behavior validated deterministically: fs_writer
+[2m2026-03-07T23:19:50.217884Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m 🚀 [WasmSkillManager] Initializing WASM plugin: fs_writer
+[2m2026-03-07T23:19:50.235617Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m ⚡ [WasmSkillManager] Calling function: fs_writer::call
+[2m2026-03-07T23:19:50.235796Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m 🛡️ [WasmSkillManager] host_write: Writing 21 bytes to "/Users/motista/Desktop/antigravity/modular-open-claw/workspace/success.txt"
+[2m2026-03-07T23:19:50.235946Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m ✅ [WasmSkillManager] Skill execution successful: fs_writer
+[2m2026-03-07T23:19:54.150306Z[0m [32m INFO[0m [2mapi_server[0m[2m:[0m 🛠️ [AgentLoop] Executing skill: fs_writer
+[2m2026-03-07T23:19:54.150593Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m 🛡️  [Layer 3 Deterministic Tracer] Starting dry-run for skill: fs_writer (func: call)
+[2m2026-03-07T23:19:54.177933Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m ⚡ [Layer 3 Deterministic Tracer] Simulating execution with deterministic constraints...
+[2m2026-03-07T23:19:54.178186Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m ✅ [Layer 3 Deterministic Tracer] Protocol behavior validated deterministically: fs_writer
+[2m2026-03-07T23:19:54.178927Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m 🚀 [WasmSkillManager] Initializing WASM plugin: fs_writer
+[2m2026-03-07T23:19:54.196700Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m ⚡ [WasmSkillManager] Calling function: fs_writer::call
+[2m2026-03-07T23:19:54.196904Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m 🛡️ [WasmSkillManager] host_write: Writing 21 bytes to "/Users/motista/Desktop/antigravity/modular-open-claw/workspace/success.txt"
+[2m2026-03-07T23:19:54.197048Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m ✅ [WasmSkillManager] Skill execution successful: fs_writer
+[2m2026-03-07T23:19:58.121141Z[0m [32m INFO[0m [2mapi_server[0m[2m:[0m 🛠️ [AgentLoop] Executing skill: fs_writer
+[2m2026-03-07T23:19:58.121525Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m 🛡️  [Layer 3 Deterministic Tracer] Starting dry-run for skill: fs_writer (func: call)
+[2m2026-03-07T23:19:58.150880Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m ⚡ [Layer 3 Deterministic Tracer] Simulating execution with deterministic constraints...
+[2m2026-03-07T23:19:58.151128Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m ✅ [Layer 3 Deterministic Tracer] Protocol behavior validated deterministically: fs_writer
+[2m2026-03-07T23:19:58.151902Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m 🚀 [WasmSkillManager] Initializing WASM plugin: fs_writer
+[2m2026-03-07T23:19:58.170241Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m ⚡ [WasmSkillManager] Calling function: fs_writer::call
+[2m2026-03-07T23:19:58.170409Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m 🛡️ [WasmSkillManager] host_write: Writing 21 bytes to "/Users/motista/Desktop/antigravity/modular-open-claw/workspace/success.txt"
+[2m2026-03-07T23:19:58.170546Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m ✅ [WasmSkillManager] Skill execution successful: fs_writer
+[2m2026-03-07T23:20:02.106064Z[0m [32m INFO[0m [2mapi_server[0m[2m:[0m 🛠️ [AgentLoop] Executing skill: fs_writer
+[2m2026-03-07T23:20:02.106413Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m 🛡️  [Layer 3 Deterministic Tracer] Starting dry-run for skill: fs_writer (func: call)
+[2m2026-03-07T23:20:02.135897Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m ⚡ [Layer 3 Deterministic Tracer] Simulating execution with deterministic constraints...
+[2m2026-03-07T23:20:02.136188Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m ✅ [Layer 3 Deterministic Tracer] Protocol behavior validated deterministically: fs_writer
+[2m2026-03-07T23:20:02.136942Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m 🚀 [WasmSkillManager] Initializing WASM plugin: fs_writer
+[2m2026-03-07T23:20:02.155064Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m ⚡ [WasmSkillManager] Calling function: fs_writer::call
+[2m2026-03-07T23:20:02.155255Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m 🛡️ [WasmSkillManager] host_write: Writing 21 bytes to "/Users/motista/Desktop/antigravity/modular-open-claw/workspace/success.txt"
+[2m2026-03-07T23:20:02.155391Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m ✅ [WasmSkillManager] Skill execution successful: fs_writer
+[2m2026-03-07T23:20:06.121818Z[0m [32m INFO[0m [2mapi_server[0m[2m:[0m 🛠️ [AgentLoop] Executing skill: fs_writer
+[2m2026-03-07T23:20:06.122106Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m 🛡️  [Layer 3 Deterministic Tracer] Starting dry-run for skill: fs_writer (func: call)
+[2m2026-03-07T23:20:06.149721Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m ⚡ [Layer 3 Deterministic Tracer] Simulating execution with deterministic constraints...
+[2m2026-03-07T23:20:06.149972Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m ✅ [Layer 3 Deterministic Tracer] Protocol behavior validated deterministically: fs_writer
+[2m2026-03-07T23:20:06.150678Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m 🚀 [WasmSkillManager] Initializing WASM plugin: fs_writer
+[2m2026-03-07T23:20:06.168543Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m ⚡ [WasmSkillManager] Calling function: fs_writer::call
+[2m2026-03-07T23:20:06.168716Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m 🛡️ [WasmSkillManager] host_write: Writing 21 bytes to "/Users/motista/Desktop/antigravity/modular-open-claw/workspace/success.txt"
+[2m2026-03-07T23:20:06.168837Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m ✅ [WasmSkillManager] Skill execution successful: fs_writer
+[2m2026-03-07T23:20:10.177991Z[0m [32m INFO[0m [2mapi_server[0m[2m:[0m 🛠️ [AgentLoop] Executing skill: fs_writer
+[2m2026-03-07T23:20:10.178139Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m 🛡️  [Layer 3 Deterministic Tracer] Starting dry-run for skill: fs_writer (func: call)
+[2m2026-03-07T23:20:10.204436Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m ⚡ [Layer 3 Deterministic Tracer] Simulating execution with deterministic constraints...
+[2m2026-03-07T23:20:10.204665Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m ✅ [Layer 3 Deterministic Tracer] Protocol behavior validated deterministically: fs_writer
+[2m2026-03-07T23:20:10.205349Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m 🚀 [WasmSkillManager] Initializing WASM plugin: fs_writer
+[2m2026-03-07T23:20:10.223252Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m ⚡ [WasmSkillManager] Calling function: fs_writer::call
+[2m2026-03-07T23:20:10.223433Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m 🛡️ [WasmSkillManager] host_write: Writing 21 bytes to "/Users/motista/Desktop/antigravity/modular-open-claw/workspace/success.txt"
+[2m2026-03-07T23:20:10.223559Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m ✅ [WasmSkillManager] Skill execution successful: fs_writer
+[2m2026-03-07T23:20:14.272340Z[0m [32m INFO[0m [2mapi_server[0m[2m:[0m 🛠️ [AgentLoop] Executing skill: fs_writer
+[2m2026-03-07T23:20:14.272486Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m 🛡️  [Layer 3 Deterministic Tracer] Starting dry-run for skill: fs_writer (func: call)
+[2m2026-03-07T23:20:14.295361Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m ⚡ [Layer 3 Deterministic Tracer] Simulating execution with deterministic constraints...
+[2m2026-03-07T23:20:14.295584Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m ✅ [Layer 3 Deterministic Tracer] Protocol behavior validated deterministically: fs_writer
+[2m2026-03-07T23:20:14.296218Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m 🚀 [WasmSkillManager] Initializing WASM plugin: fs_writer
+[2m2026-03-07T23:20:14.313295Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m ⚡ [WasmSkillManager] Calling function: fs_writer::call
+[2m2026-03-07T23:20:14.313521Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m 🛡️ [WasmSkillManager] host_write: Writing 21 bytes to "/Users/motista/Desktop/antigravity/modular-open-claw/workspace/success.txt"
+[2m2026-03-07T23:20:14.313659Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m ✅ [WasmSkillManager] Skill execution successful: fs_writer
+[2m2026-03-07T23:20:18.542049Z[0m [32m INFO[0m [2mapi_server[0m[2m:[0m 🛠️ [AgentLoop] Executing skill: fs_writer
+[2m2026-03-07T23:20:18.542561Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m 🛡️  [Layer 3 Deterministic Tracer] Starting dry-run for skill: fs_writer (func: call)
+[2m2026-03-07T23:20:18.573716Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m ⚡ [Layer 3 Deterministic Tracer] Simulating execution with deterministic constraints...
+[2m2026-03-07T23:20:18.573947Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m ✅ [Layer 3 Deterministic Tracer] Protocol behavior validated deterministically: fs_writer
+[2m2026-03-07T23:20:18.574641Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m 🚀 [WasmSkillManager] Initializing WASM plugin: fs_writer
+[2m2026-03-07T23:20:18.592731Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m ⚡ [WasmSkillManager] Calling function: fs_writer::call
+[2m2026-03-07T23:20:18.592890Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m 🛡️ [WasmSkillManager] host_write: Writing 21 bytes to "/Users/motista/Desktop/antigravity/modular-open-claw/workspace/success.txt"
+[2m2026-03-07T23:20:18.593015Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m ✅ [WasmSkillManager] Skill execution successful: fs_writer
+[2m2026-03-07T23:20:22.770874Z[0m [32m INFO[0m [2mapi_server[0m[2m:[0m 🛠️ [AgentLoop] Executing skill: fs_writer
+[2m2026-03-07T23:20:22.771024Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m 🛡️  [Layer 3 Deterministic Tracer] Starting dry-run for skill: fs_writer (func: call)
+[2m2026-03-07T23:20:22.790501Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m ⚡ [Layer 3 Deterministic Tracer] Simulating execution with deterministic constraints...
+[2m2026-03-07T23:20:22.790704Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m ✅ [Layer 3 Deterministic Tracer] Protocol behavior validated deterministically: fs_writer
+[2m2026-03-07T23:20:22.791289Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m 🚀 [WasmSkillManager] Initializing WASM plugin: fs_writer
+[2m2026-03-07T23:20:22.806959Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m ⚡ [WasmSkillManager] Calling function: fs_writer::call
+[2m2026-03-07T23:20:22.807147Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m 🛡️ [WasmSkillManager] host_write: Writing 21 bytes to "/Users/motista/Desktop/antigravity/modular-open-claw/workspace/success.txt"
+[2m2026-03-07T23:20:22.807284Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m ✅ [WasmSkillManager] Skill execution successful: fs_writer
+[2m2026-03-07T23:20:27.079951Z[0m [32m INFO[0m [2mapi_server[0m[2m:[0m 🛠️ [AgentLoop] Executing skill: fs_writer
+[2m2026-03-07T23:20:27.080094Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m 🛡️  [Layer 3 Deterministic Tracer] Starting dry-run for skill: fs_writer (func: call)
+[2m2026-03-07T23:20:27.105143Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m ⚡ [Layer 3 Deterministic Tracer] Simulating execution with deterministic constraints...
+[2m2026-03-07T23:20:27.105366Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m ✅ [Layer 3 Deterministic Tracer] Protocol behavior validated deterministically: fs_writer
+[2m2026-03-07T23:20:27.106068Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m 🚀 [WasmSkillManager] Initializing WASM plugin: fs_writer
+[2m2026-03-07T23:20:27.123494Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m ⚡ [WasmSkillManager] Calling function: fs_writer::call
+[2m2026-03-07T23:20:27.123666Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m 🛡️ [WasmSkillManager] host_write: Writing 21 bytes to "/Users/motista/Desktop/antigravity/modular-open-claw/workspace/success.txt"
+[2m2026-03-07T23:20:27.123785Z[0m [32m INFO[0m [2minfrastructure::skills[0m[2m:[0m ✅ [WasmSkillManager] Skill execution successful: fs_writer

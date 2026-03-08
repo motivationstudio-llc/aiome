@@ -13,16 +13,21 @@ use tower_http::services::ServeDir;
 use tracing::{info, warn};
 use serde::{Deserialize, Serialize};
 use std::fs;
+use tokio_util::sync::CancellationToken;
 
 mod api;
 mod stream;
+mod skill_handler;
 
 #[derive(Clone)]
 pub struct AppState {
     pub health_monitor: Arc<Mutex<HealthMonitor>>,
     pub job_queue: Arc<infrastructure::job_queue::SqliteJobQueue>,
     pub wasm_skill_manager: Arc<infrastructure::skills::WasmSkillManager>,
+    pub skill_forge: Arc<infrastructure::skills::forge::SkillForge>,
     pub docs_path: String,
+    pub llm_semaphore: Arc<tokio::sync::Semaphore>,
+    pub forge_semaphore: Arc<tokio::sync::Semaphore>,
 }
 
 #[derive(Deserialize, Serialize, Clone)]
@@ -104,6 +109,16 @@ async fn main() {
     let job_queue = infrastructure::job_queue::SqliteJobQueue::new(&db_url).await.expect("Failed to init DB");
     let job_queue = Arc::new(job_queue);
 
+    let wasm_skill_manager = Arc::new(infrastructure::skills::WasmSkillManager::new("workspace/skills", "workspace").expect("Skills directory not found"));
+    let skill_forge = Arc::new(infrastructure::skills::forge::SkillForge::new("workspace/forge", "workspace/skills/custom"));
+    
+    // Backpressure: Initialize semaphores
+    let llm_semaphore = Arc::new(tokio::sync::Semaphore::new(3)); // Max 3 concurrent LLM calls
+    let forge_semaphore = Arc::new(tokio::sync::Semaphore::new(1)); // Max 1 concurrent build
+
+    // Forgeワークスペースの初期化
+    skill_forge.ensure_forge_workspace().expect("Failed to initialize skill forge workspace");
+
     let app = Router::new()
         .route("/api/wiki", get(list_wiki_files))
         .route("/api/wiki/:filename", get(get_wiki_content))
@@ -128,8 +143,11 @@ async fn main() {
         .with_state(AppState {
             health_monitor,
             job_queue: job_queue.clone(),
-            wasm_skill_manager: Arc::new(infrastructure::skills::WasmSkillManager::new("workspace/skills", "workspace").expect("Skills directory not found")),
+            wasm_skill_manager,
+            skill_forge,
             docs_path: docs_path.to_string(),
+            llm_semaphore,
+            forge_semaphore,
         })
         .fallback_service(ServeDir::new(static_path).append_index_html_on_directories(true))
         .layer({
@@ -143,9 +161,12 @@ async fn main() {
     let addr = SocketAddr::from(([127, 0, 0, 1], 3015));
     info!("🌌 Aiome Management Console listening on {}", addr);
 
-    // 🚀 Start Autonomous Background Worker Loop
+    let token = CancellationToken::new();
     let jq_clone = job_queue.clone();
+    let token_bg = token.clone();
     tokio::spawn(async move {
+        let token = token_bg;
+        let token_ws = token.clone();
         // Initialize LLM for background tasks
         let ollama_host = std::env::var("OLLAMA_HOST").unwrap_or_else(|_| "http://127.0.0.1:11434".to_string());
         let ollama_model = std::env::var("OLLAMA_MODEL").unwrap_or_else(|_| "qwen2.5:0.5b".to_string());
@@ -158,6 +179,7 @@ async fn main() {
         let jq_ws = jq_clone.clone();
 
         tokio::spawn(async move {
+            let token = token_ws;
             use aiome_core::contracts::HubMessage;
             use aiome_core::traits::JobQueue;
             use futures_util::StreamExt;
@@ -167,6 +189,11 @@ async fn main() {
             info!("⚙️ [FederationWorker] Starting with Node ID: {}", self_node_id);
 
             loop {
+                if token.is_cancelled() {
+                    info!("🛑 [FederationWorker] Shutdown requested. Exiting loop.");
+                    break;
+                }
+                
                 let mut request = hub_ws_url.clone().into_client_request().expect("Invalid WS URL");
                 request.headers_mut().insert(
                     "Authorization",
@@ -217,11 +244,22 @@ async fn main() {
                         warn!("⚠️ [FederationWorker] Connection failed: {:?}. Retrying...", e);
                     }
                 }
-                tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+                tokio::select! {
+                    _ = tokio::time::sleep(tokio::time::Duration::from_secs(10)) => {},
+                    _ = token.cancelled() => {
+                        info!("🛑 [FederationWorker] Cancellation received during wait. Exiting.");
+                        break;
+                    }
+                }
             }
         });
 
         loop {
+            if token.is_cancelled() {
+                info!("🛑 [BackgroundWorker] Shutdown requested. Cleaning up...");
+                break;
+            }
+
             // 🛡️ 1. Auto-Healing: Analyze threats and generate new immune rules
             info!("⚙️ [BackgroundWorker] Starting autonomous threat analysis (Auto-Healing)...");
             match immune_system.analyze_threats(jq_clone.as_ref()).await {
@@ -231,13 +269,52 @@ async fn main() {
             }
 
             // Sleep for 1 minute before next maintenance cycle
-            tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
+            tokio::select! {
+                _ = tokio::time::sleep(tokio::time::Duration::from_secs(60)) => {},
+                _ = token.cancelled() => {
+                    info!("🛑 [BackgroundWorker] Cancellation received. Exiting.");
+                    break;
+                }
+            }
         }
 
     });
     
     let listener = tokio::net::TcpListener::bind(addr).await.expect("Failed to bind to port 3015");
-    axum::serve(listener, app).await.expect("Server error");
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal(token))
+        .await
+        .expect("Server error");
+}
+
+async fn shutdown_signal(token: CancellationToken) {
+    let ctrl_c = async {
+        tokio::signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl+C handler");
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("failed to install signal handler")
+            .recv()
+            .await;
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {
+            info!("🔴 [api-server] Received Ctrl+C signal. Initiating graceful shutdown...");
+        },
+        _ = terminate => {
+            info!("🔴 [api-server] Received Terminate signal. Initiating graceful shutdown...");
+        },
+    }
+    
+    token.cancel();
 }
 
 async fn get_karma_stream(
@@ -249,7 +326,7 @@ async fn get_karma_stream(
 }
 
 async fn trigger_failure_demo(
-    axum::extract::State(state): axum::extract::State<AppState>,
+    axum::extract::State(_state): axum::extract::State<AppState>,
 ) -> Json<serde_json::Value> {
     // Demo implementation
     Json(serde_json::json!({
@@ -291,6 +368,50 @@ async fn trigger_federation_demo() -> Json<serde_json::Value> {
     }))
 }
 
+pub fn build_system_instructions(state: &AppState, karma_str: &str) -> String {
+    let skill_list = state.wasm_skill_manager.list_skills_with_metadata()
+        .iter()
+        .map(|m| {
+            let desc = if m.description == "No metadata provided" { "" } else { &m.description };
+            format!("- {}: {} (入力: {})", m.name, desc, m.inputs.first().cloned().unwrap_or_default())
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+        
+    let soul = std::fs::read_to_string("SOUL.md").unwrap_or_default();
+    let evolving_soul = std::fs::read_to_string("EVOLVING_SOUL.md").unwrap_or_default();
+    let forge_prompt = std::fs::read_to_string("workspace/config/SKILL_FORGE_PROMPT.md").unwrap_or_default();
+    
+    // SOUL or EVOLVING_SOUL could be empty, so handle that
+    let identity_prefix = if !soul.is_empty() || !evolving_soul.is_empty() {
+        format!("# IDENTITY: あなたはAiomeの守護者(Watchtower)です。🐾\n\
+                ルール: 簡潔に答え、[CallSkill]以外は自然な文章で話してください。私的な情報は守秘してください。\n\n")
+    } else {
+        "あなたはOpenClaw、Aiome OSの高度なコーディングAIです。日本語で短く答えてください。\n\n".to_string()
+    };
+    
+    format!(
+        "{}[利用可能な Wasm スキル]\n\
+        {}\n\n\
+        [Forge ツール (内部コマンド)]\n\
+        - forge_skill: {{\"skill_name\": \"...\", \"initial_rust_code\": \"...\", \"description\": \"...\"}}\n\
+        - forge_test_run: {{\"skill_name\": \"...\", \"test_input\": \"...\"}}\n\
+        - forge_publish: {{\"skill_name\": \"...\"}}\n\n\
+        ルール:\n\
+        1. スキル・ツールは [CallSkill: 名, {{引数}}] 形式を使用。\n\
+        2. 1ターンにつき1つの [CallSkill] のみ実行可能。\n\
+        3. 自分が現在使えるスキルの全スキーマは上記リストを参照。\n\n\
+        現在のディレクトリ: {}\n\
+        過去の教訓: {}\n\n\
+        {}\n",
+        identity_prefix,
+        skill_list,
+        std::env::current_dir().unwrap_or_default().display(),
+        karma_str,
+        forge_prompt
+    )
+}
+
 async fn trigger_agent_chat(
     axum::extract::State(state): axum::extract::State<AppState>,
     headers: axum::http::HeaderMap,
@@ -298,7 +419,7 @@ async fn trigger_agent_chat(
 ) -> impl axum::response::IntoResponse {
     use subtle::ConstantTimeEq;
     use aiome_core::llm_provider::LlmProvider;
-    use infrastructure::skills::{UnverifiedSkill, WasmSkillManager};
+    use infrastructure::skills::UnverifiedSkill;
     use tokio::time::timeout;
     use std::time::Duration;
 
@@ -315,6 +436,14 @@ async fn trigger_agent_chat(
             axum::http::StatusCode::UNAUTHORIZED, 
             Json(serde_json::json!({"status": "blocked", "reply": "Unauthorized"}))
         ).into_response();
+    }
+
+    // Discovery H: Guardrails check (Security Layer 0)
+    if let shared::guardrails::ValidationResult::Blocked(reason) = shared::guardrails::validate_input(&payload.prompt) {
+        return Json(serde_json::json!({
+            "status": "blocked",
+            "reply": format!("🚨 [GUARDRAIL BLOCK] {}", reason)
+        })).into_response();
     }
 
     let ollama_host = std::env::var("OLLAMA_HOST").unwrap_or_else(|_| "http://127.0.0.1:11434".to_string());
@@ -344,17 +473,7 @@ async fn trigger_agent_chat(
         current_history.push(format!("{}{}", prefix, msg.content));
     }
 
-    let system_instructions = format!(
-        "あなたはOpenClaw、Aiome OSの高度なコーディングAIです。日本語で短く答えてください。\n\
-        [スキル] [CallSkill: 名, {{引数}}]\n\
-        - fs_reader: {{\"path\":\"パス\"}}\n\
-        - terminal_exec: {{\"cmd\":\"コマンド\"}}\n\
-        ルール: スキルは [CallSkill] 形式を使用。1ターン1アクション。簡潔に結果を出すこと。\n\
-        現在のディレクトリ: {}\n\
-        過去の教訓: {}\n",
-        std::env::current_dir().unwrap_or_default().display(),
-        karma_str
-    );
+    let system_instructions = build_system_instructions(&state, &karma_str);
 
     let mut turn = 0;
     let max_turns = 15;
@@ -368,6 +487,9 @@ async fn trigger_agent_chat(
             payload.prompt
         );
         
+        // Phase 13-A: Acquire LLM semaphore
+        let _llm_permit = state.llm_semaphore.acquire().await.ok();
+
         match timeout(Duration::from_secs(300), provider.complete(&full_prompt, None)).await {
             Ok(Ok(reply)) => {
                 let reply = reply.trim().to_string();
@@ -376,25 +498,16 @@ async fn trigger_agent_chat(
 
                 let calls = parse_tool_calls(&reply);
                 for (skill_name, skill_input) in calls {
-                    let test_payload = state.wasm_skill_manager.get_metadata(&skill_name)
-                        .and_then(|m| m.inputs.first().cloned())
-                        .unwrap_or_else(|| "{}".to_string());
-
-                    let unverified = UnverifiedSkill { 
-                        name: skill_name.to_string(), 
-                        input_test_payload: test_payload 
-                    };
-                    if let Ok(v) = unverified.verify(&state.wasm_skill_manager).await {
-                        if let Ok(res) = state.wasm_skill_manager.call_skill(&v, "call", &skill_input, None).await {
-                            let limited_res = if res.len() > 3000 {
-                                format!("{}... [Truncated for brevity]", &res[..3000])
-                            } else {
-                                res
-                            };
-                            skill_results.push(format!("[{} Result: {}]", skill_name, limited_res));
+                    info!("🛠️ [AgentLoop] Executing skill: {}", skill_name);
+                    
+                    if skill_name.starts_with("forge_") {
+                        match skill_handler::execute_forge_command(&skill_name, &skill_input, &state).await {
+                            Ok(res) => skill_results.push(res),
+                            Err(e) => skill_results.push(format!("[{} Error: {}]", skill_name, e)),
                         }
                     } else {
-                        skill_results.push(format!("[{} Error: Verification failed]", skill_name));
+                        let res = skill_handler::execute_wasm_skill(&skill_name, &skill_input, &state).await;
+                        skill_results.push(res);
                     }
                 }
 
@@ -444,6 +557,11 @@ async fn get_wiki_content(
     axum::extract::State(state): axum::extract::State<AppState>,
     Path(filename): Path<String>
 ) -> impl IntoResponse {
+    // Discovery G: Path Traversal Fix
+    if filename.contains("..") || filename.contains('/') || filename.contains('\\') {
+        return (StatusCode::BAD_REQUEST, "Invalid filename").into_response();
+    }
+
     let path = std::path::PathBuf::from(&state.docs_path).join(filename);
     match fs::read_to_string(path) {
         Ok(content) => content.into_response(),
