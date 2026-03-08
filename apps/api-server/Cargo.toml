@@ -1,5 +1,5 @@
 [package]
-license = "MIT"
+license = "ELv2"
 name = "api-server"
 version = "0.1.0"
 edition = "2021"
@@ -16,3 +16,14 @@ serde_json = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 anyhow = { workspace = true }
+regex = "1.10"
+subtle = "2.5.0"
+tower = { version = "0.4", features = ["limit", "util", "buffer"] }
+futures = { workspace = true }
+async-stream = { workspace = true }
+tokio-stream = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+tokio-tungstenite = "0.28.0"
+futures-util = "0.3.32"
+url = "2.5.8"

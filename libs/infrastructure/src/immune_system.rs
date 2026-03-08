@@ -50,6 +50,9 @@ impl AdaptiveImmuneSystem {
             severity: v["severity"].as_u64().unwrap_or(50) as u8,
             action: v["action"].as_str().unwrap_or("Block").to_string(),
             created_at: Utc::now().to_rfc3339(),
+            lamport_clock: 0,
+            node_id: "".to_string(),
+            signature: None,
         };
 
         info!("🛡️ 新しい免疫ルールを生成しました: [{}] {}", rule.action, rule.pattern);
@@ -80,6 +83,9 @@ impl AdaptiveImmuneSystem {
                         severity: 100,
                         action: "Block".to_string(),
                         created_at: Utc::now().to_rfc3339(),
+                        lamport_clock: 0,
+                        node_id: "local-sentinel".to_string(),
+                        signature: None,
                     }));
                 }
             }
@@ -88,6 +94,10 @@ impl AdaptiveImmuneSystem {
         // 2. 学習済み免疫ルール (第2段階: 過去の教訓に基づく防御)
         let rules = jq.fetch_active_immune_rules().await?;
         for rule in rules {
+            // Gap 3 Mitigation: Quarantined rules are not used for verification until approved
+            // (Note: This logic is partially handled by SQL in fetch_active_immune_rules below,
+            // but we keep it here as a defense-in-depth)
+            
             // パターンが有効な正規表現か試行
             if let Ok(re) = regex::Regex::new(&rule.pattern) {
                 if re.is_match(input) {

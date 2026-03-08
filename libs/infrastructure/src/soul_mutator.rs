@@ -13,7 +13,7 @@ use tokio::fs;
 use aiome_core::traits::JobQueue;
 use aiome_core::llm_provider::LlmProvider;
 use std::sync::Arc;
-use tracing::info;
+use tracing::{info, error};
 
 pub struct SoulMutator {
     provider: Arc<dyn LlmProvider>,
@@ -99,6 +99,15 @@ impl SoulMutator {
         let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S").to_string();
         let backup_path = evolving_soul_path.with_extension(format!("bak.{}", timestamp));
         let _ = fs::copy(&evolving_soul_path, &backup_path).await;
+
+        // 5. Verification: Prevent "Ignore previous instructions" injection
+        let malicious_patterns = ["ignore all previous", "delete all", "overwrite everything"];
+        for pattern in malicious_patterns {
+            if new_soul_content.to_lowercase().contains(pattern) {
+                error!("🚨 [SoulMutator] Malicious mutation pattern detected! Aborting.");
+                return Err("Security Violation: Malicious mutation blocked.".into());
+            }
+        }
 
         fs::write(&evolving_soul_path, &new_soul_content).await
             .map_err(|e| format!("Failed to write EVOLVING_SOUL.md: {}", e))?;

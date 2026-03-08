@@ -179,6 +179,9 @@ pub trait JobQueue: Send + Sync {
     /// Log-First Distillation: 実行ログをDBに永続化する（LLMダウン時でも教訓を失わない）
     async fn store_execution_log(&self, job_id: &str, log: &str) -> Result<(), AiomeError>;
 
+    /// すべての教訓（Karma）を最新順に取得する
+    async fn fetch_all_karma(&self, limit: i64) -> Result<Vec<serde_json::Value>, AiomeError>;
+
     /// Deferred Distillation: ログはあるが Karma 未抽出のジョブを検索する
     async fn fetch_undistilled_jobs(&self, limit: i64) -> Result<Vec<Job>, AiomeError>;
 
@@ -239,9 +242,6 @@ pub trait JobQueue: Send + Sync {
     /// 指定した時刻以降に作成されたジョブ数を取得する
     async fn get_job_count_since(&self, since: chrono::DateTime<chrono::Utc>) -> Result<i64, AiomeError>;
 
-    /// すべての教訓（Karma）をN件取得する (分析用)
-    async fn fetch_all_karma(&self, limit: i64) -> Result<Vec<serde_json::Value>, AiomeError>;
-
     /// SNSで再生数上位のジョブを取得する (成功パターンの分析用)
     async fn fetch_top_performing_jobs(&self, limit: i64) -> Result<Vec<Job>, AiomeError>;
 
@@ -276,7 +276,21 @@ pub trait JobQueue: Send + Sync {
     /// Federation: 宛先ノード(Peer)ごとの最終同期時刻を取得・更新
     async fn get_peer_sync_time(&self, peer_url: &str) -> Result<Option<String>, AiomeError>;
     async fn update_peer_sync_time(&self, peer_url: &str, sync_time: &str) -> Result<(), AiomeError>;
+    
+    /// Get all immune rules for visualization
+    async fn get_immune_rules(&self) -> Result<Vec<crate::contracts::ImmuneRule>, AiomeError>;
+
+    // --- Phase 10-B: Swarm Logic ---
+    /// Get the node's unique ID (Public Key)
+    async fn get_node_id(&self) -> Result<String, AiomeError>;
+    /// Sign a message payload for the Swarm
+    async fn sign_swarm_payload(&self, payload: &str) -> Result<String, AiomeError>;
+    /// Increment the local Lamport clock and return new value
+    async fn tick_local_clock(&self) -> Result<u64, AiomeError>;
+    /// Update local clock based on a received remote clock value
+    async fn sync_local_clock(&self, remote_clock: u64) -> Result<u64, AiomeError>;
 }
+
 
 /// 評価台帳（sns_metrics_history）のレコード構造体
 #[derive(Debug, Clone)]

@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::env;
 use tracing::{info, error, warn};
-use zeroize::Zeroize;
+
 
 #[derive(Debug, Deserialize)]
 struct ProxyRequest {
@@ -82,6 +82,7 @@ async fn main() -> anyhow::Result<()> {
     quotas.insert("daemon".to_string(), 1000);
     quotas.insert("watchtower".to_string(), 100);
     quotas.insert("api-server".to_string(), 1000);
+    quotas.insert("openclaw-agent".to_string(), 1000);
 
     let state = AppState {
         gemini_key: Arc::new(SecretString::from(gemini_key)),
@@ -100,7 +101,7 @@ async fn main() -> anyhow::Result<()> {
 
     // 4. Level 5: Unix Domain Sockets (Optional/Configurable)
     // For now, let's start with TCP but keep the design ready for UDS
-    let port = env::var("KEY_PROXY_PORT").unwrap_or_else(|_| "9999".to_string());
+    let port = env::var("KEY_PROXY_PORT").unwrap_or_else(|_| "3016".to_string());
     let bind_addr = if env::var("BIND_ALL").map(|v| v == "true").unwrap_or(false) {
         "0.0.0.0"
     } else {
@@ -139,12 +140,8 @@ async fn handle_llm_complete(
         _ => return (StatusCode::BAD_REQUEST, "Invalid endpoint").into_response(),
     };
 
-    // 6. Zeroize usage
-    let mut api_key = state.gemini_key.expose_secret().clone();
-    
     // DEMO MOCK MODE
-    if api_key == "mock_key_for_testing" {
-        api_key.zeroize();
+    if state.gemini_key.expose_secret() == "mock_key_for_testing" {
         return Json(ProxyResponse { 
             result: format!("I am OpenClaw. I hear you loud and clear. Your prompt was: '{}'. Currently operating in Mock Offline Mode inside the Aiome Abyss Vault.", payload.prompt)
         }).into_response();
@@ -161,13 +158,9 @@ async fn handle_llm_complete(
         })
     });
 
-    let target_url = format!("{}?key={}", url, api_key);
-    
-    // IMPORTANT: Zeroize the key copy immediately after string format if possible
-    api_key.zeroize(); 
-
-    let res = state.client.post(target_url)
+    let res = state.client.post(url)
         .header("Content-Type", "application/json")
+        .header("x-goog-api-key", state.gemini_key.expose_secret())
         .json(&gemini_payload)
         .send()
         .await;
@@ -223,19 +216,15 @@ async fn handle_llm_embed(
         _ => return (StatusCode::BAD_REQUEST, "Invalid endpoint").into_response(),
     };
 
-    let mut api_key = state.gemini_key.expose_secret().clone();
-    
     let gemini_payload = serde_json::json!({
         "content": {
             "parts": [{ "text": payload.prompt }]
         }
     });
 
-    let target_url = format!("{}?key={}", url, api_key);
-    api_key.zeroize(); 
-
-    let res = state.client.post(target_url)
+    let res = state.client.post(url)
         .header("Content-Type", "application/json")
+        .header("x-goog-api-key", state.gemini_key.expose_secret())
         .json(&gemini_payload)
         .send()
         .await;

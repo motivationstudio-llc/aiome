@@ -1,13 +1,14 @@
 [workspace]
 members = [
     "apps/api-server",
-    "apps/watchtower",
-    "apps/command-center/src-tauri",
     "apps/samsara-hub",
+    "apps/key-proxy",
     "libs/core",
     "libs/infrastructure",
     "libs/shared",
-    "libs/sidecar", "workspace/skill_generator", "apps/aiome-daemon", "apps/key-proxy",
+    "libs/wasm-skills/fs_reader",
+    "libs/wasm-skills/terminal_exec",
+    "libs/wasm-skills/fs_writer", "libs/napi-bridge",
 ]
 resolver = "2"
 
@@ -34,3 +35,6 @@ tokio-util = { version = "0.7", features = ["codec", "io"] }
 secrecy = { version = "0.8", features = ["serde"] }
 jsonschema = "0.17"
 tower = { version = "0.4", features = ["limit"] }
+futures = "0.3"
+tokio-stream = "0.1"
+async-stream = "0.3"

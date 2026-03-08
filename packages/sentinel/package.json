@@ -1,0 +1,25 @@
+{
+    "name": "@aiome/sentinel",
+    "version": "1.0.0",
+    "description": "Aiome ContextEngine for OpenClaw",
+    "main": "dist/index.js",
+    "types": "dist/index.d.ts",
+    "scripts": {
+        "build": "tsc",
+        "build:native": "napi build --platform --release --manifest-path ../../libs/napi-bridge/Cargo.toml --output-dir .",
+        "test": "echo \"Error: no test specified\" && exit 1"
+    },
+    "openclaw": {
+        "plugin": true,
+        "kind": "context-engine"
+    },
+    "dependencies": {},
+    "devDependencies": {
+        "@napi-rs/cli": "^3.0.0",
+        "typescript": "^5.0.0",
+        "@types/node": "^20.0.0"
+    },
+    "engines": {
+        "node": ">= 20"
+    }
+}

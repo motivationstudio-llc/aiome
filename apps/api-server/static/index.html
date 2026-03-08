@@ -6,6 +6,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Aiome | Dashboard</title>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.6/purify.min.js"></script>
+    <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600&family=JetBrains+Mono&display=swap"
         rel="stylesheet">
     <style>
@@ -264,6 +266,8 @@
                                 (Vault)</span></a></li>
                     <li><a href="#" onclick="showSynergyPanel('federation')"><span id="nav-federation">🌐 集団知能
                                 (Sync)</span></a></li>
+                    <li><a href="#" onclick="showSynergyPanel('graph')"><span id="nav-graph">🕸️ 共鳴グラフ
+                                (Graph)</span></a></li>
                     <li style="margin-top:0.5rem; padding-top:0.5rem; border-top:1px dashed var(--border-color);"><a
                             href="#" onclick="showSynergyPanel('agent')"><span id="nav-agent">💬 Agent Console
                                 (Direct)</span></a></li>
@@ -311,6 +315,7 @@
                 nav_karma: "🧬 進化の脈動 (Karma)",
                 nav_security: "🛡️ 防御の盾 (Vault)",
                 nav_federation: "🌐 集団知能 (Sync)",
+                nav_graph: "🕸️ 共鳴グラフ (Graph)",
                 nav_agent: "💬 Agent Console (Direct)",
                 welcome: "サイドバーからドキュメントを選択してください。",
                 karma_title: "🧬 進化の脈動 (Karma Stream)",
@@ -334,12 +339,16 @@
                 agent_desc: "<h3>Genesis Interface</h3><p>OpenClaw とペアプログラミングを行い、機能拡張の指示を出すためのコンソールです。</p>",
                 agent_send: "送信 / Send",
                 agent_placeholder: "Type a prompt to OpenClaw (e.g. 'Write a new scraper script')",
-                agent_thinking: "Thinking..."
+                agent_thinking: "Thinking...",
+                graph_title: "🕸️ Synapse Resonance Graph",
+                graph_status: "Real-time Synergy Map",
+                graph_desc: "<h3>知識と免疫の共鳴</h3><p>全ての教訓(Karma)と免疫ルール(Immune Rules)は Aiome Core を中心にネットワークを形成します。これはエージェントの「脳」の成長を可視化したものです。</p>"
             },
             en: {
                 nav_karma: "🧬 Evolution Pulse (Karma)",
                 nav_security: "🛡️ Security Shield (Vault)",
                 nav_federation: "🌐 Swarm Sync (Sync)",
+                nav_graph: "🕸️ Synergy Graph (Graph)",
                 nav_agent: "💬 Agent Console (Direct)",
                 welcome: "Select a document from the sidebar to begin.",
                 karma_title: "🧬 Evolution Pulse (Karma Stream)",
@@ -360,6 +369,9 @@
                 federation_waiting: "Terminal: Waiting for global node connection...",
                 agent_title: "💬 Agent Console (Direct Chat)",
                 agent_status: "Active Link to OpenClaw",
+                graph_title: "🕸️ Synapse Resonance Graph",
+                graph_status: "Real-time Synergy Map",
+                graph_desc: "<h3>Resonance of Knowledge & Immunity</h3><p>All Karma and Immune Rules form a network around the Aiome Core. This is a visualization of the agent's growing 'brain'.</p>",
                 agent_desc: "<h3>Genesis Interface</h3><p>A pair-programming console to directly converse with OpenClaw and issue skill expansion commands.</p>",
                 agent_send: "Send",
                 agent_placeholder: "Type a prompt to OpenClaw (e.g. 'Write a new scraper script')",
@@ -380,6 +392,8 @@
             document.getElementById('nav-karma').innerText = t('nav_karma');
             document.getElementById('nav-security').innerText = t('nav_security');
             document.getElementById('nav-federation').innerText = t('nav_federation');
+            const navGraph = document.getElementById('nav-graph');
+            if (navGraph) navGraph.innerText = t('nav_graph');
             const navAgent = document.getElementById('nav-agent');
             if (navAgent) navAgent.innerText = t('nav_agent');
 
@@ -447,7 +461,7 @@
             area.classList.remove('animate');
             void area.offsetWidth;
             area.classList.add('animate');
-            body.innerHTML = marked.parse(text);
+            body.innerHTML = DOMPurify.sanitize(marked.parse(text));
         }
 
         function updateActive(target) {
@@ -502,6 +516,18 @@
                     <div id="federation-term" class="terminal"><span style="color:var(--text-dim)">>_ ${t('federation_waiting').split(': ')[1]}</span></div>
                     <div id="federation-conclusion" style="margin-top: 1rem;"></div>
                 `;
+            } else if (type === 'graph') {
+                title.innerText = t('graph_title');
+                status.innerText = t('graph_status');
+                body.innerHTML = `
+                    <div style="margin-bottom: 1.5rem;">
+                        ${t('graph_desc')}
+                    </div>
+                    <div id="synergy-graph" style="height: 500px; background: rgba(0,0,0,0.2); border: 1px solid var(--border-color); border-radius: 12px; position:relative; overflow:hidden;">
+                        <div style="position:absolute; top:50%; left:50%; transform:translate(-50%, -50%); color:var(--text-dim);">Initializing Neural Map...</div>
+                    </div>
+                `;
+                setTimeout(renderSynergyGraph, 100);
             } else if (type === 'agent') {
                 title.innerText = t('agent_title');
                 status.innerText = t('agent_status');
@@ -529,6 +555,8 @@
             }
         }
 
+        let chatHistoryArray = [];
+
         async function sendAgentMessage() {
             const inputField = document.getElementById('agent-input');
             const prompt = inputField.value.trim();
@@ -537,6 +565,7 @@
             const chatHistory = document.getElementById('agent-chat-history');
             const btnSend = document.getElementById('btn-agent-send');
 
+            // 1. Add user message
             const userMsg = document.createElement('div');
             userMsg.style = "align-self: flex-end; background: rgba(88, 166, 255, 0.1); border: 1px solid var(--accent-primary); padding: 0.8rem; border-radius: 12px 12px 0 12px; max-width: 80%; line-height: 1.5; box-shadow: 0 4px 10px rgba(0,0,0,0.2);";
             userMsg.innerText = prompt;
@@ -546,45 +575,88 @@
             inputField.disabled = true;
             btnSend.disabled = true;
 
+            // 2. Prepare Agent Message (Streaming)
             const agentMsg = document.createElement('div');
             agentMsg.style = "align-self: flex-start; background: transparent; border-left: 3px solid var(--accent-secondary); padding: 0.5rem 1rem; border-radius: 0 8px 8px 0; max-width: 90%; color: var(--text-main); font-size: 0.95rem; line-height: 1.6;";
             agentMsg.innerHTML = `<span style="color:var(--text-dim); font-style: italic;">${t('agent_thinking')}</span>`;
             chatHistory.appendChild(agentMsg);
             chatHistory.scrollTop = chatHistory.scrollHeight;
 
+            let fullContent = "";
+            let currentTurnEl = null;
+
             try {
-                const response = await fetch('/api/agent/chat', {
+                const response = await fetch('/api/agent/chat/stream', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ prompt: prompt })
+                    body: JSON.stringify({
+                        prompt: prompt,
+                        history: chatHistoryArray
+                    })
                 });
-                const result = await response.json();
 
-                if (result.status === "success") {
-                    agentMsg.innerHTML = typeof marked !== 'undefined' ? marked.parse(result.reply) : "<pre style='white-space: pre-wrap;'>" + result.reply + "</pre>";
-                } else if (result.status === "blocked") {
-                    agentMsg.style.borderColor = "#ff7b72";
-                    agentMsg.style.background = "rgba(255, 123, 114, 0.05)";
-                    const barrier = lang === 'ja' ? result.barrier_ja : result.barrier_en;
-                    agentMsg.innerHTML = `
-                        <div style="color: #ff7b72; font-weight: 600; margin-bottom: 0.5rem; display: flex; align-items: center; gap: 8px;">
-                            <span>🚫 ACCESS DENIED</span>
-                            <span class="badge" style="background:#ff7b72; color:#000; border:none; border-radius:4px;">${barrier}</span>
-                        </div>
-                        <pre style="white-space: pre-wrap; color: #ff7b72; font-family: 'JetBrains Mono', monospace; font-size: 0.85rem;">${result.reply}</pre>
-                    `;
-                } else {
-                    agentMsg.innerHTML = `<span style="color: #ff7b72;">${result.reply}</span>`;
+                if (!response.body) throw new Error("No response body");
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = "";
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop();
+
+                    for (const line of lines) {
+                        if (line.startsWith('event:')) {
+                            const eventType = line.replace('event:', '').trim();
+                            const dataLine = lines[lines.indexOf(line) + 1] || "";
+                            if (dataLine.startsWith('data:')) {
+                                const data = dataLine.replace('data:', '').trim();
+                                handleSseEvent(eventType, data, agentMsg);
+                            }
+                        }
+                    }
                 }
+
+                // Finalize history
+                chatHistoryArray.push({ role: "user", content: prompt });
+                chatHistoryArray.push({ role: "assistant", content: agentMsg.innerText.trim() });
+                if (chatHistoryArray.length > 20) chatHistoryArray.splice(0, 2);
+
             } catch (e) {
-                console.error("Agent chat error", e);
-                agentMsg.innerHTML = `<span style="color: #ff7b72;">Failed to communicate with OpenClaw. Make sure api-server is running.</span>`;
+                console.error("Stream error", e);
+                agentMsg.innerHTML += `<div class="term-error">Connection Error</div>`;
             }
 
             inputField.disabled = false;
             btnSend.disabled = false;
             inputField.focus();
             chatHistory.scrollTop = chatHistory.scrollHeight;
+        }
+
+        function handleSseEvent(type, data, container) {
+            if (type === 'text') {
+                if (container.querySelector('span')) container.innerHTML = ""; // Clear "Thinking"
+                const text = data;
+                // Accumulate and marked.parse
+                container.accumulatedText = (container.accumulatedText || "") + text;
+                const rawHtml = typeof marked !== 'undefined' ? marked.parse(container.accumulatedText) : container.accumulatedText;
+                container.innerHTML = DOMPurify.sanitize(rawHtml);
+            } else if (type === 'tool_detect') {
+                container.innerHTML += `<div style="color:var(--accent-primary); font-size: 0.8rem; margin: 0.5rem 0;">🛠️ Using Skills...</div>`;
+            } else if (type === 'tool_exec') {
+                container.innerHTML += `<div style="color:var(--text-dim); font-family: 'JetBrains Mono'; font-size: 0.8rem; padding-left: 1rem;">> ${data}</div>`;
+            } else if (type === 'tool_result') {
+                container.innerHTML += `<div style="color:var(--accent-secondary); font-family: 'JetBrains Mono'; font-size: 0.8rem; padding-left: 1rem;">✔ ${data}</div>`;
+            } else if (type === 'turn_start') {
+                console.log("Turn start:", data);
+            } else if (type === 'error') {
+                container.innerHTML += `<div class="term-error">Error: ${data}</div>`;
+            }
+            const chatBox = document.getElementById('agent-chat-history');
+            chatBox.scrollTop = chatBox.scrollHeight;
         }
 
         async function animateSteps(termId, steps) {
@@ -659,6 +731,48 @@
                 `).join('');
             } catch (e) {
                 console.error("Failed to fetch karma", e);
+            }
+        }
+
+        async function renderSynergyGraph() {
+            const container = document.getElementById('synergy-graph');
+            if (!container) return;
+
+            try {
+                const response = await fetch('/api/synergy/graph');
+                const data = await response.json();
+
+                const nodes = new vis.DataSet(data.nodes.map(n => ({
+                    id: n.id,
+                    label: n.label,
+                    group: n.group,
+                    font: { color: '#c9d1d9', size: 12, face: 'Outfit' },
+                    shape: n.group === 'core' ? 'diamond' : 'dot',
+                    size: n.group === 'core' ? 30 : 15
+                })));
+
+                const edges = new vis.DataSet(data.edges);
+
+                const options = {
+                    groups: {
+                        core: { color: { background: '#58a6ff', border: '#fff' } },
+                        karma: { color: { background: '#bc8cff', border: '#bc8cff' } },
+                        rule: { color: { background: '#ff7b72', border: '#ff7b72' } }
+                    },
+                    edges: {
+                        color: { color: 'rgba(255,255,255,0.2)', highlight: '#58a6ff' },
+                        smooth: { type: 'continuous' }
+                    },
+                    physics: {
+                        enabled: true,
+                        barnesHut: { gravitationalConstant: -2000, centralGravity: 0.3, springLength: 95 },
+                        stabilization: { iterations: 150 }
+                    }
+                };
+
+                new vis.Network(container, { nodes, edges }, options);
+            } catch (e) {
+                container.innerHTML = `<p style="padding:2rem; color:red;">Failed to render synergy graph: ${e}</p>`;
             }
         }
 

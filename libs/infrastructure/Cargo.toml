@@ -30,6 +30,9 @@ tokio-util = { workspace = true, features = ["codec", "io"] }
 secrecy = { workspace = true }
 jsonschema = { workspace = true }
 sha2 = "0.10"
+ed25519-dalek = { version = "2.1", features = ["rand_core"] }
+base64 = "0.22"
+rand = "0.8"
 contracts = "0.6.7"
 
 [dev-dependencies]

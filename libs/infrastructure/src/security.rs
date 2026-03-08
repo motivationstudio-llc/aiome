@@ -9,9 +9,15 @@
  */
 
 use aiome_core::error::AiomeError;
+
 use tracing::{info, error};
-use std::process::Command;
 use serde::{Deserialize, Serialize};
+
+const COMMAND_WHITELIST: &[&str] = &[
+    "ls", "cat", "cargo", "grep", "find", "wc", "echo", "pwd",
+    "git", "rustc", "node", "npm", "python3", "mkdir", "cp", "mv",
+    "head", "tail", "diff", "tree", "which", "env"
+];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PermissionManifest {
@@ -45,50 +51,56 @@ impl BastionGuard {
         Self { manifest }
     }
 
-    /// シェルコマンドの実行を検証し、許可されていれば実行する
+    /// シェルコマンドの実行を検証し、許可されていれば実行する (同期版)
     pub fn safe_exec(&self, cmd_str: &str) -> Result<String, AiomeError> {
         info!("🛡️ [BastionGuard] 検証中: {}", cmd_str);
 
-        // 1. マニフェスト・チェック (第2層-A)
+        // 1. マニフェスト・チェック
         if !self.manifest.allow_shell_execution {
-            error!("🚨 [SECURITY VIOLATION] Shell execution is disabled in manifest.");
-            return Err(AiomeError::Infrastructure { reason: "Security Violation: Shell execution is forbidden.".to_string() });
+            error!("🚨 [SECURITY VIOLATION] Shell execution is disabled.");
+            return Err(AiomeError::Infrastructure { reason: "Security Violation: Forbidden.".to_string() });
         }
 
-        // 2. インジェクション・フィルタ (第2層-B)
+        // 2. インジェクション・フィルタ
         let dangerous_parts = [";", "&&", "||", ">", "<", "|", "`", "$("];
         for part in dangerous_parts {
             if cmd_str.contains(part) {
-                error!("🚨 [SECURITY VIOLATION] Malicious command chaining detected: {}", part);
-                return Err(AiomeError::Infrastructure { reason: format!("Security Violation: Use of '{}' is prohibited in input.", part) });
+                return Err(AiomeError::Infrastructure { reason: format!("Security Violation: '{}' prohibited.", part) });
             }
         }
 
-        // 3. OSレベルの制限 (第2層-C: Seccomp/Sandbox)
-        // NOTE: macOS の場合は sandbox-exec 等が候補。Linux の場合は seccomp-bpf。
-        // ここではデモ用に、特定の「保護されたディレクトリ」へのアクセスをチェックする。
+        // 3. センシティブなパス
         if cmd_str.contains("/etc/") || cmd_str.contains("~/.ssh") || cmd_str.contains(".env") {
-            error!("🚨 [SECURITY VIOLATION] Attempted access to sensitive OS region: {}", cmd_str);
-            return Err(AiomeError::Infrastructure { reason: "Security Violation: Access to sensitive system files is blocked.".to_string() });
+            return Err(AiomeError::Infrastructure { reason: "Security Violation: Sensitive access.".to_string() });
         }
 
         info!("✅ [BastionGuard] 検証完了。コマンドを実行します...");
 
-        #[cfg(target_os = "linux")]
-        {
-             // Linux環境ならここで seccomp-bpf を適用した子プロセスを生成
-             info!("(Linux-specific seccomp/pledge would be applied here)");
+        // 4. Safer Execution: Use direct binary execution if possible to avoid terminal injection
+        let parts: Vec<&str> = cmd_str.split_whitespace().collect();
+        if parts.is_empty() {
+             return Err(AiomeError::Infrastructure { reason: "Empty command.".into() });
+        }
+        let binary = parts[0];
+        let args = &parts[1..];
+
+        // Strict Whitelist check against COMMAND_WHITELIST
+        if !COMMAND_WHITELIST.contains(&binary) {
+             return Err(AiomeError::Infrastructure { 
+                reason: format!("Security Violation: Binary '{}' is not in the whitelist.", binary) 
+             });
         }
 
-        let output = if cfg!(target_os = "windows") {
-            Command::new("cmd").args(["/C", cmd_str]).output()
-        } else {
-            Command::new("sh").args(["-c", cmd_str]).output()
-        }.map_err(|e| AiomeError::Infrastructure { reason: format!("Execution failed: {}", e) })?;
+        use std::process::Command;
+
+        let output = Command::new(binary)
+            .args(args)
+            .output()
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Execution failed: {}", e) })?;
 
         if !output.status.success() {
             let err_msg = String::from_utf8_lossy(&output.stderr).to_string();
-            return Err(AiomeError::Infrastructure { reason: format!("Command exited with error: {}", err_msg) });
+            return Err(AiomeError::Infrastructure { reason: format!("Command error: {}", err_msg) });
         }
 
         Ok(String::from_utf8_lossy(&output.stdout).to_string())

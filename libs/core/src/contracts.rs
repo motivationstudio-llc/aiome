@@ -315,9 +315,17 @@ pub struct ImmuneRule {
     pub pattern: String,
     /// ルールの重要度 (1-100)
     pub severity: u8,
-    /// 適用するアクション (Block, Warn, Quarantine)
+    /// 適用するアクション (Block, Warn, Quarantine, Revoke)
     pub action: String,
     pub created_at: String,
+
+    // --- Phase 10-B: Swarm Sync & CRDT ---
+    #[serde(default)]
+    pub lamport_clock: u64,
+    #[serde(default)]
+    pub node_id: String,
+    #[serde(default)]
+    pub signature: Option<String>,
 }
 
 /// 競争的淘汰アリーナの対戦記録
@@ -337,7 +345,7 @@ pub struct ArenaMatch {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FederationSyncRequest {
-    /// このノードの一意識別子 (起動時に生成されたUUID)。Sybil攻撃対策。
+    /// このノードの一意識別子 (Public KeyBase64等)。Sybil攻撃対策。
     pub node_id: String,
     /// 前回の同期日時 (ISO8601等)。初回は None
     pub since: Option<String>,
@@ -364,6 +372,14 @@ pub struct FederatedKarma {
     pub weight: i32,
     pub created_at: String,
     pub soul_version_hash: Option<String>,
+
+    // --- Phase 10-B: Swarm Sync & CRDT ---
+    #[serde(default)]
+    pub lamport_clock: u64,
+    #[serde(default)]
+    pub node_id: String,
+    #[serde(default)]
+    pub signature: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -377,4 +393,22 @@ pub struct FederationPushRequest {
 pub struct FederationPushResponse {
     pub accepted_count: usize,
     pub message: String,
+}
+
+// --- WebSocket Protocol Genesis ---
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FederationHandshake {
+    pub node_id: String,
+    pub auth_token: String,
+    pub protocol_version: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", content = "data")]
+pub enum HubMessage {
+    NewImmuneRule(ImmuneRule),
+    NewKarma(FederatedKarma),
+    LaggedForceSync { server_time: String },
+    Pong { server_time: String },
 }

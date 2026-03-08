@@ -20,6 +20,9 @@ use chrono::Utc;
 use tracing::warn;
 use aiome_core::llm_provider::EmbeddingProvider;
 use std::sync::Arc;
+use ed25519_dalek::{SigningKey, VerifyingKey, Signature, Signer, Verifier};
+use rand::rngs::OsRng;
+use base64::{prelude::BASE64_STANDARD, Engine};
 
 /// Job Queue that utilizes SQLite in WAL Mode to allow multi-threaded queue operations.
 #[derive(Clone)]
@@ -29,6 +32,10 @@ pub struct SqliteJobQueue {
 }
 
 impl SqliteJobQueue {
+    pub fn get_pool(&self) -> &sqlx::SqlitePool {
+        &self.pool
+    }
+
     /// Connects to the SQLite database and initializes the WAL mode and schema.
     pub async fn new(db_path: &str) -> Result<Self, AiomeError> {
         use std::str::FromStr;
@@ -175,7 +182,14 @@ impl SqliteJobQueue {
             "ALTER TABLE karma_logs ADD COLUMN soul_version_hash TEXT",
             "ALTER TABLE karma_logs ADD COLUMN karma_embedding BLOB",
             "ALTER TABLE karma_logs ADD COLUMN is_federated INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE karma_logs ADD COLUMN lamport_clock INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE karma_logs ADD COLUMN node_id TEXT DEFAULT ''",
+            "ALTER TABLE karma_logs ADD COLUMN signature TEXT",
             "ALTER TABLE immune_rules ADD COLUMN is_federated INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE immune_rules ADD COLUMN lamport_clock INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE immune_rules ADD COLUMN node_id TEXT DEFAULT ''",
+            "ALTER TABLE immune_rules ADD COLUMN signature TEXT",
+            "ALTER TABLE immune_rules ADD COLUMN status TEXT DEFAULT 'Active'",
         ] {
             let _ = sqlx::query(migration).execute(&self.pool).await;
         }
@@ -212,6 +226,10 @@ impl SqliteJobQueue {
         .execute(&self.pool)
         .await
         .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to create system_state table: {}", e) })?;
+
+        // Seed initial logical clock
+        let _ = sqlx::query("INSERT OR IGNORE INTO system_state (key, value) VALUES ('logical_clock', '0')")
+            .execute(&self.pool).await;
 
         // --- Watchtower Memory Distillation Tables ---
         sqlx::query(
@@ -532,6 +550,12 @@ impl JobQueue for SqliteJobQueue {
         let id = Uuid::new_v4().to_string();
         let now = Utc::now().to_rfc3339();
 
+        // --- Phase 10-B: Swarm Identity & Clock ---
+        let node_id = self.get_node_id().await.unwrap_or_default();
+        let clock = self.tick_local_clock().await.unwrap_or(0);
+        let sign_target = format!("{}:{}:{}", id, lesson, clock);
+        let signature = self.sign_swarm_payload(&sign_target).await.ok();
+
         let mut embedding: Option<Vec<u8>> = None;
         if let Some(ref provider) = self.embed_provider {
             if let Ok(vec) = provider.embed(lesson).await {
@@ -543,7 +567,7 @@ impl JobQueue for SqliteJobQueue {
         }
 
         sqlx::query(
-            "INSERT INTO karma_logs (id, job_id, karma_type, related_skill, lesson, soul_version_hash, created_at, karma_embedding) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+            "INSERT INTO karma_logs (id, job_id, karma_type, related_skill, lesson, soul_version_hash, created_at, karma_embedding, node_id, lamport_clock, signature) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         )
         .bind(&id)
         .bind(job_id)
@@ -553,6 +577,9 @@ impl JobQueue for SqliteJobQueue {
         .bind(soul_hash)
         .bind(&now)
         .bind(embedding)
+        .bind(&node_id)
+        .bind(clock as i64)
+        .bind(signature)
         .execute(&self.pool)
         .await
         .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to store karma for job {}: {}", job_id, e) })?;
@@ -1196,12 +1223,21 @@ impl JobQueue for SqliteJobQueue {
     }
 
     async fn store_immune_rule(&self, rule: &aiome_core::contracts::ImmuneRule) -> Result<(), AiomeError> {
-        sqlx::query("INSERT INTO immune_rules (id, pattern, severity, action, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING")
+        // --- Phase 10-B: Swarm Identity & Clock ---
+        let node_id = self.get_node_id().await.unwrap_or_default();
+        let clock = self.tick_local_clock().await.unwrap_or(0);
+        let sign_target = format!("{}:{}:{}", rule.id, rule.pattern, clock);
+        let signature = self.sign_swarm_payload(&sign_target).await.ok();
+
+        sqlx::query("INSERT INTO immune_rules (id, pattern, severity, action, created_at, node_id, lamport_clock, signature) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING")
             .bind(&rule.id)
             .bind(&rule.pattern)
             .bind(rule.severity as i64)
             .bind(&rule.action)
             .bind(&rule.created_at)
+            .bind(&node_id)
+            .bind(clock as i64)
+            .bind(signature)
             .execute(&self.pool)
             .await
             .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to store immune rule: {}", e) })?;
@@ -1209,7 +1245,7 @@ impl JobQueue for SqliteJobQueue {
     }
 
     async fn fetch_active_immune_rules(&self) -> Result<Vec<aiome_core::contracts::ImmuneRule>, AiomeError> {
-        let rows = sqlx::query("SELECT id, pattern, severity, action, created_at FROM immune_rules ORDER BY created_at DESC")
+        let rows = sqlx::query("SELECT id, pattern, severity, action, created_at, lamport_clock, node_id, signature FROM immune_rules WHERE status != 'Quarantined' ORDER BY created_at DESC")
             .fetch_all(&self.pool)
             .await
             .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to fetch immune rules: {}", e) })?;
@@ -1222,6 +1258,9 @@ impl JobQueue for SqliteJobQueue {
                 severity: r.try_get::<i64, _>("severity").unwrap_or(50) as u8,
                 action: r.try_get("action").unwrap_or_else(|_| "Block".to_string()),
                 created_at: r.try_get("created_at").unwrap_or_else(|_| "".to_string()),
+                lamport_clock: r.try_get::<i64, _>("lamport_clock").unwrap_or(0) as u64,
+                node_id: r.try_get("node_id").unwrap_or_else(|_| "".to_string()),
+                signature: try_get_optional_string(&r, "signature"),
             });
         }
         Ok(rules)
@@ -1247,13 +1286,13 @@ impl JobQueue for SqliteJobQueue {
     async fn export_federated_data(&self, since: Option<&str>) -> Result<(Vec<aiome_core::contracts::FederatedKarma>, Vec<aiome_core::contracts::ImmuneRule>, Vec<aiome_core::contracts::ArenaMatch>), AiomeError> {
         let since_ts = since.unwrap_or("1970-01-01T00:00:00");
 
-        let karmas = sqlx::query("SELECT id, job_id, karma_type, related_skill, lesson, weight, soul_version_hash, created_at FROM karma_logs WHERE created_at > ?")
+        let karmas = sqlx::query("SELECT id, job_id, karma_type, related_skill, lesson, weight, soul_version_hash, created_at, lamport_clock, node_id, signature FROM karma_logs WHERE created_at > ?")
             .bind(since_ts)
             .fetch_all(&self.pool)
             .await
             .map_err(|e| AiomeError::Infrastructure { reason: format!("Export Karma failed: {}", e) })?;
 
-        let rules = sqlx::query("SELECT id, pattern, severity, action, created_at FROM immune_rules WHERE created_at > ?")
+        let rules = sqlx::query("SELECT id, pattern, severity, action, created_at, lamport_clock, node_id, signature FROM immune_rules WHERE created_at > ?")
             .bind(since_ts)
             .fetch_all(&self.pool)
             .await
@@ -1276,6 +1315,9 @@ impl JobQueue for SqliteJobQueue {
                 weight: r.get::<i64, _>("weight") as i32,
                 soul_version_hash: try_get_optional_string(&r, "soul_version_hash"),
                 created_at: r.get("created_at"),
+                lamport_clock: r.get::<i64, _>("lamport_clock") as u64,
+                node_id: r.get("node_id"),
+                signature: try_get_optional_string(&r, "signature"),
             });
         }
 
@@ -1287,6 +1329,9 @@ impl JobQueue for SqliteJobQueue {
                 severity: r.get::<i64, _>("severity") as u8,
                 action: r.get("action"),
                 created_at: r.get("created_at"),
+                lamport_clock: r.get::<i64, _>("lamport_clock") as u64,
+                node_id: r.get("node_id"),
+                signature: try_get_optional_string(&r, "signature"),
             });
         }
 
@@ -1311,21 +1356,61 @@ impl JobQueue for SqliteJobQueue {
             .map_err(|e| AiomeError::Infrastructure { reason: format!("Import Tx start failed: {}", e) })?;
 
         for k in karmas {
-            sqlx::query("INSERT INTO karma_logs (id, job_id, karma_type, related_skill, lesson, weight, soul_version_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING")
-                .bind(&k.id).bind(&k.job_id).bind(&k.karma_type).bind(&k.related_skill).bind(&k.lesson).bind(k.weight as i64).bind(&k.soul_version_hash).bind(&k.created_at)
-                .execute(&mut *tx).await.map_err(|e| AiomeError::Infrastructure { reason: format!("Import Karma failed: {}", e) })?;
+            // Gap 2 Mitigation: Sanitization
+            let clean_lesson = if k.lesson.len() > 2000 {
+                format!("{}... [Truncated for Swarm Safety]", k.lesson.chars().take(2000).collect::<String>())
+            } else {
+                k.lesson.clone()
+            };
+
+            // Gap 3 Mitigation: Clock Sync
+            let _ = self.sync_local_clock(k.lamport_clock).await;
+
+            // CRDT LWW-Element-Set Merge
+            sqlx::query(
+                "INSERT INTO karma_logs (id, job_id, karma_type, related_skill, lesson, weight, soul_version_hash, created_at, is_federated, lamport_clock, node_id, signature) 
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+                 ON CONFLICT(id) DO UPDATE SET 
+                    lesson = excluded.lesson, 
+                    weight = excluded.weight,
+                    lamport_clock = excluded.lamport_clock,
+                    node_id = excluded.node_id,
+                    signature = excluded.signature,
+                    is_federated = 1
+                 WHERE excluded.lamport_clock > karma_logs.lamport_clock OR (excluded.lamport_clock = karma_logs.lamport_clock AND excluded.node_id > karma_logs.node_id)"
+            )
+            .bind(&k.id).bind(&k.job_id).bind(&k.karma_type).bind(&k.related_skill).bind(&clean_lesson)
+            .bind(k.weight as i64).bind(&k.soul_version_hash).bind(&k.created_at)
+            .bind(k.lamport_clock as i64).bind(&k.node_id).bind(&k.signature)
+            .execute(&mut *tx).await.ok();
         }
 
         for r in rules {
-            sqlx::query("INSERT INTO immune_rules (id, pattern, severity, action, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING")
-                .bind(&r.id).bind(&r.pattern).bind(r.severity as i64).bind(&r.action).bind(&r.created_at)
-                .execute(&mut *tx).await.map_err(|e| AiomeError::Infrastructure { reason: format!("Import Rule failed: {}", e) })?;
+            let _ = self.sync_local_clock(r.lamport_clock).await;
+
+            // Gap 3 Mitigation: Quarantine for Global Rules
+            // 外部から受信したルールは初期状態を 'Quarantined' (隔離) とする。
+            sqlx::query(
+                "INSERT INTO immune_rules (id, pattern, severity, action, created_at, is_federated, lamport_clock, node_id, signature, status) 
+                 VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, 'Quarantined')
+                 ON CONFLICT(id) DO UPDATE SET 
+                    pattern = excluded.pattern, 
+                    severity = excluded.severity,
+                    action = excluded.action,
+                    lamport_clock = excluded.lamport_clock,
+                    node_id = excluded.node_id,
+                    signature = excluded.signature
+                 WHERE excluded.lamport_clock > immune_rules.lamport_clock OR (excluded.lamport_clock = immune_rules.lamport_clock AND excluded.node_id > immune_rules.node_id)"
+            )
+            .bind(&r.id).bind(&r.pattern).bind(r.severity as i64).bind(&r.action).bind(&r.created_at)
+            .bind(r.lamport_clock as i64).bind(&r.node_id).bind(&r.signature)
+            .execute(&mut *tx).await.ok();
         }
 
         for m in matches {
             sqlx::query("INSERT INTO arena_history (id, skill_a, skill_b, topic, winner, reasoning, created_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING")
                 .bind(&m.id).bind(&m.skill_a).bind(&m.skill_b).bind(&m.topic).bind(&m.winner).bind(&m.reasoning).bind(&m.created_at)
-                .execute(&mut *tx).await.map_err(|e| AiomeError::Infrastructure { reason: format!("Import Match failed: {}", e) })?;
+                .execute(&mut *tx).await.ok();
         }
 
         tx.commit().await.map_err(|e| AiomeError::Infrastructure { reason: format!("Import Tx commit failed: {}", e) })?;
@@ -1351,7 +1436,110 @@ impl JobQueue for SqliteJobQueue {
             .map_err(|e| AiomeError::Infrastructure { reason: format!("Update Peer sync time failed: {}", e) })?;
         Ok(())
     }
+
+    async fn get_immune_rules(&self) -> Result<Vec<aiome_core::contracts::ImmuneRule>, AiomeError> {
+        let rows = sqlx::query("SELECT id, pattern, severity, action, created_at, lamport_clock, node_id, signature FROM immune_rules ORDER BY created_at DESC")
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Fetch immune rules failed: {}", e) })?;
+
+        let mut rules = Vec::new();
+        for r in rows {
+            use sqlx::Row;
+            rules.push(aiome_core::contracts::ImmuneRule {
+                id: r.get("id"),
+                pattern: r.get("pattern"),
+                severity: r.get::<i64, _>("severity") as u8,
+                action: r.get("action"),
+                created_at: r.get("created_at"),
+                lamport_clock: r.get::<i64, _>("lamport_clock") as u64,
+                node_id: r.get("node_id"),
+                signature: try_get_optional_string(&r, "signature"),
+            });
+        }
+        Ok(rules)
+    }
+
+    // --- Phase 10-B: Swarm Logic ---
+
+    async fn get_node_id(&self) -> Result<String, AiomeError> {
+        let row = sqlx::query("SELECT value FROM system_state WHERE key = 'node_id'")
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| AiomeError::Infrastructure { reason: e.to_string() })?;
+
+        if let Some(r) = row {
+            Ok(r.get("value"))
+        } else {
+            let mut csprng = OsRng;
+            let signing_key = SigningKey::generate(&mut csprng);
+            let pubkey_b64 = BASE64_STANDARD.encode(signing_key.verifying_key().as_bytes());
+            let privkey_b64 = BASE64_STANDARD.encode(signing_key.to_bytes());
+
+            let mut tx = self.pool.begin().await
+                .map_err(|e| AiomeError::Infrastructure { reason: e.to_string() })?;
+            sqlx::query("INSERT INTO system_state (key, value) VALUES ('node_id', ?)")
+                .bind(&pubkey_b64).execute(&mut *tx).await.ok();
+            sqlx::query("INSERT INTO system_state (key, value) VALUES ('node_privkey', ?)")
+                .bind(&privkey_b64).execute(&mut *tx).await.ok();
+            tx.commit().await.ok();
+
+            Ok(pubkey_b64)
+        }
+    }
+
+    async fn sign_swarm_payload(&self, payload: &str) -> Result<String, AiomeError> {
+        let row = sqlx::query("SELECT value FROM system_state WHERE key = 'node_privkey'")
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| AiomeError::Infrastructure { reason: e.to_string() })?;
+
+        if let Some(r) = row {
+            let privkey_b64: String = r.get("value");
+            let priv_bytes = BASE64_STANDARD.decode(privkey_b64).map_err(|_| AiomeError::Infrastructure { reason: "Corrupt node key".to_string() })?;
+            let mut key_arr = [0u8; 32];
+            key_arr.copy_from_slice(&priv_bytes);
+            let signing_key = SigningKey::from_bytes(&key_arr);
+            let signature = signing_key.sign(payload.as_bytes());
+            Ok(BASE64_STANDARD.encode(signature.to_bytes()))
+        } else {
+            let _ = self.get_node_id().await?; // Ensure key exists
+            Box::pin(self.sign_swarm_payload(payload)).await 
+        }
+    }
+
+    async fn tick_local_clock(&self) -> Result<u64, AiomeError> {
+        let mut tx = self.pool.begin().await.map_err(|e| AiomeError::Infrastructure { reason: e.to_string() })?;
+        let current: i64 = sqlx::query("SELECT value FROM system_state WHERE key = 'logical_clock'")
+            .fetch_one(&mut *tx).await.map(|r| r.get::<String, _>("value").parse().unwrap_or(0)).unwrap_or(0);
+        
+        let next = current + 1;
+        sqlx::query("UPDATE system_state SET value = ? WHERE key = 'logical_clock'")
+            .bind(next.to_string()).execute(&mut *tx).await.ok();
+        tx.commit().await.ok();
+        Ok(next as u64)
+    }
+
+    async fn sync_local_clock(&self, remote_clock: u64) -> Result<u64, AiomeError> {
+        let mut tx = self.pool.begin().await.map_err(|e| AiomeError::Infrastructure { reason: e.to_string() })?;
+        let current: i64 = sqlx::query("SELECT value FROM system_state WHERE key = 'logical_clock'")
+            .fetch_one(&mut *tx).await.map(|r| r.get::<String, _>("value").parse().unwrap_or(0)).unwrap_or(0);
+        
+        // Gap 3 Mitigation: Clock Skew Rejection
+        if remote_clock > (current as u64) + 100_000 {
+            warn!("⚠️ Potential Clock Poisoning attempt or severe skew detected: {} vs {}", remote_clock, current);
+            tx.rollback().await.ok();
+            return Ok(current as u64);
+        }
+
+        let next = std::cmp::max(current as u64, remote_clock) + 1;
+        sqlx::query("UPDATE system_state SET value = ? WHERE key = 'logical_clock'")
+            .bind(next.to_string()).execute(&mut *tx).await.ok();
+        tx.commit().await.ok();
+        Ok(next)
+    }
 }
+
 
 impl SqliteJobQueue {
     // --- Watchtower Memory Distillation Methods ---
@@ -1597,12 +1785,12 @@ impl SqliteJobQueue {
     }
 
     pub async fn fetch_unfederated_data(&self) -> Result<(Vec<aiome_core::contracts::FederatedKarma>, Vec<aiome_core::contracts::ImmuneRule>), AiomeError> {
-        let karmas = sqlx::query("SELECT id, job_id, karma_type, related_skill, lesson, weight, soul_version_hash, created_at FROM karma_logs WHERE is_federated = 0")
+        let karmas = sqlx::query("SELECT id, job_id, karma_type, related_skill, lesson, weight, soul_version_hash, created_at, lamport_clock, node_id, signature FROM karma_logs WHERE is_federated = 0")
             .fetch_all(&self.pool)
             .await
             .map_err(|e| AiomeError::Infrastructure { reason: format!("Fetch unfederated karma failed: {}", e) })?;
 
-        let rules = sqlx::query("SELECT id, pattern, severity, action, created_at FROM immune_rules WHERE is_federated = 0")
+        let rules = sqlx::query("SELECT id, pattern, severity, action, created_at, lamport_clock, node_id, signature FROM immune_rules WHERE is_federated = 0")
             .fetch_all(&self.pool)
             .await
             .map_err(|e| AiomeError::Infrastructure { reason: format!("Fetch unfederated rules failed: {}", e) })?;
@@ -1619,6 +1807,9 @@ impl SqliteJobQueue {
                 weight: r.get::<i64, _>("weight") as i32,
                 soul_version_hash: try_get_optional_string(&r, "soul_version_hash"),
                 created_at: r.get("created_at"),
+                lamport_clock: r.get::<i64, _>("lamport_clock") as u64,
+                node_id: r.get("node_id"),
+                signature: try_get_optional_string(&r, "signature"),
             });
         }
 
@@ -1631,6 +1822,9 @@ impl SqliteJobQueue {
                 severity: r.get::<i64, _>("severity") as u8,
                 action: r.get("action"),
                 created_at: r.get("created_at"),
+                lamport_clock: r.get::<i64, _>("lamport_clock") as u64,
+                node_id: r.get("node_id"),
+                signature: try_get_optional_string(&r, "signature"),
             });
         }
 

@@ -27,12 +27,23 @@ impl OllamaProvider {
 #[async_trait]
 impl LlmProvider for OllamaProvider {
     async fn complete(&self, prompt: &str, system: Option<&str>) -> Result<String, AiomeError> {
-        let url = format!("{}/api/generate", self.base_url);
+        let url = format!("{}/api/chat", self.base_url);
         
+        let mut messages = Vec::new();
+        if let Some(sys) = system {
+            messages.push(json!({
+                "role": "system",
+                "content": sys
+            }));
+        }
+        messages.push(json!({
+            "role": "user",
+            "content": prompt
+        }));
+
         let payload = json!({
             "model": self.model,
-            "prompt": prompt,
-            "system": system,
+            "messages": messages,
             "stream": false
         });
 
@@ -45,7 +56,7 @@ impl LlmProvider for OllamaProvider {
         let body: serde_json::Value = res.json().await
             .map_err(|e| AiomeError::Infrastructure { reason: e.to_string() })?;
 
-        Ok(body["response"].as_str().unwrap_or("").to_string())
+        Ok(body["message"]["content"].as_str().unwrap_or("").to_string())
     }
 
     fn name(&self) -> &str {

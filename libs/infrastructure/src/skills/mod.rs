@@ -12,10 +12,11 @@ use std::path::{Path, PathBuf};
 use std::collections::HashMap;
 use std::time::Duration;
 use tracing::{info, error};
-use extism::{Manifest, Plugin};
+use extism::{Manifest, Plugin, Function, Val, ValType, UserData};
 use jsonschema::JSONSchema;
+use crate::security::{BastionGuard, PermissionManifest};
 pub mod forge;
-use contracts::{requires, ensures};
+use contracts::requires;
 
 /// 状態: 未検証の外部Skill (TypeState Pattern)
 #[derive(Debug, Clone)]
@@ -27,7 +28,19 @@ pub struct UnverifiedSkill {
 /// 状態: 確定的検証をパスした安全なSkill (TypeState Pattern)
 #[derive(Debug, Clone)]
 pub struct VerifiedSkill {
-    pub name: String,
+    name: String,
+}
+
+impl VerifiedSkill {
+    /// Internal constructor for the infrastructure crate to promote unverified skills.
+    /// This ensures mathematical safety of the TypeState pattern.
+    pub(crate) fn promote(name: String) -> Self {
+        Self { name }
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
 }
 
 impl UnverifiedSkill {
@@ -37,7 +50,7 @@ impl UnverifiedSkill {
     pub async fn verify(self, manager: &WasmSkillManager) -> Result<VerifiedSkill, Box<dyn std::error::Error + Send + Sync>> {
         let is_safe = manager.dry_run_skill(&self.name, &self.input_test_payload).await?;
         if is_safe {
-            Ok(VerifiedSkill { name: self.name })
+            Ok(VerifiedSkill::promote(self.name))
         } else {
             Err(format!("Skill {} failed the deterministic dry-run quarantine", self.name).into())
         }
@@ -62,6 +75,7 @@ pub struct WasmSkillManager {
     skills_dir: PathBuf,
     memory_limit_bytes: u64,
     timeout: Duration,
+    wasm_cache: std::sync::RwLock<HashMap<String, Vec<u8>>>,
 }
 
 impl WasmSkillManager {
@@ -74,6 +88,7 @@ impl WasmSkillManager {
             skills_dir, 
             memory_limit_bytes: 10 * 1024 * 1024, // 10MB default
             timeout: Duration::from_millis(5000), // 5s default
+            wasm_cache: std::sync::RwLock::new(HashMap::new()),
         })
     }
 
@@ -89,7 +104,7 @@ impl WasmSkillManager {
         if let Ok(entries) = std::fs::read_dir(&self.skills_dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
-                if path.extension().and_then(|s| s.to_str()) == Some("meta.json") {
+                if path.extension().map_or(false, |ext| ext == "json") && path.to_string_lossy().ends_with(".meta.json") {
                     if let Ok(data) = std::fs::read_to_string(&path) {
                         if let Ok(meta) = serde_json::from_str::<SkillMetadata>(&data) {
                             list.push(meta);
@@ -143,14 +158,32 @@ impl WasmSkillManager {
         input: &str,
         configs: Option<HashMap<String, String>>
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-        let skill_name = &skill.name;
+        let skill_name = skill.name();
         let wasm_path = self.skills_dir.join(format!("{}.wasm", skill_name));
         if !wasm_path.exists() {
             return Err(format!("Skill {} not found", skill_name).into());
         }
+        let wasm_bytes = {
+            let cache = self.wasm_cache.read().unwrap();
+            if let Some(data) = cache.get(skill_name) {
+                Some(data.clone())
+            } else {
+                None
+            }
+        };
+
+        let wasm_data = match wasm_bytes {
+            Some(data) => data,
+            None => {
+                let data = std::fs::read(&wasm_path).map_err(|e| format!("Failed to read WASM {}: {}", skill_name, e))?;
+                let mut cache = self.wasm_cache.write().unwrap();
+                cache.insert(skill_name.to_string(), data.clone());
+                data
+            }
+        };
 
         // 厳密なサンドボックス設定
-        let mut manifest = Manifest::new([extism::Wasm::file(&wasm_path)]);
+        let mut manifest = Manifest::new([extism::Wasm::data(wasm_data)]);
         
         // 1. WASI Jail Bindings: Sandboxのルートのみをバインド
         if let Some(parent) = self.skills_dir.parent() {
@@ -181,9 +214,123 @@ impl WasmSkillManager {
             }
         }
 
+        // 3. Host Functions: Aiome OS Sentinel Bindings
+        // Register 'host_exec' for terminal_exec skill
+        let host_exec_permissions = self.get_metadata(skill_name)
+            .map(|m| m.permissions.clone())
+            .unwrap_or_default();
+            
+        let host_exec_fn = Function::new(
+            "host_exec",
+            [ValType::I64],
+            [ValType::I64],
+            UserData::new(()),
+            move |plugin, inputs, outputs, _user_data| {
+                let cmd_ptr = inputs[0].i64().unwrap() as u64;
+                let handle = plugin.memory_handle(cmd_ptr).ok_or_else(|| extism::Error::msg("Invalid memory handle"))?;
+                let cmd_str: String = plugin.memory_str(handle).map_err(|e: extism::Error| e)?.to_string();
+                
+                info!("🛡️ [WasmSkillManager] host_exec called with: {}", cmd_str);
+                
+                // Host function execution through Bastion Guard
+                let guard = BastionGuard::new(host_exec_permissions.clone());
+                
+                match guard.safe_exec(&cmd_str) {
+                    Ok(stdout) => {
+                        let mem = plugin.memory_alloc(stdout.len() as u64)?;
+                        plugin.memory_bytes_mut(mem)?.copy_from_slice(stdout.as_bytes());
+                        outputs[0] = Val::I64(mem.offset() as i64);
+                    },
+                    Err(e) => {
+                        let err_msg = format!("Bastion Guard Error: {}", e);
+                        let mem = plugin.memory_alloc(err_msg.len() as u64)?;
+                        plugin.memory_bytes_mut(mem)?.copy_from_slice(err_msg.as_bytes());
+                        outputs[0] = Val::I64(mem.offset() as i64);
+                    }
+                }
+                Ok(())
+            }
+        );
+
+        // Register 'host_write' for fs_writer skill
+        let allowed_root_clone = if let Some(parent) = self.skills_dir.parent() {
+            std::fs::canonicalize(parent).unwrap_or_else(|_| parent.to_path_buf())
+        } else {
+            self.skills_dir.clone()
+        };
+        let host_write_permissions = self.get_metadata(skill_name)
+            .map(|m| m.permissions.clone())
+            .unwrap_or_default();
+            
+        let skill_name_for_write = skill_name.to_string();
+        let host_write_fn = Function::new(
+            "host_write",
+            [ValType::I64],
+            [ValType::I64],
+            UserData::new(()),
+            move |plugin, inputs, outputs, _user_data| {
+                let json_ptr = inputs[0].i64().unwrap() as u64;
+                let handle = plugin.memory_handle(json_ptr).ok_or_else(|| extism::Error::msg("Invalid memory handle for host_write"))?;
+                let req_str = plugin.memory_str(handle).map_err(|e: extism::Error| e)?;
+                
+                // Permission Check
+                if !host_write_permissions.allow_filesystem_write {
+                    error!("🛡️ [WasmSkillManager] Skill '{}' attempted write but lacks allow_filesystem_write permission", skill_name_for_write);
+                    let res_json = serde_json::json!({ "success": false, "path": "", "error": "Security Violation: Field writing is not permitted for this skill." }).to_string();
+                    let mem = plugin.memory_alloc(res_json.len() as u64)?;
+                    plugin.memory_bytes_mut(mem)?.copy_from_slice(res_json.as_bytes());
+                    outputs[0] = Val::I64(mem.offset() as i64);
+                    return Ok(());
+                }
+
+                #[derive(serde::Deserialize)]
+                struct WriteReq { path: String, content: String }
+                
+                let res_json = match serde_json::from_str::<WriteReq>(req_str) {
+                    Ok(req) => {
+                        let full_path = allowed_root_clone.join(&req.path);
+                        
+                        let parent_dir = full_path.parent().unwrap_or(&full_path);
+                        if !parent_dir.exists() {
+                            let _ = std::fs::create_dir_all(parent_dir);
+                        }
+                        match std::fs::canonicalize(parent_dir) {
+                            Ok(canon_parent) => {
+                                let final_path = canon_parent.join(full_path.file_name().unwrap());
+                                if !final_path.to_string_lossy().starts_with(allowed_root_clone.to_string_lossy().as_ref()) {
+                                    error!("🛡️ [WasmSkillManager] Security Violation: Attempted to write outside allowed root: {:?}", final_path);
+                                    serde_json::json!({ "success": false, "path": "", "error": "Security Violation: Path traversal blocked." }).to_string()
+                                } else {
+                                    if let Some(parent) = final_path.parent() {
+                                        let _ = std::fs::create_dir_all(parent);
+                                    }
+                                    info!("🛡️ [WasmSkillManager] host_write: Writing {} bytes to {:?}", req.content.len(), final_path);
+                                    match std::fs::write(&final_path, req.content) {
+                                        Ok(_) => serde_json::json!({ "success": true, "path": final_path.to_string_lossy().to_string(), "error": None::<String> }).to_string(),
+                                        Err(e) => {
+                                            error!("🛡️ [WasmSkillManager] host_write failed: {}", e);
+                                            serde_json::json!({ "success": false, "path": "", "error": format!("Write failed: {}", e) }).to_string()
+                                        }
+                                    }
+                                }
+                            },
+                            Err(e) => serde_json::json!({ "success": false, "path": "", "error": format!("Parent path canonicalization failed: {}", e) }).to_string()
+                        }
+                    },
+                    Err(e) => serde_json::json!({ "success": false, "path": "", "error": format!("Invalid JSON payload: {}", e) }).to_string()
+                };
+
+                let mem = plugin.memory_alloc(res_json.len() as u64)?;
+                plugin.memory_bytes_mut(mem)?.copy_from_slice(res_json.as_bytes());
+                outputs[0] = Val::I64(mem.offset() as i64);
+                Ok(())
+            }
+        );
+
         // プラグインの初期化と実行
         info!("🚀 [WasmSkillManager] Initializing WASM plugin: {}", skill_name);
-        let mut plugin = Plugin::new(&manifest, [], true)
+        let functions = vec![host_exec_fn, host_write_fn];
+        let mut plugin = Plugin::new(&manifest, functions, true)
             .map_err(|e| format!("Failed to initialize WASM plugin {}: {}", skill_name, e))?;
         
         info!("⚡ [WasmSkillManager] Calling function: {}::{}", skill_name, func_name);
@@ -235,8 +382,34 @@ impl WasmSkillManager {
         let manifest = Manifest::new([extism::Wasm::file(&wasm_path)])
             .with_timeout(Duration::from_millis(500)); // タイムアウトも極端に短く (500ms)
 
+        // 為、ドライラン時にも同じHost関数インターフェースが必要。
+        // ただし、ドライラン時は実効的な書き込み等は行わない「モック」として登録する。
+        let host_exec_fn = Function::new(
+            "host_exec",
+            [ValType::I64],
+            [ValType::I64],
+            UserData::new(()),
+            |plugin, _inputs, outputs, _user_data| {
+                let mem = plugin.memory_alloc(0)?;
+                outputs[0] = Val::I64(mem.offset() as i64);
+                Ok(())
+            }
+        );
+        let host_write_fn = Function::new(
+            "host_write",
+            [ValType::I64],
+            [ValType::I64],
+            UserData::new(()),
+            |plugin, _inputs, outputs, _user_data| {
+                let mem = plugin.memory_alloc(0)?;
+                outputs[0] = Val::I64(mem.offset() as i64);
+                Ok(())
+            }
+        );
+        let functions = vec![host_exec_fn, host_write_fn];
+
         // プラグイン初期化
-        let mut plugin = match Plugin::new(&manifest, [], true) {
+        let mut plugin = match Plugin::new(&manifest, functions, true) {
             Ok(p) => p,
             Err(e) => {
                 error!("🚨 [Layer 3 Deterministic Tracer] Initialization violation (OOM or format error): {}", e);
@@ -249,21 +422,14 @@ impl WasmSkillManager {
         info!("⚡ [Layer 3 Deterministic Tracer] Simulating execution with deterministic constraints...");
         let dry_run_result = plugin.call::<&str, String>(&func_name, test_input);
         
-        // 3. 全ての検証をパスした場合のみ、VerifiedSkill 型を生成して返す
+        // 3. 全ての検証をパスした場合のみ、VerifiedSkill 型を生成
         match dry_run_result {
             Ok(_) => {
                 info!("✅ [Layer 3 Deterministic Tracer] Protocol behavior validated deterministically: {}", skill_name);
-                
-                // 内部で call_skill を呼んで最終的な出力を得てから VerifiedSkill を返す
-                // (一部の高度な検証では出力を精査するため)
-                let verified = VerifiedSkill { name: skill_name.to_string() };
-                let _output = self.call_skill(&verified, &func_name, test_input, None).await?;
-                
                 Ok(true)
             }
             Err(e) => {
-                println!("🚨 [Layer 3 Deterministic Tracer] Deterministic Violation Detected: {}", e);
-                error!("🚨 [Layer 3 Deterministic Tracer] Deterministic Violation Detected: {}", e);
+                error!("🚨 [Layer 3 Deterministic Tracer] Deterministic Violation Detected for '{}': {}", skill_name, e);
                 Ok(false)
             }
         }
@@ -280,7 +446,7 @@ impl WasmSkillManager {
         info!("🧪 [WasmSkillManager] Validating skill logic for: {}", skill_name);
         
         // 内部的に VerifiedSkill を作成 (※validate_skill_logic は管理者のみが呼ぶため信頼済み)
-        let verified = VerifiedSkill { name: skill_name.to_string() };
+        let verified = VerifiedSkill::promote(skill_name.to_string());
         let output = self.call_skill(&verified, "execute", test_input, None).await?;
         
         // JSON Schema validation
