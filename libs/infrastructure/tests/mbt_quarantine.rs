@@ -69,7 +69,7 @@ async fn test_mbt_quarantine_happy_path() {
     assert!(result.is_ok(), "Skill should reach Active state (VerifiedSkill) after dry-run simulation. Found: {:?}", result);
     
     let verified_skill = result.unwrap();
-    assert_eq!(verified_skill.name, "StubSkill");
+    assert_eq!(verified_skill.name(), "StubSkill");
 }
 
 /// Trace 2: ManifestCheck -> DryRunQuarantine -> Violated

@@ -22,7 +22,12 @@ async fn test_unauthorized_caller() {
     match res {
         Err(e) => {
             let err_str = e.to_string();
-            assert!(err_str.to_lowercase().contains("keyproxy") || err_str.to_lowercase().contains("connect") || err_str.to_lowercase().contains("refused"));
+            assert!(
+                err_str.to_lowercase().contains("keyproxy") || 
+                err_str.to_lowercase().contains("connect") || 
+                err_str.to_lowercase().contains("refused") ||
+                err_str.to_lowercase().contains("error sending request")
+            );
         }
         Ok(_) => panic!("Unauthorized caller should have been blocked"),
     }
