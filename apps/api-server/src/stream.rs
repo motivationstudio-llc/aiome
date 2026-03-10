@@ -6,13 +6,15 @@ use futures::stream::Stream;
 use core::convert::Infallible;
 use aiome_core::llm_provider::LlmProvider;
 use aiome_core::traits::JobQueue;
-use infrastructure::skills::UnverifiedSkill;
+// use infrastructure::skills::UnverifiedSkill;
 use std::sync::Arc;
 use tokio::time::{timeout, Duration, interval};
 use futures::StreamExt;
 use tracing::info;
+use crate::skill_handler;
 
-use crate::{AppState, AgentChatRequest};
+use crate::AppState;
+use crate::routes::agent::{AgentChatRequest, build_system_instructions, parse_tool_calls};
 
 pub async fn trigger_agent_chat_stream(
     State(state): State<AppState>,
@@ -49,7 +51,7 @@ pub async fn trigger_agent_chat_stream(
             current_history.push(format!("{}{}", prefix, msg.content));
         }
 
-        let system_instructions = crate::build_system_instructions(&state, &karma_str);
+        let system_instructions = build_system_instructions(&state, &karma_str);
 
         let max_turns = 15;
         let mut turn = 0;
@@ -106,7 +108,7 @@ pub async fn trigger_agent_chat_stream(
                     yield Ok(Event::default().event("text").data(&buffer));
                 }
 
-                let calls = crate::parse_tool_calls(&full_reply);
+                let calls = parse_tool_calls(&full_reply);
                 
                 if calls.is_empty() {
                     yield Ok(Event::default().event("turn_end").data("done"));
@@ -120,7 +122,7 @@ pub async fn trigger_agent_chat_stream(
                         if skill_name.starts_with("forge_") {
                             // Phase 12-C: SSE Heartbeat implementation for long-running forge tasks
                             let mut heartbeat_ticker = interval(Duration::from_secs(5));
-                            let forge_future = crate::skill_handler::execute_forge_command(&skill_name, &skill_input, &state);
+                            let forge_future = skill_handler::execute_forge_command(&skill_name, &skill_input, &state);
                             tokio::pin!(forge_future);
 
                             loop {
@@ -144,7 +146,7 @@ pub async fn trigger_agent_chat_stream(
                                 }
                             }
                         } else {
-                            let out = crate::skill_handler::execute_wasm_skill(&skill_name, &skill_input, &state).await;
+                            let out = skill_handler::execute_wasm_skill(&skill_name, &skill_input, &state).await;
                             skill_results.push(out.clone());
                             let status = if out.contains("Error:") { "failed" } else { "Success" };
                             yield Ok(Event::default().event("tool_result").data(format!("{}: {}", skill_name, status)));

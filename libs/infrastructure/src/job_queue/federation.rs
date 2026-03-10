@@ -94,10 +94,37 @@ impl FederationOps for SqliteJobQueue {
     }
 
     async fn do_import_federated_data(&self, karmas: Vec<FederatedKarma>, rules: Vec<ImmuneRule>, matches: Vec<ArenaMatch>) -> Result<(), AiomeError> {
+        if !karmas.is_empty() || !rules.is_empty() || !matches.is_empty() {
+            info!("📥 [Federation] Importing {} karmas, {} rules, {} matches.", karmas.len(), rules.len(), matches.len());
+        }
         let mut tx = self.pool.begin().await
             .map_err(|e| AiomeError::Infrastructure { reason: format!("Import Tx start failed: {}", e) })?;
 
+        use ed25519_dalek::{VerifyingKey, Signature, Verifier};
+        use base64::{prelude::BASE64_STANDARD, Engine};
+        use tracing::{warn, info};
+
         for k in karmas {
+            // Verify Ed25519 Signature
+            let mut valid = false;
+            if let Some(ref sig_b64) = k.signature {
+                let payload = format!("{}:{}:{}", k.id, k.lesson, k.lamport_clock);
+                if let (Ok(pubkey_bytes), Ok(sig_bytes)) = (BASE64_STANDARD.decode(&k.node_id), BASE64_STANDARD.decode(sig_b64)) {
+                    if let (Ok(pubkey), Ok(sig)) = (VerifyingKey::from_bytes(&pubkey_bytes.try_into().unwrap_or([0; 32])), Signature::from_slice(&sig_bytes)) {
+                        if pubkey.verify(payload.as_bytes(), &sig).is_ok() {
+                            valid = true;
+                        } else {
+                            warn!("🛡️ [Federation] Signature verification failed for Karma {}.", k.id);
+                        }
+                    }
+                }
+            }
+
+            if !valid {
+                warn!("🛡️ [Federation] Skipping Karma {} due to invalid/missing signature.", k.id);
+                continue;
+            }
+
             let clean_lesson = if k.lesson.len() > 2000 {
                 format!("{}... [Truncated for Swarm Safety]", k.lesson.chars().take(2000).collect::<String>())
             } else {
@@ -106,9 +133,9 @@ impl FederationOps for SqliteJobQueue {
 
             let _ = self.sync_local_clock(k.lamport_clock).await;
 
-            sqlx::query(
+            if let Err(e) = sqlx::query(
                 "INSERT INTO karma_logs (id, job_id, karma_type, related_skill, lesson, weight, soul_version_hash, created_at, is_federated, lamport_clock, node_id, signature) 
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+                 VALUES (?, NULL, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
                  ON CONFLICT(id) DO UPDATE SET 
                     lesson = excluded.lesson, 
                     weight = excluded.weight,
@@ -118,13 +145,33 @@ impl FederationOps for SqliteJobQueue {
                     is_federated = 1
                  WHERE excluded.lamport_clock > karma_logs.lamport_clock OR (excluded.lamport_clock = karma_logs.lamport_clock AND excluded.node_id > karma_logs.node_id)"
             )
-            .bind(&k.id).bind(&k.job_id).bind(&k.karma_type).bind(&k.related_skill).bind(&clean_lesson)
+            .bind(&k.id).bind(&k.karma_type).bind(&k.related_skill).bind(&clean_lesson)
             .bind(k.weight as i64).bind(&k.soul_version_hash).bind(&k.created_at)
             .bind(k.lamport_clock as i64).bind(&k.node_id).bind(&k.signature)
-            .execute(&mut *tx).await.ok();
+            .execute(&mut *tx).await {
+                warn!("🛡️ [Federation] SQL Error importing karma {}: {:?}", k.id, e);
+            }
         }
 
         for r in rules {
+            // Verify Ed25519 Signature
+            let mut valid = false;
+            if let Some(ref sig_b64) = r.signature {
+                let payload = format!("{}:{}:{}", r.id, r.pattern, r.lamport_clock);
+                if let (Ok(pubkey_bytes), Ok(sig_bytes)) = (BASE64_STANDARD.decode(&r.node_id), BASE64_STANDARD.decode(sig_b64)) {
+                    if let (Ok(pubkey), Ok(sig)) = (VerifyingKey::from_bytes(&pubkey_bytes.try_into().unwrap_or([0; 32])), Signature::from_slice(&sig_bytes)) {
+                        if pubkey.verify(payload.as_bytes(), &sig).is_ok() {
+                            valid = true;
+                        }
+                    }
+                }
+            }
+
+            if !valid {
+                warn!("🛡️ [Federation] Skipping Rule {} due to invalid signature.", r.id);
+                continue;
+            }
+
             let _ = self.sync_local_clock(r.lamport_clock).await;
 
             sqlx::query(

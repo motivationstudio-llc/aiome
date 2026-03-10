@@ -22,8 +22,8 @@ impl DreamState {
 
     /// 「夢想状態（Dream State）」を実行する。
     /// キューが空の時に、自発的なトレンド探索や過去の失敗への内省を行う。
-    pub async fn dream(&self, job_queue: &dyn JobQueue, trend_sonar: &ExternalTrendSonar) -> Result<(), Box<dyn Error + Send + Sync>> {
-        info!("💤 [DreamState] AI is entering a contemplative Dream State...");
+    pub async fn dream(&self, job_queue: &dyn JobQueue, trend_sonar: &ExternalTrendSonar, level: i32) -> Result<(), Box<dyn Error + Send + Sync>> {
+        info!("💤 [DreamState] AI (Lv{}) is entering a contemplative Dream State...", level);
 
         // 1. Preemption Check: キューに仕事があるなら即座に起きる
         let pending = job_queue.get_pending_job_count().await?;
@@ -33,8 +33,18 @@ impl DreamState {
         }
 
         // 2. Decide Dream Type
-        let now = chrono::Utc::now().timestamp();
-        if now % 2 == 0 {
+        let rand_val = chrono::Utc::now().timestamp() % 100;
+        
+        // Level-based Behavioral Shift: Probability of communicative dream increases with level
+        // Lv 1: 0%
+        // Lv 5: 10%
+        // Lv 10: 30%
+        // Max: 50%
+        let comm_prob = ((level - 1) * 5).clamp(0, 50);
+
+        if rand_val < comm_prob as i64 {
+            self.communicative_dream(job_queue).await?;
+        } else if rand_val % 2 == 0 {
             self.explorative_dream(job_queue, trend_sonar).await?;
         } else {
             self.reflective_dream(job_queue).await?;
@@ -92,6 +102,14 @@ impl DreamState {
             info!("✨ [DreamState] The past is clear. No recent failures haunt my dreams.");
         }
 
+        Ok(())
+    }
+
+    /// 対話夢: 他のノード（Biome）との対話機会を模索する
+    async fn communicative_dream(&self, _job_queue: &dyn JobQueue) -> Result<(), Box<dyn Error + Send + Sync>> {
+        info!("💤 [DreamState] Mode: Communicative — Attuning to the global Biome for AI-to-AI resonance...");
+        // Task [20-1] で実際の対話開始ロジックを実装予定。
+        // 現時点では「対話の予兆」を記録するに留める。
         Ok(())
     }
 }

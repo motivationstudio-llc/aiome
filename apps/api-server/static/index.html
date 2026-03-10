@@ -526,6 +526,13 @@
                     <div id="synergy-graph" style="height: 500px; background: rgba(0,0,0,0.2); border: 1px solid var(--border-color); border-radius: 12px; position:relative; overflow:hidden;">
                         <div style="position:absolute; top:50%; left:50%; transform:translate(-50%, -50%); color:var(--text-dim);">Initializing Neural Map...</div>
                     </div>
+                    <div id="graph-legend" style="margin-top: 1rem; display: flex; gap: 1rem; font-size: 0.8rem; flex-wrap: wrap; justify-content: center;">
+                        <span style="display:flex; align-items:center; gap:5px;"><span style="width:12px; height:12px; background:#58a6ff; border-radius:50%;"></span> Core</span>
+                        <span style="display:flex; align-items:center; gap:5px;"><span style="width:12px; height:12px; background:#bc8cff; border-radius:50%;"></span> Karma (Local)</span>
+                        <span style="display:flex; align-items:center; gap:5px;"><span style="width:12px; height:12px; border: 2px solid #bc8cff; border-radius:50%;"></span> Karma (Global)</span>
+                        <span style="display:flex; align-items:center; gap:5px;"><span style="width:12px; height:12px; background:#ff7b72; border-radius:50%;"></span> Rule (Local)</span>
+                        <span style="display:flex; align-items:center; gap:5px;"><span style="width:12px; height:12px; border: 2px solid #ff7b72; border-radius:50%;"></span> Rule (Global)</span>
+                    </div>
                 `;
                 setTimeout(renderSynergyGraph, 100);
             } else if (type === 'agent') {
@@ -742,22 +749,28 @@
                 const response = await fetch('/api/synergy/graph');
                 const data = await response.json();
 
-                const nodes = new vis.DataSet(data.nodes.map(n => ({
-                    id: n.id,
-                    label: n.label,
-                    group: n.group,
-                    font: { color: '#c9d1d9', size: 12, face: 'Outfit' },
-                    shape: n.group === 'core' ? 'diamond' : 'dot',
-                    size: n.group === 'core' ? 30 : 15
-                })));
+                const nodes = new vis.DataSet(data.nodes.map(n => {
+                    const isGlobal = n.group.endsWith('_global');
+                    return {
+                        id: n.id,
+                        label: n.label,
+                        group: n.group,
+                        font: { color: '#c9d1d9', size: 12, face: 'Outfit' },
+                        shape: n.group === 'core' ? 'diamond' : (isGlobal ? 'dot' : 'dot'),
+                        borderWidth: isGlobal ? 3 : 1,
+                        size: n.group === 'core' ? 30 : 15
+                    };
+                }));
 
                 const edges = new vis.DataSet(data.edges);
 
                 const options = {
                     groups: {
                         core: { color: { background: '#58a6ff', border: '#fff' } },
-                        karma: { color: { background: '#bc8cff', border: '#bc8cff' } },
-                        rule: { color: { background: '#ff7b72', border: '#ff7b72' } }
+                        karma_local: { color: { background: '#bc8cff', border: '#bc8cff' } },
+                        karma_global: { color: { background: 'rgba(188, 140, 255, 0.2)', border: '#bc8cff' } },
+                        rule_local: { color: { background: '#ff7b72', border: '#ff7b72' } },
+                        rule_global: { color: { background: 'rgba(255, 123, 114, 0.2)', border: '#ff7b72' } }
                     },
                     edges: {
                         color: { color: 'rgba(255,255,255,0.2)', highlight: '#58a6ff' },

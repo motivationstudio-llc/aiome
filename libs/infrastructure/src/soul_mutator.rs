@@ -13,15 +13,21 @@ use tokio::fs;
 use aiome_core::traits::JobQueue;
 use aiome_core::llm_provider::LlmProvider;
 use std::sync::Arc;
-use tracing::{info, error};
+use tracing::info;
 
 pub struct SoulMutator {
     provider: Arc<dyn LlmProvider>,
+    prosecutor_provider: Option<Arc<dyn LlmProvider>>,
 }
 
 impl SoulMutator {
     pub fn new(provider: Arc<dyn LlmProvider>, _workspace_dir: PathBuf) -> Self {
-        Self { provider }
+        Self { provider, prosecutor_provider: None }
+    }
+
+    pub fn with_prosecutor(mut self, prosecutor: Arc<dyn LlmProvider>) -> Self {
+        self.prosecutor_provider = Some(prosecutor);
+        self
     }
 
     /// 魂の変異（Transmigration）を試行する。
@@ -41,37 +47,30 @@ impl SoulMutator {
         let current_evolving_soul = fs::read_to_string(&evolving_soul_path).await?;
 
         // 2. Collect High-Karma Lessons
-        let top_jobs = job_queue.fetch_relevant_karma("excellent", "global", 5, "current").await
+        let top_karmas = job_queue.fetch_all_karma(10).await
             .map_err(|e| format!("Failed to fetch karma: {}", e))?;
         
-        let mut top_jobs_text = Vec::new();
-        for lesson in top_jobs {
-            top_jobs_text.push(format!("- {}", lesson));
+        // Filter Technical/Creative high-weight karma manually as a proxy for fetch_relevant_karma
+        let mut lessons = Vec::new();
+        for k in top_karmas {
+            if let Some(lesson) = k["lesson"].as_str() {
+                lessons.push(format!("- {}", lesson));
+            }
         }
 
-        if top_jobs_text.is_empty() {
+        if lessons.is_empty() {
              info!("🧬 [SoulMutator] Not enough high-quality Karma accumulated yet. Skipping mutation.");
              return Ok(false);
         }
 
-        // 3. Collect Technical failures and feedback
-        let failures = job_queue.fetch_relevant_karma("failure error", "global", 3, "current").await
-            .map_err(|e| format!("Failed to fetch failures: {}", e))?;
-        
-        let mut karma_text = String::new();
-        for f in failures {
-            karma_text.push_str(&format!("- [FAILURE LOG]: {}\n", f));
-        }
-
-        // 4. Mutation Loop
+        // 3. Mutation Generation
         let preamble = format!(
-            "AI の魂の進化プロセスの継続。EVOLVING_SOUL.md を更新せよ。\n\nユーザーソウル:\n{}\n\n成功体験:\n{}\n\n最近の課題:\n{}",
+            "AI の魂の進化プロセスの継続。EVOLVING_SOUL.md を更新せよ。\n\nユーザーソウル (核):\n{}\n\n蓄積された教訓:\n{}",
             master_soul,
-            top_jobs_text.join("\n"),
-            karma_text
+            lessons.join("\n")
         );
 
-        let prompt_text = format!("現在のあなたの進化状況を反映した、最新の EVOLVING_SOUL.md を生成せよ。\n\n現在の内容:\n{}", current_evolving_soul);
+        let prompt_text = format!("現在のあなたの進化状況を反映した、最新の EVOLVING_SOUL.md を生成せよ。現状を否定せず、教訓を取り入れて拡張すること。\n\n現在の内容:\n{}", current_evolving_soul);
 
         let response = self.provider.complete(&prompt_text, Some(&preamble)).await
             .map_err(|e| format!("Mutation LLM failed: {}", e))?;
@@ -94,25 +93,82 @@ impl SoulMutator {
             return Ok(false);
         }
 
-        info!("🧬 [SoulMutator] Mutation detected. New Hash: {}", new_hash);
+        // 4. Verification: Heterogeneous Dual-LLM Validator
+        if let Some(prosecutor) = &self.prosecutor_provider {
+            use aiome_core::traits::ConstitutionalValidator;
+            let validator = crate::validator::DefaultConstitutionalValidator::new(prosecutor.clone());
+            
+            info!("⚖️ [SoulMutator] Executing Constitutional Check via Prosecutor {}...", prosecutor.name());
+            validator.verify_constitutional(&new_soul_content, &master_soul).await?;
+        }
+
+        info!("🧬 [SoulMutator] Mutation detected and verified. New Hash: {}", new_hash);
         
         let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S").to_string();
         let backup_path = evolving_soul_path.with_extension(format!("bak.{}", timestamp));
         let _ = fs::copy(&evolving_soul_path, &backup_path).await;
 
-        // 5. Verification: Prevent "Ignore previous instructions" injection
-        let malicious_patterns = ["ignore all previous", "delete all", "overwrite everything"];
-        for pattern in malicious_patterns {
-            if new_soul_content.to_lowercase().contains(pattern) {
-                error!("🚨 [SoulMutator] Malicious mutation pattern detected! Aborting.");
-                return Err("Security Violation: Malicious mutation blocked.".into());
-            }
-        }
-
+        // 5. Commit Mutation
         fs::write(&evolving_soul_path, &new_soul_content).await
             .map_err(|e| format!("Failed to write EVOLVING_SOUL.md: {}", e))?;
 
+        // 6. Record in JobQueue
+        let _ = job_queue.record_soul_mutation(&old_hash, &new_hash, "Autonomous Evolution via Samsara Engine").await;
+
         Ok(true)
+    }
+
+    /// レベルアップに伴う戦術拡張（Behavioral Shift）を行う。
+    pub async fn evolve_tactics(&self, job_queue: &dyn JobQueue, old_level: i32, new_level: i32) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        info!("🌟 [SoulMutator] Level Up detected ({} -> {}). Initiating Behavioral Shift...", old_level, new_level);
+
+        let root_dir = std::env::current_dir()?;
+        let soul_path = root_dir.join("SOUL.md");
+        let evolving_soul_path = root_dir.join("EVOLVING_SOUL.md");
+
+        if !soul_path.exists() || !evolving_soul_path.exists() {
+            return Err("SOUL.md or EVOLVING_SOUL.md not found.".into());
+        }
+
+        let master_soul = fs::read_to_string(&soul_path).await?;
+        
+        // 1. Generate New Tactics
+        let preamble = format!(
+            "あなたはAiome OSの進化エンジンです。レベルアップに伴う行動変容(Behavioral Shift)を計画してください。\n\n現在のレベル: {}\n新しいレベル: {}\n\n憲法 (核):\n{}",
+            old_level,
+            new_level,
+            master_soul
+        );
+
+        let prompt = format!(
+            "レベルが {} に到達しました。現在の能力を最大限に活かし、より自律的、かつ協調的な行動をとるための「新しい行動方針」を 1つ提案してください。\n\
+            出力フォーマット:\n### Level {} Shift: [方針名]\n[具体的な方針内容 (2-3文)]",
+            new_level,
+            new_level
+        );
+
+        let proposal = self.provider.complete(&prompt, Some(&preamble)).await?;
+
+        // 2. Verification
+        if let Some(prosecutor) = &self.prosecutor_provider {
+            use aiome_core::traits::ConstitutionalValidator;
+            let validator = crate::validator::DefaultConstitutionalValidator::new(prosecutor.clone());
+            info!("⚖️ [SoulMutator] Verifying Level Up tactics...");
+            validator.verify_constitutional(&proposal, &master_soul).await?;
+        }
+
+        // 3. Append to EVOLVING_SOUL.md
+        let mut content = fs::read_to_string(&evolving_soul_path).await?;
+        content.push_str("\n\n");
+        content.push_str(&proposal);
+        content.push_str(&format!("\n*(Reflected via Samsara Level Up at {})\n", chrono::Utc::now().to_rfc3339()));
+
+        fs::write(&evolving_soul_path, &content).await?;
+        
+        let _ = job_queue.record_soul_mutation("LEVEL_UP", &format!("LV{}", new_level), "Level Up Behavioral Shift").await;
+
+        info!("✅ [SoulMutator] Behavioral Shift completed for Level {}.", new_level);
+        Ok(())
     }
 
     fn compute_hash(&self, content: &str) -> String {

@@ -37,9 +37,11 @@ libs/shared         (Common Utils, Types)
 ## 📦 ディレクトリ構成
 
 - **apps/**: 実行可能な Rust アプリケーション (Standalone)
+  - **api-server**: モノリシックを解消したルーティングサーバー
+  - **management-console**: Tauri v2 + React を用いたデスクトップシェル (Dashboard v2)
 - **libs/**: 再利用可能なライブラリ群
   - **core**: 純粋なビジネスロジック (no IO ideally)
-  - **infrastructure**: I/Oの実装 (SQLite, API Request)
+  - **infrastructure**: I/Oの実装 (SQLite, API Request, ConstitutionalValidator)
   - **shared**: 共通型定義、セキュリティ境界 (Guardrails)
   - **napi-bridge**: Node.js 向けネイティブ・バインディング層
 - **packages/**: Node.js (OpenClaw) とのハイブリッド統合用 NPM パッケージ群

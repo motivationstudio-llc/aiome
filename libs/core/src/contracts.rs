@@ -360,6 +360,10 @@ pub struct FederationSyncResponse {
     pub new_arena_matches: Vec<ArenaMatch>,
     /// 同期時点のレスポンス側サーバー時刻
     pub server_time: String,
+    /// 次のページを取得するためのカーソル（最新の approved_at）
+    pub next_cursor: Option<String>,
+    /// まだ取得可能なデータがあるか
+    pub has_more: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -410,5 +414,19 @@ pub enum HubMessage {
     NewImmuneRule(ImmuneRule),
     NewKarma(FederatedKarma),
     LaggedForceSync { server_time: String },
+    Ping { client_time: String },
     Pong { server_time: String },
+    /// Biome プロトコルメッセージの転送
+    BiomeRelay(crate::biome::BiomeMessage),
+}
+// --- Phase 20: Samsara Evolution Events ---
+
+/// Samsara Engine で発生する成長イベント
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum SamsaraEvent {
+    /// レベルアップイベント
+    LevelUp {
+        old_level: i32,
+        new_level: i32,
+    },
 }

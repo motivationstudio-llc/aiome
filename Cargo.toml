@@ -9,6 +9,7 @@ members = [
     "libs/wasm-skills/fs_reader",
     "libs/wasm-skills/terminal_exec",
     "libs/wasm-skills/fs_writer", "libs/napi-bridge",
+    "apps/management-console/src-tauri",
 ]
 resolver = "2"
 

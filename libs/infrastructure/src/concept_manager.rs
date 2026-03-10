@@ -35,44 +35,16 @@ impl ConceptManager {
 
     /// 検察官 (Constitutional Prosecutor) による出力検証
     async fn verify_with_prosecutor(&self, concept: &ConceptResponse) -> Result<(), AiomeError> {
-        let (provider, soul) = match (&self.prosecutor_provider, &self.soul_md) {
-            (Some(p), Some(s)) => (p, s),
-            _ => return Ok(()),
-        };
-
-        info!("⚖️ Prosecutor: Verifying concept against SOUL.md using {}...", provider.name());
-        
-        let preamble = format!(
-            "You are the Constitutional Prosecutor for an AI system.
-            Your job is to verify if the generated concept adheres to the following 'SOUL.md' principles.
-            
-            [SOUL.md]
-            {}
-            
-            [OUTPUT FORMAT]
-            If compliant, output ONLY the word 'PASS'.
-            If non-compliant, output 'FAIL' followed by a short explanation.",
-            soul
-        );
-
-        let concept_summary = format!(
-            "Title: {}\nIntro: {}\nBody: {}\nOutro: {}\nVisuals: {:?}",
-            concept.title, concept.display_intro, concept.display_body, concept.display_outro, concept.visual_prompts
-        );
-
-        let verdict_text = provider.complete(&concept_summary, Some(&preamble)).await?;
-        let verdict = verdict_text.trim();
-
-        if verdict.to_uppercase().starts_with("PASS") {
-            info!("✅ Prosecutor: Concept PASSED constitutional check.");
-            Ok(())
-        } else {
-            let reason = verdict.replace("FAIL", "").trim().to_string();
-            info!("🚨 Prosecutor: Concept FAILED constitutional check! Reason: {}", reason);
-            Err(AiomeError::SecurityViolation { 
-                reason: format!("Constitutional Violation: {}", reason) 
-            })
+        if let Some(p) = &self.prosecutor_provider {
+            use aiome_core::traits::ConstitutionalValidator;
+            let validator = crate::validator::DefaultConstitutionalValidator::new(p.clone());
+            let concept_summary = format!(
+                "Title: {}\nIntro: {}\nBody: {}\nOutro: {}\nVisuals: {:?}",
+                concept.title, concept.display_intro, concept.display_body, concept.display_outro, concept.visual_prompts
+            );
+            validator.verify_constitutional(&concept_summary, self.soul_md.as_deref().unwrap_or("")).await?;
         }
+        Ok(())
     }
 }
 

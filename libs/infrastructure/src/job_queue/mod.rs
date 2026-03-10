@@ -206,6 +206,10 @@ impl JobQueue for SqliteJobQueue {
         self.do_add_creativity(amount).await
     }
 
+    async fn sync_samsara_level(&self) -> Result<Option<aiome_core::contracts::SamsaraEvent>, AiomeError> {
+        self.do_sync_samsara_level().await
+    }
+
     async fn get_pending_job_count(&self) -> Result<i64, AiomeError> {
         self.do_get_pending_job_count().await
     }

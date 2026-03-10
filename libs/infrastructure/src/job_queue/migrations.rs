@@ -252,6 +252,52 @@ impl DbInitializer for SqliteJobQueue {
         ).execute(&self.pool).await
         .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to create arena_history: {}", e) })?;
 
+        // Federated Indices (Phase 15 Hardening)
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_karma_logs_federated ON karma_logs(is_federated) WHERE is_federated = 0;").execute(&self.pool).await.ok();
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_immune_rules_federated ON immune_rules(is_federated) WHERE is_federated = 0;").execute(&self.pool).await.ok();
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_karma_lamport ON karma_logs(lamport_clock, node_id);").execute(&self.pool).await.ok();
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_immune_lamport ON immune_rules(lamport_clock, node_id);").execute(&self.pool).await.ok();
+
+        // Biome Protocol (Phase 20)
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS biome_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                sender_pubkey TEXT NOT NULL,
+                recipient_pubkey TEXT NOT NULL,
+                topic_id TEXT NOT NULL,
+                content TEXT NOT NULL,
+                karma_root_cid TEXT NOT NULL,
+                signature TEXT NOT NULL,
+                lamport_clock INTEGER NOT NULL,
+                encryption TEXT NOT NULL,
+                created_at TEXT DEFAULT (datetime('now'))
+            );"
+        ).execute(&self.pool).await
+        .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to create biome_messages: {}", e) })?;
+
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS biome_peers (
+                pubkey TEXT PRIMARY KEY,
+                last_seen_at TEXT DEFAULT (datetime('now')),
+                reputation_score INTEGER NOT NULL DEFAULT 100
+            );"
+        ).execute(&self.pool).await
+        .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to create biome_peers: {}", e) })?;
+
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS biome_topics (
+                topic_id TEXT PRIMARY KEY,
+                peer_pubkey TEXT NOT NULL,
+                summary TEXT,
+                status TEXT NOT NULL CHECK(status IN ('Active', 'Archived', 'Blocked')),
+                updated_at TEXT DEFAULT (datetime('now'))
+            );"
+        ).execute(&self.pool).await
+        .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to create biome_topics: {}", e) })?;
+
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_biome_messages_topic ON biome_messages(topic_id);").execute(&self.pool).await.ok();
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_biome_messages_recipient ON biome_messages(recipient_pubkey);").execute(&self.pool).await.ok();
+
         info!("✅ [SqliteJobQueue] Database and migrations initialized successfully.");
         Ok(())
     }

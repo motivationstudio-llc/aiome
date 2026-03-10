@@ -24,6 +24,7 @@ pub mod skills;
 pub mod soul_mutator;
 pub mod dream_state;
 pub mod immune_system;
+pub mod validator;
 pub mod skill_arena;
 pub mod llm;
 pub mod security;

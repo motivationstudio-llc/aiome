@@ -22,6 +22,8 @@
 | :--- | :--- |
 | **`WasmSkillManager`** | WASM プラグインの実行寿命、サンドボックス（WASI）、リソース制限を管理。 |
 | **`SkillForge`** | LLM による Rust コード生成と `cargo` を用いたコンパイルプロセスを制御。 |
+| **`McpProcessManager`** | 外部のプログラミング言語（Node.js, Python 等）で書かれた MCP サーバープロセスのライフサイクル（PGID ゾンビキル）と標準入出力を管理。 |
+| **`DockerDelegator`** | WASM の制限を超える重い依存関係や信頼できない複雑なタスクを、使い捨ての Docker Agent コンテナ（Shadow Worker）へ安全に委譲（Delegation）する。 |
 | **`SKILL_FORGE_PROMPT.md`** | 高品質で安全なプラグインを生成するための「鉄の掟」を定めたシステム構成済プロンプト。 |
 
 ---
@@ -40,8 +42,9 @@
 
 ## 🧪 鍛造されたスキルの例
 
-- **`crypto_price_fetcher`**: 外部 API から仮想通貨のリアルタイム価格を取得する。
-- **`calculator_pro`**: 複雑な金融計算や数式処理を行う。
+- **`crypto_price_fetcher`** (WASM): 外部 API から仮想通貨のリアルタイム価格を取得する（軽量・高速）。
+- **`calculator_pro`** (WASM): 複雑な金融計算や数式処理を行う。
+- **`docker_agent_worker`** (Delegation): WASM では実行できないブラウザ自動化（Playwright 等）や機械学習モデルの推論など、ホスト環境を汚染するタスクを Docker Agent 経由で実行。
 
 ---
 

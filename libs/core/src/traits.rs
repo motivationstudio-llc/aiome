@@ -235,6 +235,8 @@ pub trait JobQueue: Send + Sync {
     async fn add_tech_exp(&self, amount: i32) -> Result<(), AiomeError>;
     /// 創造性を加算
     async fn add_creativity(&self, amount: i32) -> Result<(), AiomeError>;
+    /// Samsaraレベルを同期 (成長計算の実行)
+    async fn sync_samsara_level(&self) -> Result<Option<crate::contracts::SamsaraEvent>, AiomeError>;
 
     /// 保留中（Pending）のジョブ数を取得する
     async fn get_pending_job_count(&self) -> Result<i64, AiomeError>;
@@ -289,6 +291,13 @@ pub trait JobQueue: Send + Sync {
     async fn tick_local_clock(&self) -> Result<u64, AiomeError>;
     /// Update local clock based on a received remote clock value
     async fn sync_local_clock(&self, remote_clock: u64) -> Result<u64, AiomeError>;
+}
+
+/// 相互監視型 LLM バリデーター (The Constitutional Prosecutor)
+#[async_trait]
+pub trait ConstitutionalValidator: Send + Sync {
+    /// 生成された内容が魂の原則（SOUL.md）に準拠しているか検証する
+    async fn verify_constitutional(&self, content: &str, principles: &str) -> Result<(), AiomeError>;
 }
 
 
