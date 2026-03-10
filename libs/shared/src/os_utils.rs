@@ -27,8 +27,10 @@ pub fn prevent_app_nap() -> Result<std::process::Child, std::io::Error> {
         // -i: prevent system idle sleep
         // -d: prevent display sleep (optional, but good for visibility)
         // -m: prevent disk idle sleep
+        // -c: create a new assertion for the duration of the command
         Command::new("caffeinate")
-            .args(&["-i", "-m"])
+            .arg("-c") // Added -c argument
+            .args(["-i", "-m"]) // Changed to array literal for clippy
             .spawn()
     }
     #[cfg(not(target_os = "macos"))]

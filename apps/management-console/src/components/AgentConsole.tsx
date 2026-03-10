@@ -2,10 +2,12 @@ import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { Send, Cpu, Sparkles, Bot } from 'lucide-react';
 import { API_BASE } from "../config";
+import { ChatMessage } from '../types';
+import { getAuthHeaders } from '../lib/auth';
 
 const AgentConsole: React.FC = () => {
     const [input, setInput] = useState("");
-    const [history, setHistory] = useState<any[]>([]);
+    const [history, setHistory] = useState<ChatMessage[]>([]);
     const [isTyping, setIsTyping] = useState(false);
     const [streamingText, setStreamingText] = useState("");
     const chatEndRef = useRef<HTMLDivElement>(null);
@@ -21,7 +23,7 @@ const AgentConsole: React.FC = () => {
         if (!input.trim() || isTyping) return;
 
         const currentPrompt = input;
-        const userMsg = { role: "user", content: currentPrompt };
+        const userMsg: ChatMessage = { role: "user", content: currentPrompt };
         setHistory(prev => [...prev, userMsg]);
         setInput("");
         setIsTyping(true);
@@ -33,7 +35,7 @@ const AgentConsole: React.FC = () => {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${localStorage.getItem('aiome_secret') || 'dev_secret'}`
+                    ...getAuthHeaders()
                 },
                 body: JSON.stringify({ prompt: currentPrompt, history: history })
             });

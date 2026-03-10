@@ -1,15 +1,16 @@
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Sparkles, Activity, Dna, BrainCircuit, Zap } from 'lucide-react';
+import { Sparkles, Activity, Dna, BrainCircuit, Zap, Shield, Terminal } from 'lucide-react';
 import { useSystemVitality } from '../hooks/useSystemVitality';
+import { AgentStats, VitalityUIEvent, Karma } from '../types';
 
 interface BiotopeViewProps {
-    stats: any;
+    stats: AgentStats;
     isConnected: boolean;
 }
 
 const BiotopeView: React.FC<BiotopeViewProps> = ({ stats, isConnected }) => {
-    const [recentEvents, setRecentEvents] = useState<any[]>([]);
+    const [recentEvents, setRecentEvents] = useState<VitalityUIEvent[]>([]);
     const [pulseLevel, setPulseLevel] = useState(0);
 
     const { lastEvent } = useSystemVitality();
@@ -20,27 +21,49 @@ const BiotopeView: React.FC<BiotopeViewProps> = ({ stats, isConnected }) => {
         const { type, data } = lastEvent;
 
         switch (type) {
-            case 'level_up':
-                addEvent('Level Up!', `System ascended to level ${data.level}.`, 'var(--accent-cyan)', <Sparkles size={16} />);
+            case 'level_up': {
+                const statData = data as AgentStats;
+                addEvent('Level Up!', `System ascended to level ${statData.level}.`, 'var(--accent-cyan)', <Sparkles size={16} />);
                 setPulseLevel(prev => prev + 20);
                 break;
-            case 'karma_update':
-                addEvent('New Karma', data.lesson, 'var(--accent-purple)', <Dna size={16} />);
+            }
+            case 'karma_update': {
+                const karmaData = data as Karma;
+                addEvent('New Karma', karmaData.lesson, 'var(--accent-purple)', <Dna size={16} />);
                 setPulseLevel(prev => prev + 10);
                 break;
-            case 'inspiration':
-                addEvent('Inspiration', data.record_type, 'var(--accent-rose)', <BrainCircuit size={16} />);
+            }
+            case 'immune_alert': {
+                const alertData = data as { description: string };
+                addEvent('Security Alert', alertData.description, 'var(--accent-rose)', <Shield size={16} />);
+                setPulseLevel(prev => prev + 15);
                 break;
+            }
+            case 'skill_execution': {
+                const skillData = data as { description: string };
+                addEvent('Skill Active', skillData.description, 'var(--accent-amber)', <Terminal size={16} />);
+                setPulseLevel(prev => prev + 5);
+                break;
+            }
+            case 'inspiration': {
+                const insData = data as { description: string };
+                addEvent('Inspiration', insData.description, 'var(--accent-rose)', <BrainCircuit size={16} />);
+                break;
+            }
             default:
                 break;
         }
     }, [lastEvent]);
 
-    const addEvent = (title: string, desc: string, color: string, icon: any) => {
+    useEffect(() => {
+        if (pulseLevel <= 0) return;
+        const timer = setTimeout(() => setPulseLevel(prev => Math.max(0, prev - 5)), 2000);
+        return () => clearTimeout(timer);
+    }, [pulseLevel]);
+
+    const addEvent = (title: string, desc: string, color: string, icon: React.ReactNode) => {
         const id = Date.now();
         setRecentEvents(prev => [{ id, title, desc, color, icon }, ...prev].slice(0, 5));
-        // Reset pulse level gradually
-        setTimeout(() => setPulseLevel(prev => Math.max(0, prev - 5)), 2000);
     };
 
     return (

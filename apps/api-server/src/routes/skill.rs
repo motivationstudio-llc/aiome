@@ -16,20 +16,10 @@ use tracing::info;
 pub struct SkillSummary {
     pub name: String,
     pub description: String,
-    pub source: String, // "wasm", "mcp", "script"
+    pub source: String, // "wasm", "mcp", "marketplace"
+    pub status: String, // "Active", "Installed", "Available"
     pub layer: u8,
-}
-
-#[derive(Deserialize)]
-pub struct ImportRequest {
-    pub url: String,
-}
-
-#[derive(Deserialize)]
-pub struct McpSpawnRequest {
-    pub id: String,
-    pub command: String,
-    pub args: Vec<String>,
+    pub tools: Vec<String>,
 }
 
 /// [A-3] Skill Management Console API
@@ -43,18 +33,62 @@ pub async fn list_skills(
     let wasm_meta = state.wasm_skill_manager.list_skills_with_metadata();
     for meta in wasm_meta {
         skills.push(SkillSummary {
-            name: meta.name,
+            name: meta.name.clone(),
             description: meta.description,
             source: "wasm".to_string(),
+            status: "Active".to_string(),
             layer: 3,
+            tools: meta.capabilities,
         });
     }
 
-    // 2. MCP Skills
-    // Note: We'll list tools from currently connected MCP sessions
-    // For now, static listing based on connected IDs.
-    // In production, we'd list_tools() for each.
+    // 2. MCP Skills (Active Clients)
+    let mcp_ids = state.mcp_manager.active_client_ids().await;
+    for id in mcp_ids {
+        if let Some(client) = state.mcp_manager.get_client(&id).await {
+            let tools = client.list_tools().await.unwrap_or_default();
+            skills.push(SkillSummary {
+                name: id.clone(),
+                description: format!("Running MCP Server: {}", id),
+                source: "mcp".to_string(),
+                status: "Active".to_string(),
+                layer: 4,
+                tools: tools.into_iter().map(|t| t.name).collect(),
+            });
+        }
+    }
+
+    // 3. Mock Marketplace Skills (Discovery Phase 2B DEMO)
+    skills.push(SkillSummary {
+        name: "Browser Automation".to_string(),
+        description: "Control a headless browser to scrape data or interact with sites.".to_string(),
+        source: "marketplace".to_string(),
+        status: "Available".to_string(),
+        layer: 4,
+        tools: vec!["click_element".to_string(), "navigate".to_string(), "screenshot".to_string()],
+    });
+    skills.push(SkillSummary {
+        name: "Financial Analyst".to_string(),
+        description: "Real-time stock market data and financial report analysis.".to_string(),
+        source: "marketplace".to_string(),
+        status: "Available".to_string(),
+        layer: 5,
+        tools: vec!["get_stock_price".to_string(), "analyze_trend".to_string()],
+    });
+
     Json(skills)
+}
+
+#[derive(Deserialize)]
+pub struct ImportRequest {
+    pub url: String,
+}
+
+#[derive(Deserialize)]
+pub struct McpSpawnRequest {
+    pub id: String,
+    pub command: String,
+    pub args: Vec<String>,
 }
 
 pub async fn import_skill(

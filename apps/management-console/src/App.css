@@ -1,12 +1,7 @@
 @import './styles/tokens.css';
 @import './styles/animations.css';
 
-:root {
-  /* Legacy mapping if any components still use them */
-  --bg-dark: var(--bg-dark-obsidian);
-  --bg-card: var(--bg-glass-heavy);
-  --border-glass: var(--border-glass);
-}
+
 
 * {
   box-sizing: border-box;
@@ -264,4 +259,31 @@ body {
 
 ::-webkit-scrollbar-thumb:hover {
   background: var(--border-glass-bright);
+}
+
+.card-hover {
+  transition: all var(--speed-base) var(--timing-soft);
+  border: 1px solid var(--border-glass) !important;
+}
+
+.card-hover:hover {
+  border-color: var(--accent-cyan) !important;
+  transform: translateY(-4px);
+  box-shadow: 0 10px 40px rgba(0, 242, 255, 0.1);
+}
+
+.primary-button {
+  background: var(--accent-cyan);
+  color: #0b0b0f;
+  border: none;
+  border-radius: 8px;
+  padding: 0.6rem 1.2rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.primary-button:hover {
+  filter: brightness(1.1);
+  box-shadow: 0 0 20px rgba(0, 242, 255, 0.3);
 }

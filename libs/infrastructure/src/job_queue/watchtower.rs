@@ -23,6 +23,8 @@ pub trait WatchtowerOps {
     async fn do_fetch_skills_for_distillation(&self, threshold: i64) -> Result<Vec<String>, AiomeError>;
     async fn do_fetch_raw_karma_for_skill(&self, skill: &str) -> Result<Vec<(String, String)>, AiomeError>;
     async fn do_apply_distilled_karma(&self, skill: &str, distilled_lesson: &str, old_karma_ids: &[String], soul_hash: &str) -> Result<(), AiomeError>;
+    async fn do_adjust_karma_weight(&self, karma_id: &str, delta: i32) -> Result<(), AiomeError>;
+    async fn do_karma_decay_sweep(&self) -> Result<u64, AiomeError>;
     async fn do_increment_oracle_retry_count(&self, record_id: i64) -> Result<bool, AiomeError>;
 }
 
@@ -151,13 +153,35 @@ impl WatchtowerOps for SqliteJobQueue {
         Ok(rows.into_iter().map(|r| (r.get("id"), r.get("lesson"))).collect())
     }
 
+    async fn do_adjust_karma_weight(&self, karma_id: &str, delta: i32) -> Result<(), AiomeError> {
+        sqlx::query(
+            "UPDATE karma_logs SET weight = MAX(0, MIN(100, weight + ?)) WHERE id = ?"
+        )
+        .bind(delta).bind(karma_id)
+        .execute(&self.pool).await
+        .map_err(|e| AiomeError::Infrastructure { reason: e.to_string() })?;
+        Ok(())
+    }
+
+    async fn do_karma_decay_sweep(&self) -> Result<u64, AiomeError> {
+        let result = sqlx::query(
+            "UPDATE karma_logs SET is_archived = 1
+             WHERE weight < 5
+               AND (last_applied_at IS NULL OR last_applied_at < datetime('now', '-90 days'))
+               AND is_archived = 0"
+        ).execute(&self.pool).await
+        .map_err(|e| AiomeError::Infrastructure { reason: e.to_string() })?;
+        Ok(result.rows_affected())
+    }
+
     async fn do_apply_distilled_karma(&self, skill: &str, distilled_lesson: &str, old_karma_ids: &[String], soul_hash: &str) -> Result<(), AiomeError> {
         let mut tx = self.pool.begin().await
             .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to start tx for distillation: {}", e) })?;
 
         for id in old_karma_ids {
-            sqlx::query("DELETE FROM karma_logs WHERE id = ?").bind(id).execute(&mut *tx).await
-                .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to delete old karma {}: {}", id, e) })?;
+            // R2 Soft-update: Don't physically delete, mark as archived
+            sqlx::query("UPDATE karma_logs SET is_archived = 1 WHERE id = ?").bind(id).execute(&mut *tx).await
+                .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to archive old karma {}: {}", id, e) })?;
         }
 
         let new_id = uuid::Uuid::new_v4().to_string();

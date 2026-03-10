@@ -145,6 +145,11 @@ impl McpProcessManager {
         Ok(client)
     }
 
+    pub async fn active_client_ids(&self) -> Vec<String> {
+        let clients = self.clients.lock().await;
+        clients.keys().cloned().collect()
+    }
+
     pub async fn kill_all(&self) {
         let mut clients = self.clients.lock().await;
         info!("💥 [MCP] Evicting {} managed MCP clients", clients.len());

@@ -30,12 +30,12 @@ impl AdaptiveImmuneSystem {
     pub async fn analyze_threats(&self, jq: &impl JobQueue) -> Result<u32, AiomeError> {
         info!("防御システム: 脅威分析を開始中 (using {})...", self.provider.name());
         
-        let recent_karma = jq.fetch_relevant_karma("security threat injection error", "global", 10, "current").await?;
-        if recent_karma.is_empty() {
+        let result = jq.fetch_relevant_karma("security threat injection error", "global", 10, "current").await?;
+        if result.entries.is_empty() {
             return Ok(0);
         }
 
-        let logs_concat = recent_karma.join("\n---\n");
+        let logs_concat = result.entries.join("\n---\n");
         let preamble = "あなたはシステムの自己防衛エンジンです。以下のログから攻撃パターンを特定し、防御ルールを1つ JSON 形式で作成してください。\nFormat: {\"pattern\": \"攻撃的な単語や正規表現\", \"severity\": 0-100, \"action\": \"Block/Alert\"}";
 
         let response = self.provider.complete(&logs_concat, Some(preamble)).await?;

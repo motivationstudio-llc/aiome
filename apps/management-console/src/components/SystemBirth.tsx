@@ -5,16 +5,28 @@ interface SystemBirthProps {
     onComplete: () => void;
 }
 
+const SYNAPSES = [...Array(20)].map((_, i) => ({
+    id: i,
+    x: (Math.random() - 0.5) * 1000,
+    y: (Math.random() - 0.5) * 1000,
+    duration: 2 + Math.random() * 2,
+    delay: Math.random() * 2,
+    isCyan: Math.random() > 0.5
+}));
+
 const SystemBirth: React.FC<SystemBirthProps> = ({ onComplete }) => {
     const [phase, setPhase] = useState(0);
 
     useEffect(() => {
-        // Phase 1: Neural connections
-        setTimeout(() => setPhase(1), 800);
-        // Phase 2: Central awakening
-        setTimeout(() => setPhase(2), 2200);
-        // Phase 3: Done
-        setTimeout(() => onComplete(), 4500);
+        const t1 = setTimeout(() => setPhase(1), 800);
+        const t2 = setTimeout(() => setPhase(2), 2200);
+        const t3 = setTimeout(() => onComplete(), 4500);
+
+        return () => {
+            clearTimeout(t1);
+            clearTimeout(t2);
+            clearTimeout(t3);
+        };
     }, [onComplete]);
 
     return (
@@ -103,25 +115,25 @@ const SystemBirth: React.FC<SystemBirthProps> = ({ onComplete }) => {
             </div>
 
             {/* Decorative Synapses */}
-            {phase >= 1 && [...Array(20)].map((_, i) => (
+            {phase >= 1 && SYNAPSES.map((s) => (
                 <motion.div
-                    key={i}
+                    key={s.id}
                     initial={{ opacity: 0 }}
                     animate={{
                         opacity: [0, 1, 0],
-                        x: [0, (Math.random() - 0.5) * 1000],
-                        y: [0, (Math.random() - 0.5) * 1000]
+                        x: [0, s.x],
+                        y: [0, s.y]
                     }}
                     transition={{
-                        duration: 2 + Math.random() * 2,
+                        duration: s.duration,
                         repeat: Infinity,
-                        delay: Math.random() * 2
+                        delay: s.delay
                     }}
                     style={{
                         position: 'absolute',
                         width: '2px',
                         height: '2px',
-                        background: Math.random() > 0.5 ? 'var(--accent-cyan)' : 'var(--accent-purple)',
+                        background: s.isCyan ? 'var(--accent-cyan)' : 'var(--accent-purple)',
                         boxShadow: '0 0 8px currentColor'
                     }}
                 />

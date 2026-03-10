@@ -6,7 +6,7 @@ export type AvatarState = 'idle' | 'thinking' | 'speaking' | 'learning' | 'medit
 export const useAvatarState = () => {
     const { lastEvent } = useSystemVitality();
     const [state, setState] = useState<AvatarState>('idle');
-    const timerRef = useRef<any>(null);
+    const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     useEffect(() => {
         if (!lastEvent) return;
@@ -52,6 +52,12 @@ export const useAvatarState = () => {
                 break;
         }
     }, [lastEvent]);
+
+    useEffect(() => {
+        return () => {
+            if (timerRef.current) clearTimeout(timerRef.current);
+        };
+    }, []);
 
     return state;
 };

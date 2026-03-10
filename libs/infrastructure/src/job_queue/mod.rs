@@ -18,7 +18,10 @@ use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
 use std::time::Duration;
 use chrono::Utc;
 use aiome_core::llm_provider::EmbeddingProvider;
+use aiome_core::traits::KarmaSearchResult;
 use std::sync::Arc;
+use std::collections::HashMap;
+use std::time::Instant;
 
 #[cfg(test)]
 mod tests;
@@ -50,6 +53,7 @@ use crdt::CrdtOps;
 pub struct SqliteJobQueue {
     pool: SqlitePool,
     embed_provider: Option<Arc<dyn EmbeddingProvider>>,
+    karma_cache: Arc<tokio::sync::RwLock<HashMap<String, (KarmaSearchResult, Instant)>>>,
 }
 
 impl SqliteJobQueue {
@@ -75,6 +79,7 @@ impl SqliteJobQueue {
         let instance = Self {
             pool,
             embed_provider: None,
+            karma_cache: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
         };
 
         instance.init_db().await?;
@@ -125,12 +130,20 @@ impl JobQueue for SqliteJobQueue {
         self.do_store_execution_log(job_id, log).await
     }
 
-    async fn fetch_relevant_karma(&self, topic: &str, skill_id: &str, limit: i64, current_soul_hash: &str) -> Result<Vec<String>, AiomeError> {
+    async fn fetch_relevant_karma(&self, topic: &str, skill_id: &str, limit: i64, current_soul_hash: &str) -> Result<aiome_core::traits::KarmaSearchResult, AiomeError> {
         self.do_fetch_relevant_karma(topic, skill_id, limit, current_soul_hash).await
     }
 
     async fn store_karma(&self, job_id: &str, skill_id: &str, lesson: &str, karma_type: &str, soul_hash: &str) -> Result<(), AiomeError> {
         self.do_store_karma(job_id, skill_id, lesson, karma_type, soul_hash).await
+    }
+
+    async fn adjust_karma_weight(&self, karma_id: &str, delta: i32) -> Result<(), AiomeError> {
+        self.do_adjust_karma_weight(karma_id, delta).await
+    }
+
+    async fn karma_decay_sweep(&self) -> Result<u64, AiomeError> {
+        self.do_karma_decay_sweep().await
     }
 
     async fn fetch_undistilled_jobs(&self, limit: i64) -> Result<Vec<Job>, AiomeError> {

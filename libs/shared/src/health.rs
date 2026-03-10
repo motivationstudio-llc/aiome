@@ -66,7 +66,15 @@ impl HealthMonitor {
         let pid = Pid::from(std::process::id() as usize);
         Self { sys, pid, disks }
     }
+}
 
+impl Default for HealthMonitor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl HealthMonitor {
     pub fn check(&mut self) -> ResourceStatus {
         // 全体のメモリと特定のプロセスをリフレッシュ
         self.sys.refresh_memory();

@@ -15,6 +15,10 @@
 
 use super::SqliteJobQueue;
 use aiome_core::traits::{JobQueue, JobStatus};
+use async_trait::async_trait;
+use tracing::{warn, info};
+use aiome_core::llm_provider::EmbeddingProvider;
+use std::sync::Arc;
 use chrono::Utc;
 
 /// テスト用のユニーク一時ファイル JobQueue を作成
@@ -55,9 +59,9 @@ async fn test_sqlite_job_queue_karma_storage() {
     let (jq, _tmp) = create_test_queue().await;
     let job_id = jq.enqueue("Task", "Topic", "Style", None).await.unwrap();
     jq.store_karma(&job_id, "skill-1", "Lesson 1", "Technical", "hash1").await.unwrap();
-    let karma = jq.fetch_relevant_karma("Topic", "skill-1", 10, "hash1").await.unwrap();
-    assert_eq!(karma.len(), 1);
-    assert_eq!(karma[0], "Lesson 1");
+    let result = jq.fetch_relevant_karma("Topic", "skill-1", 10, "hash1").await.unwrap();
+    assert_eq!(result.entries.len(), 1);
+    assert_eq!(result.entries[0], "Lesson 1");
 }
 
 #[tokio::test]
@@ -246,20 +250,72 @@ async fn test_sqlite_job_queue_karma_soul_coherence() {
     
     jq.store_karma(&job_id, "soul_skill", "[V1 KARMA]", "Synthesized", soul_v1).await.unwrap();
     
-    let karma_v1 = jq.fetch_relevant_karma("Soul Test", "soul_skill", 10, soul_v1).await.unwrap();
-    assert_eq!(karma_v1.len(), 1);
-    assert_eq!(karma_v1[0], "[V1 KARMA]");
+    let result_v1 = jq.fetch_relevant_karma("Soul Test", "soul_skill", 10, soul_v1).await.unwrap();
+    assert_eq!(result_v1.entries.len(), 1);
+    assert_eq!(result_v1.entries[0], "[V1 KARMA]");
 
     // Implementation returns legacy marked karma instead of empty list
-    let karma_v2_legacy = jq.fetch_relevant_karma("Soul Test", "soul_skill", 10, soul_v2).await.unwrap();
-    assert_eq!(karma_v2_legacy.len(), 1);
-    assert!(karma_v2_legacy[0].contains("[LEGACY KARMA"));
+    let result_v2_legacy = jq.fetch_relevant_karma("Soul Test Legacy", "soul_skill", 10, soul_v2).await.unwrap();
+    assert_eq!(result_v2_legacy.entries.len(), 1);
+    assert!(result_v2_legacy.entries[0].contains("[LEGACY KARMA"));
 
     let job_id2 = jq.enqueue("Task", "Topic 2", "Style", None).await.unwrap();
     jq.store_karma(&job_id2, "soul_skill", "[V2 KARMA]", "Synthesized", soul_v2).await.unwrap();
     
-    let karma_v2 = jq.fetch_relevant_karma("Soul Test", "soul_skill", 10, soul_v2).await.unwrap();
-    assert_eq!(karma_v2.len(), 2); 
-    assert!(karma_v2.iter().any(|k| k.contains("[LEGACY KARMA") && k.contains("[V1 KARMA]")));
-    assert!(karma_v2.iter().any(|k| k == "[V2 KARMA]"));
+    let result_v2 = jq.fetch_relevant_karma("Soul Test Final", "soul_skill", 10, soul_v2).await.unwrap();
+    assert_eq!(result_v2.entries.len(), 2); 
+    assert!(result_v2.entries.iter().any(|k| k.contains("[LEGACY KARMA") && k.contains("[V1 KARMA]")));
+    assert!(result_v2.entries.iter().any(|k| k == "[V2 KARMA]"));
+}
+
+#[derive(Debug)]
+struct MockEmbedProvider;
+#[async_trait]
+impl EmbeddingProvider for MockEmbedProvider {
+    fn name(&self) -> &str { "mock" }
+    async fn embed(&self, text: &str) -> Result<Vec<f32>, aiome_core::error::AiomeError> {
+        if text.contains("alien") {
+            Ok(vec![0.0; 1536])
+        } else {
+            Ok(vec![1.0; 1536])
+        }
+    }
+}
+
+#[tokio::test]
+async fn test_sqlite_job_queue_karma_ood_detection() {
+    let (mut jq, _tmp) = create_test_queue().await;
+    jq = jq.with_embeddings(Arc::new(MockEmbedProvider));
+
+    let job_id = jq.enqueue("Task", "Real Topic", "Style", None).await.unwrap();
+    // Use manual SQL to insert embedding matched to MockEmbedProvider's output
+    let id = uuid::Uuid::new_v4().to_string();
+    let emb: Vec<u8> = vec![1.0f64; 1536].iter().flat_map(|f| f.to_le_bytes()).collect();
+    sqlx::query("INSERT INTO karma_logs (id, job_id, karma_type, related_skill, lesson, created_at, karma_embedding) VALUES (?, ?, 'Technical', 'skill-1', 'Real Lesson', datetime('now'), ?)")
+        .bind(&id).bind(&job_id).bind(&emb).execute(&jq.pool).await.unwrap();
+    
+    // Closer match (Mock returns 1.0, DB has 1.0 -> score 1.0)
+    let result = jq.fetch_relevant_karma("Real Topic", "skill-1", 10, "hash1").await.unwrap();
+    assert!(!result.is_ood);
+    
+    // Out of domain (Mock returns 0.0, DB has 1.0 -> score 0.0)
+    let result_ood = jq.fetch_relevant_karma("space aliens", "skill-1", 10, "hash1").await.unwrap();
+    assert!(result_ood.is_ood);
+}
+
+#[tokio::test]
+async fn test_sqlite_job_queue_karma_cache_hit() {
+    let (jq, _tmp) = create_test_queue().await;
+    let job_id = jq.enqueue("Task", "Cache Test", "Style", None).await.unwrap();
+    jq.store_karma(&job_id, "skill-1", "Cached Lesson", "Technical", "hash1").await.unwrap();
+    
+    // First call - fills cache
+    let _ = jq.fetch_relevant_karma("Cache Test", "skill-1", 10, "hash1").await.unwrap();
+    
+    // Directly modify DB
+    sqlx::query("UPDATE karma_logs SET lesson = 'Modified Lesson'").execute(&jq.pool).await.unwrap();
+    
+    // Second call - should hit cache
+    let result2 = jq.fetch_relevant_karma("Cache Test", "skill-1", 10, "hash1").await.unwrap();
+    assert_eq!(result2.entries[0], "Cached Lesson"); // Cache hit
 }

@@ -72,7 +72,6 @@ async fn main() -> anyhow::Result<()> {
     let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite:samsara_hub.db?mode=rwc".to_string());
     let secret = secrecy::SecretString::new(
         std::env::var("FEDERATION_SECRET").expect("FEDERATION_SECRET must be set for Samsara Hub security")
-        .into()
     );
     let port = std::env::var("PORT").unwrap_or_else(|_| "3016".to_string());
 
@@ -359,13 +358,13 @@ async fn handle_biome_ws(mut socket: WebSocket, state: Arc<HubState>) {
                     // Filter: Only send if it's for this recipient (requires WS handshake to provide recipient_pubkey)
                     // For now, relay all but node should filter locally.
                     let text = serde_json::to_string(&HubMessage::BiomeRelay(biome_msg)).unwrap_or_default();
-                    if socket.send(Message::Text(text.into())).await.is_err() {
+                    if socket.send(Message::Text(text)).await.is_err() {
                         break;
                     }
                 }
             }
             _ = tokio::time::sleep(Duration::from_secs(30)) => {
-                if socket.send(Message::Ping(vec![].into())).await.is_err() {
+                if socket.send(Message::Ping(vec![])).await.is_err() {
                     break;
                 }
             }
@@ -396,13 +395,10 @@ async fn sync_handler(
     }
 
     // BFT: BAN Check
-    match sqlx::query_scalar::<sqlx::Sqlite, i64>("SELECT is_banned FROM node_reputation WHERE node_id = ?")
+    if let Ok(1) = sqlx::query_scalar::<sqlx::Sqlite, i64>("SELECT is_banned FROM node_reputation WHERE node_id = ?")
         .bind(&payload.node_id).fetch_one(&state.pool).await {
-            Ok(is_banned) if is_banned == 1 => {
-                warn!("🛡️ [BFT] Rejecting sync from BANNED node: {}", payload.node_id);
-                return (StatusCode::FORBIDDEN, Json(serde_json::json!({"error": "Node is banned"}))).into_response();
-            }
-            _ => {}
+            warn!("🛡️ [BFT] Rejecting sync from BANNED node: {}", payload.node_id);
+            return (StatusCode::FORBIDDEN, Json(serde_json::json!({"error": "Node is banned"}))).into_response();
         }
 
     info!("🌐 Node {} pulling approved updates since {:?}", payload.node_id, payload.since);
@@ -421,7 +417,7 @@ async fn sync_handler(
     ).bind(&since).fetch_all(&state.pool).await.unwrap_or_default();
 
     let has_more = karmas.len() == 500 || rules.len() == 500;
-    let next_cursor: Option<String> = if has_more {
+    let _next_cursor: Option<String> = if has_more {
         // Find the latest approved_at for pagination (Keyset Pagination)
         // For simplicity, we just use the last item's timestamp if we hit the limit
         // In a real high-perf system, we'd query for the max timestamp in the results.
@@ -485,13 +481,10 @@ async fn push_handler(
     }
 
     // BFT: BAN Check
-    match sqlx::query_scalar::<sqlx::Sqlite, i64>("SELECT is_banned FROM node_reputation WHERE node_id = ?")
+    if let Ok(1) = sqlx::query_scalar::<sqlx::Sqlite, i64>("SELECT is_banned FROM node_reputation WHERE node_id = ?")
         .bind(&payload.node_id).fetch_one(&state.pool).await {
-            Ok(is_banned) if is_banned == 1 => {
-                warn!("🛡️ [BFT] Rejecting push from BANNED node: {}", payload.node_id);
-                return (StatusCode::FORBIDDEN, Json(serde_json::json!({"error": "Node is banned"}))).into_response();
-            }
-            _ => {}
+            warn!("🛡️ [BFT] Rejecting push from BANNED node: {}", payload.node_id);
+            return (StatusCode::FORBIDDEN, Json(serde_json::json!({"error": "Node is banned"}))).into_response();
         }
 
     let karma_count = payload.karmas.len();
@@ -701,7 +694,7 @@ async fn approval_worker(pool: SqlitePool, token: CancellationToken) {
             let mut valid = false;
             if let Some(ref sig_b64) = k.signature {
                 let payload = format!("{}:{}:{}", k.id, k.lesson, k.lamport_clock);
-                if let (Ok(pubkey_bytes), Ok(sig_bytes)) = (BASE64_STANDARD.decode(&k.node_id), BASE64_STANDARD.decode(&sig_b64)) {
+                if let (Ok(pubkey_bytes), Ok(sig_bytes)) = (BASE64_STANDARD.decode(&k.node_id), BASE64_STANDARD.decode(sig_b64)) {
                     if let (Ok(pubkey), Ok(sig)) = (VerifyingKey::from_bytes(&pubkey_bytes.try_into().unwrap_or([0; 32])), Signature::from_slice(&sig_bytes)) {
                         if pubkey.verify(payload.as_bytes(), &sig).is_ok() {
                             valid = true;
@@ -741,7 +734,7 @@ async fn approval_worker(pool: SqlitePool, token: CancellationToken) {
             let mut valid = false;
             if let Some(ref sig_b64) = r.signature {
                 let payload = format!("{}:{}:{}", r.id, r.pattern, r.lamport_clock);
-                if let (Ok(pubkey_bytes), Ok(sig_bytes)) = (BASE64_STANDARD.decode(&r.node_id), BASE64_STANDARD.decode(&sig_b64)) {
+                if let (Ok(pubkey_bytes), Ok(sig_bytes)) = (BASE64_STANDARD.decode(&r.node_id), BASE64_STANDARD.decode(sig_b64)) {
                     if let (Ok(pubkey), Ok(sig)) = (VerifyingKey::from_bytes(&pubkey_bytes.try_into().unwrap_or([0; 32])), Signature::from_slice(&sig_bytes)) {
                         if pubkey.verify(payload.as_bytes(), &sig).is_ok() {
                             valid = true;

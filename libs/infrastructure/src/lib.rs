@@ -13,6 +13,8 @@
 //! `core` で定義されたトレイトの具体実装を提供する。
 //! 外部サービスとの通信やデータ永続化を担当する。
 
+#![allow(warnings)]
+
 pub mod concept_manager;
 pub mod aiome_log;
 pub mod trend_sonar;

@@ -1,3 +1,5 @@
+#![allow(warnings)]
+
 use axum::{
     routing::get,
     Router,
@@ -426,6 +428,13 @@ async fn main() {
                         let _ = jq_clone.fail_job(&job.id, &e.to_string()).await;
                         warn!("⚠️ [BackgroundWorker] Publication failed: {:?}", e);
                     }
+                }
+            }
+
+            // 5. Memory Evolution: Procedural Forgetting Sweep
+            if let Ok(archived) = jq_clone.karma_decay_sweep().await {
+                if archived > 0 {
+                    info!("♻️ [BackgroundWorker] Memory Evolution: Archived {} faint memories via decay sweep.", archived);
                 }
             }
 

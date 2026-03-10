@@ -3,6 +3,8 @@ import { Network } from "vis-network";
 import { DataSet } from "vis-data";
 import { GitMerge, ZoomIn, ZoomOut, RefreshCw, Layers } from 'lucide-react';
 import { API_BASE } from "../config";
+import { GraphNode, GraphEdge } from '../types';
+import { getAuthHeaders } from '../lib/auth';
 
 const GraphView: React.FC = () => {
     const containerRef = useRef<HTMLDivElement>(null);
@@ -14,17 +16,19 @@ const GraphView: React.FC = () => {
 
         const initGraph = async () => {
             try {
-                const res = await fetch(`${API_BASE}/api/synergy/graph`);
+                const res = await fetch(`${API_BASE}/api/synergy/graph`, {
+                    headers: getAuthHeaders()
+                });
                 const data = await res.json();
 
-                const nodes = new DataSet(data.nodes.map((n: any) => ({
+                const nodes = new DataSet<GraphNode & { color: unknown, font: unknown, shape: string, size: number, [key: string]: unknown }>(data.nodes.map((n: GraphNode) => ({
                     ...n,
                     color: {
-                        background: n.id.startsWith('job_') ? '#00f2ff22' : '#bc8cff22',
-                        border: n.id.startsWith('job_') ? 'var(--accent-cyan)' : 'var(--accent-purple)',
+                        background: n.group === 'karma_local' ? '#00f2ff22' : '#bc8cff22',
+                        border: n.group === 'karma_local' ? 'var(--accent-cyan)' : 'var(--accent-purple)',
                         highlight: {
-                            background: n.id.startsWith('job_') ? '#00f2ff44' : '#bc8cff44',
-                            border: n.id.startsWith('job_') ? '#fff' : '#fff',
+                            background: n.group === 'karma_local' ? '#00f2ff44' : '#bc8cff44',
+                            border: n.group === 'karma_local' ? '#fff' : '#fff',
                         }
                     },
                     font: { color: '#fff', size: 12, face: 'Inter' },
@@ -32,7 +36,7 @@ const GraphView: React.FC = () => {
                     size: 20 + (n.label.length / 5)
                 })));
 
-                const edges = new DataSet(data.edges.map((e: any) => ({
+                const edges = new DataSet<GraphEdge & { id?: string, color: unknown, width: number, smooth: unknown, [key: string]: unknown }>(data.edges.map((e: GraphEdge) => ({
                     ...e,
                     color: { color: 'rgba(255,255,255,0.1)', highlight: 'var(--accent-cyan)' },
                     width: 1,
@@ -65,7 +69,7 @@ const GraphView: React.FC = () => {
                     }
                 };
 
-                networkRef.current = new Network(containerRef.current!, { nodes: nodes as any, edges: edges as any }, options);
+                networkRef.current = new Network(containerRef.current!, { nodes: nodes as unknown as never, edges: edges as unknown as never }, options);
             } catch (e) {
                 console.error("Graph failed to load", e);
             }
@@ -78,8 +82,8 @@ const GraphView: React.FC = () => {
         };
     }, []);
 
-    const zoomIn = () => networkRef.current?.moveTo({ scale: (networkRef.current.getScale() * 1.2) });
-    const zoomOut = () => networkRef.current?.moveTo({ scale: (networkRef.current.getScale() / 1.2) });
+    const zoomIn = () => networkRef.current?.moveTo({ scale: (networkRef.current?.getScale() || 1) * 1.2 });
+    const zoomOut = () => networkRef.current?.moveTo({ scale: (networkRef.current?.getScale() || 1) / 1.2 });
     const fit = () => networkRef.current?.fit();
 
     return (

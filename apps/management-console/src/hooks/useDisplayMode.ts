@@ -5,9 +5,10 @@ export type DisplayMode = 'vrm' | 'lite' | 'off';
 export const useDisplayMode = () => {
     const [mode, setMode] = useState<DisplayMode>(() => {
         const saved = localStorage.getItem('aiome_display_mode');
-        // Migrate old 'live2d' value to 'vrm'
-        if (saved === 'live2d') return 'vrm';
-        return (saved as DisplayMode) || 'vrm';
+        if (saved === 'vrm' || saved === 'lite' || saved === 'off') {
+            return saved;
+        }
+        return 'vrm';
     });
 
     useEffect(() => {

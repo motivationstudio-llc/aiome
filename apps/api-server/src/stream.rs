@@ -1,6 +1,7 @@
 use axum::{
     extract::{State, Json},
     response::sse::{Event, KeepAlive, Sse},
+    response::IntoResponse,
 };
 use futures::stream::Stream;
 use core::convert::Infallible;
@@ -44,14 +45,22 @@ pub async fn trigger_agent_chat_stream(
     let stream = async_stream::stream! {
         // Discovery H: Guardrails check (Security Layer 0)
         if let shared::guardrails::ValidationResult::Blocked(reason) = shared::guardrails::validate_input(&payload.prompt) {
-            yield Ok(Event::default().event("security_block").data(format!("🚨 [GUARDRAIL BLOCK] {}", reason)));
+            yield Ok::<Event, Infallible>(Event::default().event("security_block").data(format!("🚨 [GUARDRAIL BLOCK] {}", reason)));
             return;
         }
 
         // Discovery B: Immune System check (Security Layer 1)
         let immune_system = infrastructure::immune_system::AdaptiveImmuneSystem::new(provider.clone());
         if let Ok(Some(rule)) = immune_system.verify_intent(&payload.prompt, state.job_queue.as_ref()).await {
-            yield Ok(Event::default().event("security_block").data(format!("🚨 [SENTINEL BLOCK] {}\nPattern: {}", rule.action, rule.pattern)));
+            let stats = state.job_queue.get_agent_stats().await.unwrap_or_default();
+            let _ = state.job_queue.record_evolution_event(
+                stats.level, 
+                "ImmuneAlert", 
+                &format!("Block: {} (Pattern: {})", rule.action, rule.pattern),
+                None, 
+                None
+            ).await;
+            yield Ok::<Event, Infallible>(Event::default().event("security_block").data(format!("🚨 [SENTINEL BLOCK] {}\nPattern: {}", rule.action, rule.pattern)));
             return;
         }
 
@@ -163,8 +172,19 @@ pub async fn trigger_agent_chat_stream(
                             }
                         } else {
                             let out = skill_handler::execute_wasm_skill(&skill_name, &skill_input, &state).await;
+                            
+                            // Phase 2B: Record skill execution
+                            let stats = state.job_queue.get_agent_stats().await.unwrap_or_default();
+                            let status = if out.contains("Error:") { "failed" } else { "success" };
+                            let _ = state.job_queue.record_evolution_event(
+                                stats.level,
+                                "SkillExecution",
+                                &format!("Exec: {} -> {}", skill_name, status),
+                                Some(&skill_name),
+                                None
+                            ).await;
+
                             skill_results.push(out.clone());
-                            let status = if out.contains("Error:") { "failed" } else { "Success" };
                             yield Ok(Event::default().event("tool_result").data(format!("{}: {}", skill_name, status)));
                         }
                     }
@@ -233,11 +253,17 @@ pub async fn trigger_system_vitality_stream(
                     last_karma_count = current_karmas.len();
                 }
 
-                // 3. Evolution Check (Inspiration / Soul Mutation)
+                // 3. Evolution Check (Inspiration / Soul Mutation / Alerts / SkillExec)
                 let current_evos = state.job_queue.fetch_evolution_history(100).await.unwrap_or_default();
                 if current_evos.len() > last_evolution_count {
                     if let Some(new_evo) = current_evos.first() {
-                        yield Ok(Event::default().event("inspiration").data(serde_json::to_string(new_evo).unwrap_or_default()));
+                        let event_type = new_evo["event_type"].as_str().unwrap_or("inspiration");
+                        let sse_event = match event_type {
+                            "ImmuneAlert" => "immune_alert",
+                            "SkillExecution" => "skill_execution",
+                            _ => "inspiration",
+                        };
+                        yield Ok(Event::default().event(sse_event).data(serde_json::to_string(new_evo).unwrap_or_default()));
                     }
                     last_evolution_count = current_evos.len();
                 }

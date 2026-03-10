@@ -11,13 +11,15 @@ use aiome_core::error::AiomeError;
 use sqlx::Row;
 use uuid::Uuid;
 use chrono::Utc;
-use tracing::warn;
+use tracing::{warn, info};
+use std::time::Instant;
+use aiome_core::traits::KarmaSearchResult;
 use super::SqliteJobQueue;
 use super::{try_get_optional_string, cosine_similarity};
 
 #[async_trait]
 pub trait KarmaOps {
-    async fn do_fetch_relevant_karma(&self, topic: &str, skill_id: &str, limit: i64, current_soul_hash: &str) -> Result<Vec<String>, AiomeError>;
+    async fn do_fetch_relevant_karma(&self, topic: &str, skill_id: &str, limit: i64, current_soul_hash: &str) -> Result<aiome_core::traits::KarmaSearchResult, AiomeError>;
     async fn do_store_karma(&self, job_id: &str, skill_id: &str, lesson: &str, karma_type: &str, soul_hash: &str) -> Result<(), AiomeError>;
     async fn do_fetch_undistilled_jobs(&self, limit: i64) -> Result<Vec<Job>, AiomeError>;
     async fn do_mark_karma_extracted(&self, job_id: &str) -> Result<(), AiomeError>;
@@ -28,13 +30,25 @@ pub trait KarmaOps {
 
 #[async_trait]
 impl KarmaOps for SqliteJobQueue {
-    async fn do_fetch_relevant_karma(&self, topic: &str, skill_id: &str, limit: i64, current_soul_hash: &str) -> Result<Vec<String>, AiomeError> {
+    async fn do_fetch_relevant_karma(&self, topic: &str, skill_id: &str, limit: i64, current_soul_hash: &str) -> Result<KarmaSearchResult, AiomeError> {
+        let cache_key = format!("{}:{}:{}", skill_id, topic, limit);
+        
+        // 1. Tier-0: In-memory Cache check
+        {
+            let cache = self.karma_cache.read().await;
+            if let Some((result, timestamp)) = cache.get(&cache_key) {
+                if timestamp.elapsed() < std::time::Duration::from_secs(300) {
+                    return Ok(result.clone());
+                }
+            }
+        }
+
         let candidate_limit = limit * 5;
         let rows = sqlx::query(
             "SELECT id, lesson, soul_version_hash, karma_embedding,
               max(0, weight - (julianday('now') - julianday(created_at)) * 0.5) AS sql_weight
              FROM karma_logs 
-             WHERE weight > 0 AND (related_skill = ? OR related_skill = 'global') 
+             WHERE weight > 0 AND is_archived = 0 AND (related_skill = ? OR related_skill = 'global') 
              ORDER BY sql_weight DESC, created_at DESC LIMIT ?"
         )
         .bind(skill_id)
@@ -44,7 +58,7 @@ impl KarmaOps for SqliteJobQueue {
         .map_err(|e| AiomeError::Infrastructure { reason: format!("SQL Karma Query failed: {}", e) })?;
 
         if rows.is_empty() {
-            return Ok(Vec::new());
+            return Ok(KarmaSearchResult::empty());
         }
 
         struct KarmaCandidate {
@@ -72,13 +86,20 @@ impl KarmaOps for SqliteJobQueue {
             }
         }).collect();
 
+        let mut max_score = 0.0;
+        let mut searched_semantically = false;
         if !rows.is_empty() {
             if let Some(ref provider) = self.embed_provider {
                 if let Ok(topic_vec_f32) = provider.embed(topic).await {
+                    searched_semantically = true;
                     let topic_vec: Vec<f64> = topic_vec_f32.into_iter().map(|f| f as f64).collect();
                     for candidate in &mut candidates {
                         if let Some(ref emb_vec) = candidate.stored_embedding {
-                            candidate.semantic_score = cosine_similarity(&topic_vec, emb_vec);
+                            let score = cosine_similarity(&topic_vec, emb_vec);
+                            candidate.semantic_score = score;
+                            if score > max_score {
+                                max_score = score;
+                            }
                         }
                     }
                     candidates.sort_by(|a, b| {
@@ -86,13 +107,11 @@ impl KarmaOps for SqliteJobQueue {
                         let score_b = b.semantic_score * 0.7 + (b.sql_weight / 100.0) * 0.3;
                         score_b.partial_cmp(&score_a).unwrap_or(std::cmp::Ordering::Equal)
                     });
-                } else {
-                    warn!("🧬 [KarmaRAG] Failed to embed topic using {}. Falling back to SQL weight.", provider.name());
                 }
             }
         }
 
-        let mut final_karma = Vec::new();
+        let mut final_entries = Vec::new();
         for candidate in candidates.into_iter().take(limit as usize) {
             let mut lesson_text = candidate.lesson;
             if let Some(h) = candidate.hash {
@@ -100,7 +119,27 @@ impl KarmaOps for SqliteJobQueue {
                     lesson_text = format!("[LEGACY KARMA - from an older Soul version]\n{}", lesson_text);
                 }
             }
-            final_karma.push(lesson_text);
+            final_entries.push(lesson_text);
+        }
+
+        // OOD Check (R3/Sprint 1-A)
+        // Set is_ood = true only if we actually performed a semantic search and found nothing close.
+        // If we only have SQL results, assume they are relevant enough (Backward compatibility/Local mode).
+        let is_ood = final_entries.is_empty() || (searched_semantically && max_score < 0.3);
+
+        let result = KarmaSearchResult {
+            entries: final_entries,
+            is_ood,
+            max_score,
+        };
+
+        // Update Cache (LRU simple: if too large, clear everything for now or just insert)
+        {
+            let mut cache = self.karma_cache.write().await;
+            if cache.len() > 50 {
+                cache.clear();
+            }
+            cache.insert(cache_key, (result.clone(), Instant::now()));
         }
 
         let now = Utc::now().to_rfc3339();
@@ -109,7 +148,7 @@ impl KarmaOps for SqliteJobQueue {
             let _ = sqlx::query("UPDATE karma_logs SET last_applied_at = ? WHERE id = ?").bind(&now).bind(id).execute(&self.pool).await;
         }
 
-        Ok(final_karma)
+        Ok(result)
     }
 
     async fn do_store_karma(&self, job_id: &str, skill_id: &str, lesson: &str, karma_type: &str, soul_hash: &str) -> Result<(), AiomeError> {

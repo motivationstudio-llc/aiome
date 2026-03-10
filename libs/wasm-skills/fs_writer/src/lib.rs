@@ -16,6 +16,7 @@ struct WriteRequest {
     pub content: String,
 }
 
+#[allow(dead_code)]
 #[derive(Serialize)]
 struct WriteResponse {
     pub success: bool,
@@ -26,7 +27,7 @@ struct WriteResponse {
 #[plugin_fn]
 pub fn call(input: String) -> FnResult<String> {
     // We just parse to validate JSON, then pass the whole JSON string to the host
-    let req: WriteRequest = serde_json::from_str(&input)?;
+    let _req: WriteRequest = serde_json::from_str(&input)?;
     
     // Call the host function (Aiome OS Sentinel handles all security and IO)
     // The host function expects the raw JSON string because it needs both path and content.

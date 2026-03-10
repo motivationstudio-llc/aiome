@@ -163,6 +163,17 @@ pub fn http_client_with_timeout(timeout: Duration) -> Result<reqwest::Client, re
         .build()
 }
 
+/// Vec<String> 版のタイムアウト付き実行
+pub async fn run_with_timeout_vec(
+    program: &str,
+    args: Vec<String>,
+    timeout: Duration,
+) -> Result<Output, ProcessError> {
+    let args_str: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+    run_with_timeout(program, &args_str, timeout).await
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -219,14 +230,4 @@ mod tests {
             other => panic!("Expected SpawnFailed, got: {:?}", other),
         }
     }
-}
-
-/// Vec<String> 版のタイムアウト付き実行
-pub async fn run_with_timeout_vec(
-    program: &str,
-    args: Vec<String>,
-    timeout: Duration,
-) -> Result<Output, ProcessError> {
-    let args_str: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-    run_with_timeout(program, &args_str, timeout).await
 }

@@ -491,9 +491,9 @@ impl WasmSkillManager {
         }
 
         // Karmaから類似したレッスンを検索 (Top 5)
-        let entries = jq.fetch_relevant_karma(query, "global", 5, "current").await?;
+        let result = jq.fetch_relevant_karma(query, "global", 5, "current").await?;
         
-        for entry in entries {
+        for entry in result.entries {
             // エントリ内にスキル名が含まれているか、あるいはスキル名そのものが関連しているかチェック
             for skill in &available_skills {
                 if entry.to_lowercase().contains(&skill.to_lowercase()) {

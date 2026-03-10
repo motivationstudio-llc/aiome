@@ -207,7 +207,7 @@ impl LlmProvider for AbyssVaultProvider {
             "endpoint": "gemini"
         });
 
-        let resp = self.client.post(&format!("{}/api/v1/llm/complete", self.proxy_url))
+        let resp = self.client.post(format!("{}/api/v1/llm/complete", self.proxy_url))
             .json(&payload)
             .send()
             .await

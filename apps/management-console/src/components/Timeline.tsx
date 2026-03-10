@@ -2,19 +2,23 @@ import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Zap, Terminal, BrainCircuit, Globe, Clock } from 'lucide-react';
 import { API_BASE } from "../config";
+import { Karma } from '../types';
+import { getAuthHeaders } from '../lib/auth';
 
 const Timeline: React.FC = () => {
-    const [karmas, setKarmas] = useState<any[]>([]);
+    const [karmas, setKarmas] = useState<Karma[]>([]);
     const [selfNodeId, setSelfNodeId] = useState<string>("");
 
     useEffect(() => {
+        const authHeader = getAuthHeaders();
+
         // Fetch health to get self node id
-        fetch(`${API_BASE}/api/health`)
+        fetch(`${API_BASE}/api/health`, { headers: authHeader })
             .then(res => res.json())
             .then(data => setSelfNodeId(data.node_id))
             .catch(console.error);
 
-        fetch(`${API_BASE}/api/synergy/karma`)
+        fetch(`${API_BASE}/api/synergy/karma`, { headers: authHeader })
             .then(res => res.json())
             .then(data => setKarmas(data))
             .catch(console.error);

@@ -3,24 +3,31 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Shield, AlertTriangle, CheckCircle, Search, Filter } from 'lucide-react';
 import { API_BASE } from "../config";
 
+import { ImmuneRule } from "../types";
+import { getAuthHeaders } from "../lib/auth";
+
 const ImmuneSystem: React.FC = () => {
-    const [rules, setRules] = useState<any[]>([]);
+    const [rules, setRules] = useState<ImmuneRule[]>([]);
 
     useEffect(() => {
         const fetchRules = async () => {
             try {
-                // Assuming there's an endpoint for listing immune rules. 
-                // If not, we might need to mock it or update the API.
-                await fetch(`${API_BASE}/api/biome/status`);
-                await fetch(`${API_BASE}/api/synergy/karma`);
+                const res = await fetch(`${API_BASE}/api/synergy/rules`, {
+                    headers: getAuthHeaders()
+                });
+                if (res.ok) {
+                    const data: ImmuneRule[] = await res.json();
 
-                setRules([
-                    { id: 1, pattern: "rm -rf /", action: "BLOCK & LOG", risk: "CRITICAL", active: true },
-                    { id: 2, pattern: "curl .* | bash", action: "QUARANTINE", risk: "HIGH", active: true },
-                    { id: 3, pattern: "env | grep API_KEY", action: "MASK", risk: "MEDIUM", active: true },
-                ]);
+                    // Map backend severity (0-100) to UI risk
+                    const mapped = data.map(r => ({
+                        ...r,
+                        risk: r.severity > 80 ? "CRITICAL" : r.severity > 50 ? "HIGH" : "MEDIUM",
+                        active: true // Backend doesn't have active field, assume true
+                    }));
+                    setRules(mapped);
+                }
             } catch (e) {
-                console.error(e);
+                console.error("Failed to fetch immune rules", e);
             }
         };
 

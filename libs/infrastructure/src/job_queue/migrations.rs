@@ -315,7 +315,6 @@ impl DbInitializer for SqliteJobQueue {
 
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_biome_messages_recipient ON biome_messages(recipient_pubkey);").execute(&self.pool).await.ok();
         
-        // CRDT Sync (Phase 20)
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS timeline_checkpoints (
                 id TEXT PRIMARY KEY,
@@ -324,6 +323,10 @@ impl DbInitializer for SqliteJobQueue {
                 updated_at TEXT DEFAULT (datetime('now'))
             );"
         ).execute(&self.pool).await.ok();
+
+        // Memory Evolution Sprint 2: Procedural Forgetting
+        sqlx::query("ALTER TABLE karma_logs ADD COLUMN is_archived INTEGER NOT NULL DEFAULT 0;").execute(&self.pool).await.ok();
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_karma_logs_active ON karma_logs(is_archived) WHERE is_archived = 0;").execute(&self.pool).await.ok();
 
         info!("✅ [SqliteJobQueue] Database and migrations initialized successfully.");
         Ok(())

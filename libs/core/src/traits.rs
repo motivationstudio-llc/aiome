@@ -54,6 +54,7 @@ pub trait GenerativeEngine: Send + Sync {
 }
 
 /// メディアプロセッサー (旧 MediaForge)
+#[allow(clippy::ptr_arg)]
 #[async_trait]
 pub trait MediaProcessor: Send + Sync {
     /// 複数のアセットを合成して最終出力を生成
@@ -86,6 +87,7 @@ pub enum JobStatus {
     Failed,
 }
 
+#[allow(clippy::to_string_trait_impl)]
 impl ToString for JobStatus {
     fn to_string(&self) -> String {
         match self {
@@ -160,11 +162,18 @@ pub trait JobQueue: Send + Sync {
 
     // --- Phase 10-A.5 The Samsara Protocol ---
     /// RAG-Driven Karma Injection: トピックとSkillIDに関連する過去の教訓を抽出する
-    async fn fetch_relevant_karma(&self, topic: &str, skill_id: &str, limit: i64, current_soul_hash: &str) -> Result<Vec<String>, AiomeError>;
+    async fn fetch_relevant_karma(&self, topic: &str, skill_id: &str, limit: i64, current_soul_hash: &str) -> Result<KarmaSearchResult, AiomeError>;
 
     /// 抽出された教訓（Karma）を保存する
     /// `karma_type`: 'Technical', 'Creative', 'Synthesized'
     async fn store_karma(&self, job_id: &str, skill_id: &str, lesson: &str, karma_type: &str, soul_hash: &str) -> Result<(), AiomeError>;
+
+    /// 指定したKarmaの重みを調整する (Self-Editing)
+    /// `delta`: 変化量 (-20..=20)
+    async fn adjust_karma_weight(&self, karma_id: &str, delta: i32) -> Result<(), AiomeError>;
+
+    /// アーカイブ・能動的忘却スイープを実行
+    async fn karma_decay_sweep(&self) -> Result<u64, AiomeError>;
 
     /// The Zombie Hunter: 一定時間以上 Processing のまま放置されたジョブを Failed に強制移行する
     /// Heartbeat 版: last_heartbeat が timeout 分以上途絶えているものを回収
@@ -349,6 +358,7 @@ pub struct SnsMetricsRecord {
 /// ログ・通知ツール (AiomeLog)
 ///
 /// 稼働ログをSQLiteに記録し、必要に応じてSlack/Discordに通知する。
+#[allow(clippy::ptr_arg)]
 #[async_trait]
 pub trait AiomeLogger: Send + Sync {
     /// 成功ログ
@@ -379,4 +389,21 @@ pub trait AgentAct: Send + Sync {
         input: Self::Input,
         jail: &bastion::fs_guard::Jail,
     ) -> Result<Self::Output, AiomeError>;
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct KarmaSearchResult {
+    pub entries: Vec<String>,
+    pub is_ood: bool,
+    pub max_score: f64,
+}
+
+impl KarmaSearchResult {
+    pub fn empty() -> Self {
+        Self {
+            entries: Vec::new(),
+            is_ood: true,
+            max_score: 0.0,
+        }
+    }
 }

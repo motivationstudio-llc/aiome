@@ -110,7 +110,6 @@ interface VrmRendererProps {
 
 const VrmRenderer: React.FC<VrmRendererProps> = ({ modelUrl, avatarState, onLoaded, onError }) => {
     const isThinking = avatarState === 'thinking';
-    const isSpeaking = avatarState === 'speaking';
     const isAwakened = avatarState === 'awakened';
 
     // Dynamic accent color

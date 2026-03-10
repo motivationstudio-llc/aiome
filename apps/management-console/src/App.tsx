@@ -6,7 +6,8 @@ import {
   Clock,
   GitMerge,
   MessageSquare,
-  BrainCircuit
+  BrainCircuit,
+  Package
 } from "lucide-react";
 import OnboardingModal from "./components/OnboardingModal";
 import SystemBirth from "./components/SystemBirth";
@@ -14,18 +15,25 @@ import BiotopeView from "./components/BiotopeView";
 import Timeline from "./components/Timeline";
 import ImmuneSystem from "./components/ImmuneSystem";
 import AgentConsole from "./components/AgentConsole";
+import SkillVault from "./components/SkillVault";
 import GraphView from "./components/GraphView";
 import DioramaView from "./components/diorama/DioramaView";
 import { useAvatarState } from "./hooks/useAvatarState";
 import { useDisplayMode } from "./hooks/useDisplayMode";
 import { API_BASE } from "./config";
+import { AgentStats } from "./types";
+import { useSystemVitality } from "./hooks/useSystemVitality";
+import { getAuthHeaders } from "./lib/auth";
+import React, { useMemo } from "react";
 
 function App() {
   const [activeTab, setActiveTab] = useState("dashboard");
-  const [stats, setStats] = useState({ level: 1, exp: 0, resonance: 0, creativity: 0 });
+  const [stats, setStats] = useState<AgentStats>({ level: 1, exp: 0 });
   const [isConnected, setIsConnected] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [showBirth, setShowBirth] = useState(false);
+
+  const { lastEvent } = useSystemVitality();
 
   const avatarState = useAvatarState();
   const { mode, setMode } = useDisplayMode();
@@ -38,19 +46,12 @@ function App() {
 
     const fetchStatus = async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/health`);
+        const res = await fetch(`${API_BASE}/api/health`, {
+          headers: getAuthHeaders()
+        });
         if (res.ok) {
           setIsConnected(true);
-          const data = await res.json();
-          // Mocking level from health check for now or fetch real stats
-          setStats(prev => ({ ...prev, level: data.level || 1, exp: data.exp || 0 }));
         }
-
-        // For now, let's try getting karma to see if it works
-        // const karmaRes = await fetch(`${API_BASE}/api/synergy/karma`);
-        // if (karmaRes.ok) {
-        //   // We'll update stats once a dedicated endpoint exists or calculate from karma
-        // }
       } catch (e) {
         setIsConnected(false);
       }
@@ -61,6 +62,14 @@ function App() {
     return () => clearInterval(timer);
   }, []);
 
+  // Update stats from SSE
+  useEffect(() => {
+    if (lastEvent?.type === 'level_up') {
+      const data = lastEvent.data as AgentStats;
+      setStats(prev => ({ ...prev, level: data.level, exp: data.exp }));
+    }
+  }, [lastEvent]);
+
   return (
     <div className="app-container">
       {/* Digital Diorama — Resident Avatar */}
@@ -68,7 +77,7 @@ function App() {
 
       {/* Ambient Background Particles */}
       <div style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 0, overflow: 'hidden' }}>
-        {[...Array(6)].map((_, i) => (
+        {useMemo(() => [...Array(6)].map((_, i) => (
           <motion.div
             key={i}
             animate={{
@@ -90,7 +99,7 @@ function App() {
               filter: 'blur(50px)'
             }}
           />
-        ))}
+        )), [])}
       </div>
 
       {/* Sidebar */}
@@ -136,6 +145,12 @@ function App() {
             active={activeTab === "agent"}
             onClick={() => setActiveTab("agent")}
           />
+          <NavItem
+            icon={<Package size={20} />}
+            label="Skill Vault"
+            active={activeTab === "vault"}
+            onClick={() => setActiveTab("vault")}
+          />
         </nav>
 
         <div style={{ marginTop: 'auto', padding: '1rem', background: 'rgba(255,255,255,0.03)', borderRadius: '12px', fontSize: '0.8rem' }}>
@@ -169,6 +184,7 @@ function App() {
             {activeTab === "graph" && "Resonance Map"}
             {activeTab === "immune" && "Immune System"}
             {activeTab === "agent" && "Agent Console"}
+            {activeTab === "vault" && "Neural Skill Vault"}
           </motion.h2>
 
           <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
@@ -216,6 +232,7 @@ function App() {
             {activeTab === "graph" && <GraphView />}
             {activeTab === "immune" && <ImmuneSystem />}
             {activeTab === "agent" && <AgentConsole />}
+            {activeTab === "vault" && <SkillVault />}
           </motion.div>
         </AnimatePresence>
       </main>
@@ -239,7 +256,7 @@ function App() {
   );
 }
 
-function NavItem({ icon, label, active, onClick }: { icon: any, label: string, active: boolean, onClick: () => void }) {
+function NavItem({ icon, label, active, onClick }: { icon: React.ReactNode, label: string, active: boolean, onClick: () => void }) {
   return (
     <div
       className={`nav-item ${active ? 'active' : ''}`}
