@@ -9,6 +9,7 @@
  */
 
 use async_trait::async_trait;
+use sqlx::Row;
 use aiome_core::traits::{Job, JobQueue, SnsMetricsRecord};
 use aiome_core::contracts::{OracleVerdict, ImmuneRule, ArenaMatch, FederatedKarma};
 use aiome_core::error::AiomeError;
@@ -31,6 +32,7 @@ mod guardrails;
 mod federation;
 mod swarm;
 mod watchtower;
+pub mod crdt;
 
 use migrations::DbInitializer;
 use core_ops::CoreOps;
@@ -41,6 +43,7 @@ use guardrails::GuardrailOps;
 use federation::FederationOps;
 use swarm::SwarmOps;
 use watchtower::WatchtowerOps;
+use crdt::CrdtOps;
 
 /// Job Queue that utilizes SQLite in WAL Mode to allow multi-threaded queue operations.
 #[derive(Clone)]
@@ -210,6 +213,14 @@ impl JobQueue for SqliteJobQueue {
         self.do_sync_samsara_level().await
     }
 
+    async fn record_evolution_event(&self, level: i32, event_type: &str, description: &str, inspiration: Option<&str>, karma_json: Option<&str>) -> Result<(), AiomeError> {
+        self.do_record_evolution_event(level, event_type, description, inspiration, karma_json).await
+    }
+
+    async fn fetch_evolution_history(&self, limit: i64) -> Result<Vec<serde_json::Value>, AiomeError> {
+        self.do_fetch_evolution_history(limit).await
+    }
+
     async fn get_pending_job_count(&self) -> Result<i64, AiomeError> {
         self.do_get_pending_job_count().await
     }
@@ -290,12 +301,60 @@ impl JobQueue for SqliteJobQueue {
         self.do_sign_swarm_payload(payload).await
     }
 
+    async fn sync_local_clock(&self, remote_clock: u64) -> Result<u64, AiomeError> {
+        self.do_sync_local_clock(remote_clock).await
+    }
+
     async fn tick_local_clock(&self) -> Result<u64, AiomeError> {
         self.do_tick_local_clock().await
     }
 
-    async fn sync_local_clock(&self, remote_clock: u64) -> Result<u64, AiomeError> {
-        self.do_sync_local_clock(remote_clock).await
+    async fn storage_gc(&self, threshold_gb: f64) -> Result<u64, AiomeError> {
+        self.do_storage_gc(threshold_gb).await
+    }
+
+    // --- Chat & Memory (The Soul Persistence) ---
+    async fn store_chat_message(&self, channel_id: &str, role: &str, content: &str) -> Result<(), AiomeError> {
+        self.do_insert_chat_message(channel_id, role, content).await
+    }
+
+    async fn fetch_chat_history(&self, channel_id: &str, limit: i64) -> Result<Vec<serde_json::Value>, AiomeError> {
+        self.do_fetch_chat_history(channel_id, limit).await
+    }
+
+    async fn get_biome_topic_status(&self, topic_id: &str) -> Result<Option<(i32, Option<String>)>, AiomeError> {
+        let row = sqlx::query("SELECT turn_count, cooldown_until FROM biome_topics WHERE topic_id = ?")
+            .bind(topic_id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| AiomeError::Infrastructure { reason: e.to_string() })?;
+        
+        Ok(row.map(|r| (r.get("turn_count"), r.get::<Option<String>, _>("cooldown_until"))))
+    }
+
+    async fn advance_biome_turn(&self, topic_id: &str, cooldown_minutes: i64) -> Result<i32, AiomeError> {
+        let now = chrono::Utc::now();
+        let cooldown_until = (now + chrono::Duration::minutes(cooldown_minutes)).to_rfc3339();
+        
+        let row = sqlx::query("UPDATE biome_topics SET turn_count = turn_count + 1, cooldown_until = ?, updated_at = datetime('now') WHERE topic_id = ? RETURNING turn_count")
+            .bind(&cooldown_until)
+            .bind(topic_id)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|e| AiomeError::Infrastructure { reason: e.to_string() })?;
+        
+        Ok(row.get("turn_count"))
+    }
+
+    async fn update_biome_reputation(&self, pubkey: &str, delta: f64) -> Result<f64, AiomeError> {
+        let row = sqlx::query("UPDATE biome_peers SET reputation_score = MAX(0, MIN(100, reputation_score + ?)) WHERE pubkey = ? RETURNING reputation_score")
+            .bind(delta)
+            .bind(pubkey)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|e| AiomeError::Infrastructure { reason: e.to_string() })?;
+        
+        Ok(row.get("reputation_score"))
     }
 }
 

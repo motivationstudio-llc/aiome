@@ -32,6 +32,7 @@ pub trait CoreOps {
     async fn do_fetch_job_retry_count(&self, job_id: &str) -> Result<i64, AiomeError>;
     async fn do_increment_job_retry_count(&self, job_id: &str) -> Result<bool, AiomeError>;
     async fn do_reset_job_retry_count(&self, job_id: &str) -> Result<(), AiomeError>;
+    async fn do_storage_gc(&self, threshold_gb: f64) -> Result<u64, AiomeError>;
 }
 
 #[async_trait]
@@ -378,5 +379,61 @@ impl CoreOps for SqliteJobQueue {
         } else {
             Ok(false)
         }
+    }
+
+    async fn do_storage_gc(&self, threshold_gb: f64) -> Result<u64, AiomeError> {
+        let threshold_bytes = (threshold_gb * 1024.0 * 1024.0 * 1024.0) as u64;
+        
+        // 1. Fetch all jobs with artifacts, ordered by ASC (oldest first)
+        let rows = sqlx::query("SELECT id, output_artifacts FROM jobs WHERE output_artifacts IS NOT NULL AND status IN ('Completed', 'Failed') ORDER BY created_at ASC")
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("GC: failed to fetch artifacts: {}", e) })?;
+
+        let mut current_total_size: u64 = 0;
+        let mut job_artifacts = Vec::new();
+
+        for row in &rows {
+            let id: String = row.get("id");
+            let artifacts_json: String = row.get("output_artifacts");
+            if let Ok(paths) = serde_json::from_str::<Vec<String>>(&artifacts_json) {
+                let mut job_size = 0;
+                for p in &paths {
+                    if let Ok(meta) = std::fs::metadata(p) {
+                        job_size += meta.len();
+                    }
+                }
+                current_total_size += job_size;
+                job_artifacts.push((id, paths, job_size));
+            }
+        }
+
+        if current_total_size <= threshold_bytes {
+            return Ok(0);
+        }
+
+        tracing::info!("♻️ [StorageGC] Current storage usage ({} bytes) exceeds threshold ({} bytes). Starting cleanup.", current_total_size, threshold_bytes);
+
+        let mut deleted_count = 0;
+        let mut target_reduction = current_total_size - threshold_bytes;
+        let mut reduced_so_far = 0;
+
+        for (id, paths, size) in job_artifacts {
+            if reduced_so_far >= target_reduction { break; }
+
+            for p in paths {
+                if std::fs::remove_file(&p).is_ok() {
+                    deleted_count += 1;
+                }
+            }
+            
+            // Clear artifact list in DB to prevent re-scanning
+            let _ = sqlx::query("UPDATE jobs SET output_artifacts = NULL WHERE id = ?").bind(&id).execute(&self.pool).await;
+            
+            reduced_so_far += size;
+        }
+
+        tracing::info!("♻️ [StorageGC] Cleanup complete. Removed {} artifact files.", deleted_count);
+        Ok(deleted_count)
     }
 }

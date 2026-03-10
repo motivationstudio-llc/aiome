@@ -18,6 +18,10 @@ pub trait EvolutionOps {
     async fn do_add_creativity(&self, amount: i32) -> Result<(), AiomeError>;
     async fn do_record_soul_mutation(&self, old_hash: &str, new_hash: &str, reason: &str) -> Result<(), AiomeError>;
     async fn do_sync_samsara_level(&self) -> Result<Option<aiome_core::contracts::SamsaraEvent>, AiomeError>;
+
+    // Evolution Chronicle
+    async fn do_record_evolution_event(&self, level: i32, event_type: &str, description: &str, inspiration: Option<&str>, karma_json: Option<&str>) -> Result<(), AiomeError>;
+    async fn do_fetch_evolution_history(&self, limit: i64) -> Result<Vec<serde_json::Value>, AiomeError>;
 }
 
 #[async_trait]
@@ -117,5 +121,65 @@ impl EvolutionOps for SqliteJobQueue {
         }
 
         Ok(None)
+    }
+
+    async fn do_record_evolution_event(&self, level: i32, event_type: &str, description: &str, inspiration: Option<&str>, karma_json: Option<&str>) -> Result<(), AiomeError> {
+        // 1. Get previous row for hash chaining
+        let prev_record = sqlx::query("SELECT record_hash FROM evolution_chronicle ORDER BY id DESC LIMIT 1")
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| AiomeError::Infrastructure { reason: e.to_string() })?;
+        
+        let prev_hash = match prev_record {
+            Some(row) => row.get::<String, _>("record_hash"),
+            None => "GENESIS".to_string(),
+        };
+
+        // 2. Calculate new hash: hash(prev_hash + description + timestamp)
+        use sha2::{Sha256, Digest};
+        let mut hasher = Sha256::new();
+        hasher.update(prev_hash.as_bytes());
+        hasher.update(description.as_bytes());
+        hasher.update(chrono::Utc::now().to_rfc3339().as_bytes());
+        let record_hash = format!("{:x}", hasher.finalize());
+
+        // 3. Insert
+        sqlx::query("INSERT INTO evolution_chronicle (level_at, event_type, description, inspiration_source, karma_snapshot, prev_record_hash, record_hash) VALUES (?, ?, ?, ?, ?, ?, ?)")
+            .bind(level)
+            .bind(event_type)
+            .bind(description)
+            .bind(inspiration)
+            .bind(karma_json)
+            .bind(&prev_hash)
+            .bind(&record_hash)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| AiomeError::Infrastructure { reason: e.to_string() })?;
+
+        Ok(())
+    }
+
+    async fn do_fetch_evolution_history(&self, limit: i64) -> Result<Vec<serde_json::Value>, AiomeError> {
+        let rows = sqlx::query("SELECT * FROM evolution_chronicle ORDER BY id DESC LIMIT ?")
+            .bind(limit)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| AiomeError::Infrastructure { reason: e.to_string() })?;
+
+        let mut history = Vec::new();
+        for row in rows {
+            let val = serde_json::json!({
+                "id": row.get::<i64, _>("id"),
+                "level": row.get::<i32, _>("level_at"),
+                "event_type": row.get::<String, _>("event_type"),
+                "description": row.get::<String, _>("description"),
+                "inspiration": row.get::<Option<String>, _>("inspiration_source"),
+                "karma": row.get::<Option<String>, _>("karma_snapshot"),
+                "record_hash": row.get::<String, _>("record_hash"),
+                "created_at": row.get::<String, _>("created_at"),
+            });
+            history.push(val);
+        }
+        Ok(history)
     }
 }

@@ -12,9 +12,12 @@
   "app": {
     "windows": [
       {
-        "title": "management-console",
-        "width": 800,
-        "height": 600
+        "title": "Aiome — Digital Diorama",
+        "width": 1280,
+        "height": 800,
+        "resizable": true,
+        "minWidth": 960,
+        "minHeight": 640
       }
     ],
     "security": {

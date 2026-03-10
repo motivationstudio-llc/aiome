@@ -290,13 +290,40 @@ impl DbInitializer for SqliteJobQueue {
                 peer_pubkey TEXT NOT NULL,
                 summary TEXT,
                 status TEXT NOT NULL CHECK(status IN ('Active', 'Archived', 'Blocked')),
+                turn_count INTEGER NOT NULL DEFAULT 0,
+                cooldown_until TEXT,
                 updated_at TEXT DEFAULT (datetime('now'))
             );"
         ).execute(&self.pool).await
         .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to create biome_topics: {}", e) })?;
 
-        sqlx::query("CREATE INDEX IF NOT EXISTS idx_biome_messages_topic ON biome_messages(topic_id);").execute(&self.pool).await.ok();
+        // Evolution Chronicle (The Record of Growth)
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS evolution_chronicle (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                level_at INTEGER NOT NULL,
+                event_type TEXT NOT NULL,
+                description TEXT NOT NULL,
+                inspiration_source TEXT,
+                karma_snapshot TEXT,
+                prev_record_hash TEXT NOT NULL,
+                record_hash TEXT NOT NULL,
+                created_at TEXT DEFAULT (datetime('now'))
+            );"
+        ).execute(&self.pool).await
+        .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to create evolution_chronicle: {}", e) })?;
+
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_biome_messages_recipient ON biome_messages(recipient_pubkey);").execute(&self.pool).await.ok();
+        
+        // CRDT Sync (Phase 20)
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS timeline_checkpoints (
+                id TEXT PRIMARY KEY,
+                automerge_blob BLOB NOT NULL,
+                last_seq INTEGER NOT NULL,
+                updated_at TEXT DEFAULT (datetime('now'))
+            );"
+        ).execute(&self.pool).await.ok();
 
         info!("✅ [SqliteJobQueue] Database and migrations initialized successfully.");
         Ok(())

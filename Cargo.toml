@@ -39,3 +39,4 @@ tower = { version = "0.4", features = ["limit"] }
 futures = "0.3"
 tokio-stream = "0.1"
 async-stream = "0.3"
+automerge = "0.6"

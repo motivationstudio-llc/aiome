@@ -80,8 +80,7 @@ pub fn build_system_instructions(state: &AppState, karma_str: &str) -> String {
     let skill_list = state.wasm_skill_manager.list_skills_with_metadata()
         .iter()
         .map(|m| {
-            let desc = if m.description == "No metadata provided" { "" } else { &m.description };
-            format!("- {}: {} (入力: {})", m.name, desc, m.inputs.first().cloned().unwrap_or_default())
+            format!("- {}: {}", m.name, m.description.split('.').next().unwrap_or(&m.description))
         })
         .collect::<Vec<_>>()
         .join("\n");
@@ -98,15 +97,16 @@ pub fn build_system_instructions(state: &AppState, karma_str: &str) -> String {
     };
     
     format!(
-        "{}[利用可能な Wasm スキル]\n\
+        "{}[利用可能なスキル (概要)]\n\
         {}\n\n\
-        [Forge ツール (内部コマンド)]\n\
+        [システムツール]\n\
+        - describe_skill: {{\"skill_name\": \"...\"}} (スキルの入力スキーマや詳細を取得)\n\
         - forge_skill: {{\"skill_name\": \"...\", \"initial_rust_code\": \"...\", \"description\": \"...\"}}\n\
         - forge_test_run: {{\"skill_name\": \"...\", \"test_input\": \"...\"}}\n\
         - forge_publish: {{\"skill_name\": \"...\"}}\n\n\
         ルール:\n\
         1. スキル・ツールは [CallSkill: 名, {{引数}}] 形式を使用。\n\
-        2. 1ターンにつき1つの [CallSkill] のみ実行可能。\n\
+        2. 詳しく知らないスキルを使う前は、必ず `describe_skill` で詳細を確認してください。\n\
         3. 自分が現在使えるスキルの全スキーマは上記リストを参照。\n\n\
         現在のディレクトリ: {}\n\
         過去の教訓: {}\n\n\
@@ -200,7 +200,14 @@ pub async fn trigger_agent_chat(
                 for (skill_name, skill_input) in calls {
                     info!("🛠️ [AgentLoop] Executing skill: {}", skill_name);
                     
-                    if skill_name.starts_with("forge_") {
+                    if skill_name == "describe_skill" {
+                        #[derive(serde::Deserialize)]
+                        struct DescReq { skill_name: String }
+                        if let Ok(req) = serde_json::from_str::<DescReq>(&skill_input) {
+                            let res = skill_handler::describe_skill(&req.skill_name, &state).await;
+                            skill_results.push(res);
+                        }
+                    } else if skill_name.starts_with("forge_") {
                         match skill_handler::execute_forge_command(&skill_name, &skill_input, &state).await {
                             Ok(res) => skill_results.push(res),
                             Err(e) => skill_results.push(format!("[{} Error: {}]", skill_name, e)),
@@ -221,7 +228,26 @@ pub async fn trigger_agent_chat(
                             if let Ok(req) = serde_json::from_str::<DockerReq>(json_str) {
                                 info!("🐳 [AgentLoop] Delegating task to Docker Shadow Worker...");
                                 let res = docker::delegator::delegate_docker_worker(&req.agent_yaml, &req.task).await;
-                                skill_results.push(format!("[Docker Delegation Result: {}]", res));
+                                
+                                // Stream A-1: Karma Feedback Loop
+                                // Classify error and store karma if needed
+                                let (_weight, k_type, lesson) = docker::karma_bridge::KarmaBridge::distill_karma(&res, 0); // TODO: Track consecutive failures
+                                if !res.is_success() {
+                                    let _ = state.job_queue.store_karma(
+                                        "watchtower_chat_job", // Virtual job_id
+                                        "docker_agent", 
+                                        &lesson, 
+                                        &k_type, 
+                                        "v1_genesis"
+                                    ).await;
+                                }
+
+                                let display_res = if res.is_success() {
+                                    format!("Success ({}ms):\n{}", res.duration_ms, res.stdout)
+                                } else {
+                                    format!("Failed (Code {}): {}", res.exit_code, res.stderr)
+                                };
+                                skill_results.push(format!("[Docker Delegation Result: {}]", display_res));
                             }
                         }
                     }

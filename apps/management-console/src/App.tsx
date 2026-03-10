@@ -1,28 +1,41 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Activity,
   Shield,
-  Dna,
+  Clock,
   GitMerge,
   MessageSquare,
-  Zap,
-  BrainCircuit,
-  RefreshCw,
-  Terminal
+  BrainCircuit
 } from "lucide-react";
-import { Network } from "vis-network";
-import { DataSet } from "vis-data";
-import "./App.css";
-
-const API_BASE = "http://localhost:3015";
+import OnboardingModal from "./components/OnboardingModal";
+import SystemBirth from "./components/SystemBirth";
+import BiotopeView from "./components/BiotopeView";
+import Timeline from "./components/Timeline";
+import ImmuneSystem from "./components/ImmuneSystem";
+import AgentConsole from "./components/AgentConsole";
+import GraphView from "./components/GraphView";
+import DioramaView from "./components/diorama/DioramaView";
+import { useAvatarState } from "./hooks/useAvatarState";
+import { useDisplayMode } from "./hooks/useDisplayMode";
+import { API_BASE } from "./config";
 
 function App() {
   const [activeTab, setActiveTab] = useState("dashboard");
   const [stats, setStats] = useState({ level: 1, exp: 0, resonance: 0, creativity: 0 });
   const [isConnected, setIsConnected] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [showBirth, setShowBirth] = useState(false);
+
+  const avatarState = useAvatarState();
+  const { mode, setMode } = useDisplayMode();
 
   useEffect(() => {
+    const isFirstVisit = localStorage.getItem("aiome_onboarding_done") !== "true";
+    if (isFirstVisit) {
+      setShowOnboarding(true);
+    }
+
     const fetchStatus = async () => {
       try {
         const res = await fetch(`${API_BASE}/api/health`);
@@ -34,10 +47,10 @@ function App() {
         }
 
         // For now, let's try getting karma to see if it works
-        const karmaRes = await fetch(`${API_BASE}/api/synergy/karma`);
-        if (karmaRes.ok) {
-          // We'll update stats once a dedicated endpoint exists or calculate from karma
-        }
+        // const karmaRes = await fetch(`${API_BASE}/api/synergy/karma`);
+        // if (karmaRes.ok) {
+        //   // We'll update stats once a dedicated endpoint exists or calculate from karma
+        // }
       } catch (e) {
         setIsConnected(false);
       }
@@ -50,6 +63,36 @@ function App() {
 
   return (
     <div className="app-container">
+      {/* Digital Diorama — Resident Avatar */}
+      <DioramaView status={avatarState} />
+
+      {/* Ambient Background Particles */}
+      <div style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 0, overflow: 'hidden' }}>
+        {[...Array(6)].map((_, i) => (
+          <motion.div
+            key={i}
+            animate={{
+              x: [Math.random() * 100 + '%', Math.random() * 100 + '%'],
+              y: [Math.random() * 100 + '%', Math.random() * 100 + '%'],
+              opacity: [0.1, 0.3, 0.1],
+            }}
+            transition={{
+              duration: 20 + Math.random() * 20,
+              repeat: Infinity,
+              ease: "linear"
+            }}
+            style={{
+              position: 'absolute',
+              width: 300 + Math.random() * 200,
+              height: 300 + Math.random() * 200,
+              background: i % 2 === 0 ? 'radial-gradient(circle, rgba(0,242,255,0.05) 0%, transparent 70%)' : 'radial-gradient(circle, rgba(188,140,255,0.05) 0%, transparent 70%)',
+              borderRadius: '50%',
+              filter: 'blur(50px)'
+            }}
+          />
+        ))}
+      </div>
+
       {/* Sidebar */}
       <aside className="sidebar">
         <div className="brand">
@@ -61,13 +104,13 @@ function App() {
           <h4>Synergy Hub</h4>
           <NavItem
             icon={<Activity size={20} />}
-            label="Dashboard"
+            label="Biotope"
             active={activeTab === "dashboard"}
             onClick={() => setActiveTab("dashboard")}
           />
           <NavItem
-            icon={<Dna size={20} />}
-            label="Karma Stream"
+            icon={<Clock size={20} />}
+            label="Chronicle"
             active={activeTab === "karma"}
             onClick={() => setActiveTab("karma")}
           />
@@ -107,6 +150,9 @@ function App() {
               style={{ height: '100%', background: 'var(--accent-purple)' }}
             />
           </div>
+          <div style={{ marginTop: '0.5rem', textAlign: 'center', fontSize: '0.65rem', color: 'var(--text-muted)' }}>
+            OPENCLAW CORE v1.0.2
+          </div>
         </div>
       </aside>
 
@@ -118,12 +164,42 @@ function App() {
             animate={{ opacity: 1, x: 0 }}
             key={activeTab}
           >
-            {activeTab.charAt(0).toUpperCase() + activeTab.slice(1)}
+            {activeTab === "dashboard" && "Biotope Overview"}
+            {activeTab === "karma" && "Eternal Chronicle"}
+            {activeTab === "graph" && "Resonance Map"}
+            {activeTab === "immune" && "Immune System"}
+            {activeTab === "agent" && "Agent Console"}
           </motion.h2>
 
-          <div className={`status-badge ${isConnected ? '' : 'disconnected'}`}>
-            <div className={`status-dot ${isConnected ? '' : 'offline'}`} />
-            {isConnected ? "Samsara Hub Connected" : "Connection Lost"}
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+            <div className="display-mode-toggle" style={{ display: 'flex', background: 'rgba(255,255,255,0.05)', padding: '2px', borderRadius: '8px', marginRight: '1rem' }}>
+              <button
+                onClick={() => setMode('vrm')}
+                style={{
+                  padding: '4px 8px', fontSize: '0.7rem', border: 'none', background: mode === 'vrm' ? 'var(--accent-cyan)' : 'transparent',
+                  color: mode === 'vrm' ? '#000' : 'var(--text-muted)', borderRadius: '6px', cursor: 'pointer', transition: 'all 0.2s'
+                }}
+              >🌟 VRM</button>
+              <button
+                onClick={() => setMode('lite')}
+                style={{
+                  padding: '4px 8px', fontSize: '0.7rem', border: 'none', background: mode === 'lite' ? 'var(--accent-cyan)' : 'transparent',
+                  color: mode === 'lite' ? '#000' : 'var(--text-muted)', borderRadius: '6px', cursor: 'pointer', transition: 'all 0.2s'
+                }}
+              >⚡ Lite</button>
+              <button
+                onClick={() => setMode('off')}
+                style={{
+                  padding: '4px 8px', fontSize: '0.7rem', border: 'none', background: mode === 'off' ? 'var(--accent-cyan)' : 'transparent',
+                  color: mode === 'off' ? '#000' : 'var(--text-muted)', borderRadius: '6px', cursor: 'pointer', transition: 'all 0.2s'
+                }}
+              >🚫 Off</button>
+            </div>
+
+            <div className={`status-badge ${isConnected ? '' : 'disconnected'}`}>
+              <div className={`status-dot ${isConnected ? '' : 'offline'}`} />
+              {isConnected ? "Samsara Hub Connected" : "Connection Lost"}
+            </div>
           </div>
         </header>
 
@@ -135,288 +211,43 @@ function App() {
             exit={{ opacity: 0, y: -10 }}
             transition={{ duration: 0.2 }}
           >
-            {activeTab === "dashboard" && <Dashboard stats={stats} isConnected={isConnected} />}
-            {activeTab === "karma" && <KarmaStream />}
+            {activeTab === "dashboard" && <BiotopeView stats={stats} isConnected={isConnected} />}
+            {activeTab === "karma" && <Timeline />}
             {activeTab === "graph" && <GraphView />}
+            {activeTab === "immune" && <ImmuneSystem />}
             {activeTab === "agent" && <AgentConsole />}
           </motion.div>
         </AnimatePresence>
       </main>
+
+      <OnboardingModal
+        isOpen={showOnboarding}
+        onClose={() => {
+          setShowOnboarding(false);
+          localStorage.setItem("aiome_onboarding_done", "true");
+          setShowBirth(true);
+        }}
+      />
+
+      {showBirth && (
+        <SystemBirth onComplete={() => {
+          setShowBirth(false);
+          localStorage.setItem("aiome_birth_shown", "true");
+        }} />
+      )}
     </div>
   );
 }
 
 function NavItem({ icon, label, active, onClick }: { icon: any, label: string, active: boolean, onClick: () => void }) {
   return (
-    <div className={`nav-item ${active ? 'active' : ''}`} onClick={onClick}>
+    <div
+      className={`nav-item ${active ? 'active' : ''}`}
+      onClick={onClick}
+    >
       {icon}
       <span>{label}</span>
-    </div>
-  );
-}
-
-function Dashboard({ isConnected }: { stats: any, isConnected: boolean }) {
-  return (
-    <>
-      <div className="grid-stats">
-        <StatCard label="Resonance Score" value="842" trend="+12.4%" color="var(--accent-cyan)" />
-        <StatCard label="Immune Rules" value="24" trend="Active" color="#10b981" />
-        <StatCard label="Karma Entities" value="156" trend="+5 today" color="var(--accent-purple)" />
-        <StatCard label="Sync Nodes" value="12" trend={isConnected ? "Online" : "Connecting..."} color="#f59e0b" />
-      </div>
-
-      <div className="main-panel">
-        <div className="panel-header">
-          <h3>System Vitality</h3>
-          <div style={{ display: 'flex', gap: '0.5rem' }}>
-            <button className="nav-item" style={{ padding: '0.25rem 0.75rem', fontSize: '0.8rem' }}><RefreshCw size={14} /> Refresh</button>
-          </div>
-        </div>
-        <div style={{ padding: '2rem', display: 'flex', justifyContent: 'center', alignItems: 'center', height: '300px', color: 'var(--text-secondary)' }}>
-          <div style={{ textAlign: 'center' }}>
-            <Activity size={48} color="var(--accent-cyan)" style={{ marginBottom: '1rem', opacity: 0.5 }} />
-            <p>Real-time neural activity metrics will appear here.</p>
-          </div>
-        </div>
-      </div>
-    </>
-  );
-}
-
-function StatCard({ label, value, trend, color }: any) {
-  return (
-    <div className="stat-card">
-      <div className="stat-label">{label}</div>
-      <div className="stat-value" style={{ color: color }}>{value}</div>
-      <div className="stat-trend trend-up">{trend}</div>
-    </div>
-  );
-}
-
-function KarmaStream() {
-  const [karmas, setKarmas] = useState<any[]>([]);
-
-  useEffect(() => {
-    fetch(`${API_BASE}/api/synergy/karma`)
-      .then(res => res.json())
-      .then(data => setKarmas(data))
-      .catch(console.error);
-  }, []);
-
-  return (
-    <div className="main-panel">
-      <div className="panel-header">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-          <Zap size={20} color="var(--accent-cyan)" />
-          <h3>Eternal Karma Log</h3>
-        </div>
-      </div>
-      <div style={{ padding: '1rem', maxHeight: '60vh', overflowY: 'auto' }}>
-        {karmas.length === 0 ? (
-          <p style={{ textAlign: 'center', color: 'var(--text-secondary)', padding: '3rem' }}>No karma recorded in this aeon.</p>
-        ) : (
-          karmas.map((k, i) => (
-            <motion.div
-              initial={{ opacity: 0, x: -10 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: i * 0.05 }}
-              key={k.id || i}
-              style={{
-                padding: '1.25rem',
-                borderBottom: '1px solid var(--border-glass)',
-                background: 'rgba(255,255,255,0.01)',
-                display: 'flex',
-                gap: '1rem',
-                alignItems: 'flex-start'
-              }}
-            >
-              <div style={{
-                width: '32px',
-                height: '32px',
-                borderRadius: '8px',
-                background: k.karma_type === 'Technical' ? 'rgba(0, 242, 255, 0.1)' : 'rgba(188, 140, 255, 0.1)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: k.karma_type === 'Technical' ? 'var(--accent-cyan)' : 'var(--accent-purple)'
-              }}>
-                {k.karma_type === 'Technical' ? <Terminal size={16} /> : <BrainCircuit size={16} />}
-              </div>
-              <div style={{ flex: 1 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 600 }}>{k.karma_type.toUpperCase()} | Job #{k.job_id}</span>
-                  <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>{k.weight}% Weight</span>
-                </div>
-                <div style={{ fontSize: '0.95rem', lineHeight: 1.5 }}>{k.lesson}</div>
-              </div>
-            </motion.div>
-          ))
-        )}
-      </div>
-    </div>
-  );
-}
-
-function GraphView() {
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!containerRef.current) return;
-
-    const initGraph = async () => {
-      try {
-        const response = await fetch(`${API_BASE}/api/synergy/graph`);
-        const data = await response.json();
-
-        const nodes = new DataSet(data.nodes.map((n: any) => ({
-          id: n.id,
-          label: n.label,
-          group: n.group,
-          font: { color: '#f0f2f5', size: 12, face: 'Outfit' },
-          shape: n.group === 'core' ? 'diamond' : 'dot',
-          borderWidth: n.group.endsWith('_global') ? 3 : 1,
-          size: n.group === 'core' ? 30 : 15
-        })));
-
-        const edges = new DataSet(data.edges);
-
-        const options = {
-          groups: {
-            core: { color: { background: '#00f2ff', border: '#fff' } },
-            karma_local: { color: { background: '#bc8cff', border: '#bc8cff' } },
-            karma_global: { color: { background: 'rgba(188, 140, 255, 0.2)', border: '#bc8cff' } },
-            rule_local: { color: { background: '#ff4d94', border: '#ff4d94' } },
-            rule_global: { color: { background: 'rgba(255, 77, 148, 0.2)', border: '#ff4d94' } }
-          },
-          edges: {
-            color: { color: 'rgba(255,255,255,0.1)', highlight: '#00f2ff' },
-            smooth: { type: 'continuous' },
-            width: 1
-          },
-          physics: {
-            enabled: true,
-            barnesHut: { gravitationalConstant: -3000, centralGravity: 0.3, springLength: 120 },
-            stabilization: { iterations: 100 }
-          },
-          interaction: {
-            hover: true,
-            zoomView: true
-          }
-        };
-
-        new Network(containerRef.current!, { nodes, edges } as any, options as any);
-      } catch (e) {
-        console.error("Graph failed", e);
-      }
-    };
-
-    initGraph();
-  }, []);
-
-  return (
-    <div className="main-panel" style={{ height: '70vh' }}>
-      <div className="panel-header">
-        <h3>Synapse Resonance Graph</h3>
-      </div>
-      <div ref={containerRef} style={{ width: '100%', height: 'calc(100% - 60px)' }} />
-    </div>
-  );
-}
-
-function AgentConsole() {
-  const [input, setInput] = useState("");
-  const [history, setHistory] = useState<any[]>([]);
-  const [isTyping, setIsTyping] = useState(false);
-  const chatEndRef = useRef<HTMLDivElement>(null);
-
-  const scrollToBottom = () => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  };
-
-  useEffect(scrollToBottom, [history]);
-
-  const sendMessage = async () => {
-    if (!input.trim()) return;
-    const userMsg = { role: "user", content: input };
-    setHistory(prev => [...prev, userMsg]);
-    setInput("");
-    setIsTyping(true);
-
-    try {
-      // Stream handling would go here for real implementation
-      const res = await fetch(`${API_BASE}/api/agent/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: input, history: history })
-      });
-      const data = await res.json();
-      setHistory(prev => [...prev, { role: "assistant", content: data.response }]);
-    } catch (e) {
-      setHistory(prev => [...prev, { role: "assistant", content: "⚠️ Connection error to OpenClaw layer." }]);
-    } finally {
-      setIsTyping(false);
-    }
-  };
-
-  return (
-    <div className="main-panel" style={{ height: '75vh', display: 'flex', flexDirection: 'column' }}>
-      <div className="panel-header">
-        <h3>Genesis Console</h3>
-        <span style={{ fontSize: '0.8rem', color: '#10b981' }}>Live Link Active</span>
-      </div>
-
-      <div style={{ flex: 1, overflowY: 'auto', padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-        {history.map((m, i) => (
-          <div key={i} style={{
-            alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start',
-            maxWidth: '80%',
-            padding: '1rem',
-            borderRadius: m.role === 'user' ? '16px 16px 0 16px' : '0 16px 16px 16px',
-            background: m.role === 'user' ? 'rgba(0, 242, 255, 0.1)' : 'rgba(255,255,255,0.03)',
-            border: m.role === 'user' ? '1px solid rgba(0, 242, 255, 0.2)' : '1px solid var(--border-glass)',
-            fontSize: '0.95rem',
-            lineHeight: 1.5
-          }}>
-            {m.content}
-          </div>
-        ))}
-        {isTyping && <div style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', fontStyle: 'italic' }}>Agent is thinking...</div>}
-        <div ref={chatEndRef} />
-      </div>
-
-      <div style={{ padding: '1.5rem', borderTop: '1px solid var(--border-glass)', background: 'rgba(0,0,0,0.1)' }}>
-        <div style={{ display: 'flex', gap: '1rem' }}>
-          <input
-            value={input}
-            onChange={e => setInput(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && sendMessage()}
-            placeholder="Issue skill sequence command..."
-            style={{
-              flex: 1,
-              background: '#0d1117',
-              border: '1px solid var(--border-glass)',
-              borderRadius: '12px',
-              padding: '0.75rem 1rem',
-              color: '#fff',
-              outline: 'none'
-            }}
-          />
-          <button
-            onClick={sendMessage}
-            style={{
-              background: 'var(--accent-cyan)',
-              color: '#000',
-              border: 'none',
-              borderRadius: '12px',
-              padding: '0 1.5rem',
-              fontWeight: 600,
-              cursor: 'pointer'
-            }}
-          >
-            Send
-          </button>
-        </div>
-      </div>
+      {active && <motion.div layoutId="active-pill" className="nav-active-bar" />}
     </div>
   );
 }

@@ -5,8 +5,9 @@ use axum::{
 };
 use crate::AppState;
 use aiome_core::biome::BiomeMessage;
+use aiome_core::biome::dialogue::DialogueManager;
 use aiome_core::traits::JobQueue;
-use tracing::info;
+use tracing::{info, warn};
 use sqlx::Row;
 
 #[derive(serde::Deserialize)]
@@ -63,6 +64,12 @@ pub async fn send_message(
 
     let clock = state.job_queue.tick_local_clock().await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": e.to_string()}))))?;
+
+    // 0. Biome Dialogue Constraint Check
+    if let Err(e) = DialogueManager::check_and_advance_turn(&*state.job_queue, &req.topic_id).await {
+        warn!("🚫 [Biome] Message blocked: {}", e);
+        return Err((StatusCode::FORBIDDEN, Json(serde_json::json!({"error": e.to_string()}))));
+    }
 
     // Phase 20 MVP: Plaintext, Karma Root CID placeholder
     let karma_root = "cid_placeholder_v20".to_string();

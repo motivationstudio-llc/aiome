@@ -1,0 +1,54 @@
+/* 
+ * Aiome Design System - Tokens
+ * Core variables for a premium, futuristic, and responsive UI.
+ */
+
+:root {
+    /* Colors - Core Dark Theme */
+    --bg-dark-obsidian: #05070a;
+    --bg-dark-sidebar: rgba(10, 12, 18, 0.95);
+    --bg-glass-heavy: rgba(16, 20, 28, 0.8);
+    --bg-glass-light: rgba(255, 255, 255, 0.03);
+
+    /* Brand Gradients & Accents */
+    --accent-cyan: #00f2ff;
+    --accent-cyan-rgb: 0, 242, 255;
+    --accent-purple: #bc8cff;
+    --accent-purple-rgb: 188, 140, 255;
+    --accent-rose: #ff4d94;
+    --accent-rose-rgb: 255, 77, 148;
+    --accent-emerald: #10b981;
+    --accent-amber: #f59e0b;
+
+    /* Text */
+    --text-primary: #f0f2f5;
+    --text-secondary: #94a3b8;
+    --text-muted: #64748b;
+
+    /* Borders & Glass */
+    --border-glass: rgba(255, 255, 255, 0.08);
+    --border-glass-bright: rgba(255, 255, 255, 0.15);
+
+    /* Effects */
+    --glow-cyan: 0 0 25px rgba(0, 242, 255, 0.25);
+    --glow-purple: 0 0 25px rgba(188, 140, 255, 0.25);
+    --glow-rose: 0 0 25px rgba(255, 77, 148, 0.25);
+    --shadow-deep: 0 20px 50px rgba(0, 0, 0, 0.5);
+
+    /* Typography */
+    --font-main: 'Outfit', 'Inter', system-ui, -apple-system, sans-serif;
+    --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+
+    /* Spacing */
+    --space-xs: 0.5rem;
+    --space-sm: 1rem;
+    --space-md: 1.5rem;
+    --space-lg: 2rem;
+    --space-xl: 3rem;
+
+    /* Radius */
+    --radius-sm: 8px;
+    --radius-md: 12px;
+    --radius-lg: 20px;
+    --radius-xl: 28px;
+}

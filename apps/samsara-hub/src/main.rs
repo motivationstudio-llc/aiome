@@ -117,6 +117,8 @@ async fn main() -> anyhow::Result<()> {
         // Biome Routes (Phase 20)
         .route("/api/v1/biome/relay", post(biome_relay_handler))
         .route("/api/v1/biome/ws", get(biome_ws_handler))
+        // CRDT Timeline Relay
+        .route("/api/v1/relay/timeline/sync", post(timeline_sync_handler))
         .layer(cors)
         .layer(DefaultBodyLimit::max(5 * 1024 * 1024)) // 5MB limit
         .layer(
@@ -267,6 +269,15 @@ async fn init_hub_db(pool: &SqlitePool) -> anyhow::Result<()> {
     ).execute(pool).await?;
 
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_biome_relay_recipient ON biome_relay_queue(recipient_pubkey) WHERE is_delivered = 0;").execute(pool).await?;
+    
+    // CRDT Timeline (Phase 20)
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS hub_timeline (
+            id TEXT PRIMARY KEY,
+            automerge_blob BLOB NOT NULL,
+            updated_at TEXT DEFAULT (datetime('now'))
+        );"
+    ).execute(pool).await?;
 
     info!("✅ Hub Database initialized (Approved & Quarantine layers + BFT/Reputation & Biome).");
     Ok(())
@@ -775,6 +786,57 @@ async fn approval_worker(pool: SqlitePool, token: CancellationToken) {
             tokio::time::sleep(Duration::from_secs(5)).await;
         }
     }
+}
+
+use automerge::AutoCommit;
+
+#[derive(Deserialize)]
+pub struct TimelineSyncRequest {
+    pub hub_id: String,
+    pub automerge_blob: Vec<u8>,
+}
+
+async fn timeline_sync_handler(
+    State(state): State<Arc<HubState>>,
+    headers: HeaderMap,
+    Json(payload): Json<TimelineSyncRequest>,
+) -> impl IntoResponse {
+    use subtle::ConstantTimeEq;
+
+    let auth = headers.get(axum::http::header::AUTHORIZATION).and_then(|h| h.to_str().ok()).unwrap_or("");
+    let expected = format!("Bearer {}", state.secret.expose_secret());
+    let is_auth_valid = if auth.len() == expected.len() {
+        bool::from(auth.as_bytes().ct_eq(expected.as_bytes()))
+    } else {
+        false
+    };
+
+    if !is_auth_valid {
+        return (StatusCode::UNAUTHORIZED, "Unauthorized").into_response();
+    }
+
+    // Load or Init Hub Master Doc
+    let mut hub_doc = match sqlx::query_scalar::<sqlx::Sqlite, Vec<u8>>("SELECT automerge_blob FROM hub_timeline WHERE id = ?")
+        .bind(&payload.hub_id).fetch_optional(&state.pool).await {
+            Ok(Some(blob)) => AutoCommit::load(&blob).unwrap_or_else(|_| AutoCommit::new()),
+            _ => AutoCommit::new(),
+        };
+
+    // Load and Merge Node's Doc
+    if let Ok(mut node_doc) = AutoCommit::load(&payload.automerge_blob) {
+        let _ = hub_doc.merge(&mut node_doc);
+    }
+
+    let finalized_blob = hub_doc.save();
+
+    // Persist Hub Master Doc
+    let _ = sqlx::query("INSERT INTO hub_timeline (id, automerge_blob) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET automerge_blob = ?, updated_at = datetime('now')")
+        .bind(&payload.hub_id).bind(&finalized_blob).bind(&finalized_blob).execute(&state.pool).await;
+
+    (StatusCode::OK, Json(serde_json::json!({
+        "status": "synchronized",
+        "automerge_blob": finalized_blob
+    }))).into_response()
 }
 
 

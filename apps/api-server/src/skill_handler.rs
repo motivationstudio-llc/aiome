@@ -119,3 +119,17 @@ pub async fn execute_wasm_skill(
         }
     }
 }
+
+pub async fn describe_skill(
+    skill_name: &str,
+    state: &AppState
+) -> String {
+    if let Some(meta) = state.wasm_skill_manager.get_metadata(skill_name) {
+        format!(
+            "[Detail for {}]\nDescription: {}\nOperations: {:?}\nInput Schema: {:?}\nPermissions: {:?}",
+            skill_name, meta.description, meta.capabilities, meta.inputs, meta.permissions
+        )
+    } else {
+        format!("[Skill {} not found or has no detailed metadata]", skill_name)
+    }
+}

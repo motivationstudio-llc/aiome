@@ -112,8 +112,10 @@ impl SoulMutator {
         fs::write(&evolving_soul_path, &new_soul_content).await
             .map_err(|e| format!("Failed to write EVOLVING_SOUL.md: {}", e))?;
 
-        // 6. Record in JobQueue
+        // 6. Record in JobQueue & Evolution Chronicle
+        let stats = job_queue.get_agent_stats().await?;
         let _ = job_queue.record_soul_mutation(&old_hash, &new_hash, "Autonomous Evolution via Samsara Engine").await;
+        let _ = job_queue.record_evolution_event(stats.level, "SoulMutation", &format!("Soul mutated from {} to {}. Reason: Autonomous Evolution.", old_hash, new_hash), None, None).await;
 
         Ok(true)
     }
@@ -166,6 +168,7 @@ impl SoulMutator {
         fs::write(&evolving_soul_path, &content).await?;
         
         let _ = job_queue.record_soul_mutation("LEVEL_UP", &format!("LV{}", new_level), "Level Up Behavioral Shift").await;
+        let _ = job_queue.record_evolution_event(new_level, "TacticalShift", &proposal, None, None).await;
 
         info!("✅ [SoulMutator] Behavioral Shift completed for Level {}.", new_level);
         Ok(())

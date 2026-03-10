@@ -1,0 +1,158 @@
+/* 
+ * Aiome Design System - Animations & Transitions
+ * Micro-animations and transitions to make the UI feel alive.
+ */
+
+/* Transitions and Timing */
+:root {
+    --timing-soft: cubic-bezier(0.16, 1, 0.3, 1);
+    --timing-bouncy: cubic-bezier(0.34, 1.56, 0.64, 1);
+    --timing-linear: linear;
+    --speed-fast: 0.2s;
+    --speed-base: 0.4s;
+    --speed-slow: 0.7s;
+}
+
+/* Base Keyframes */
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+@keyframes slideInUp {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes slideInRight {
+    from {
+        opacity: 0;
+        transform: translateX(-15px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+@keyframes breathEffect {
+    0% {
+        transform: scale(1);
+        opacity: 0.7;
+    }
+
+    50% {
+        transform: scale(1.05);
+        opacity: 1;
+    }
+
+    100% {
+        transform: scale(1);
+        opacity: 0.7;
+    }
+}
+
+@keyframes holographicSweep {
+    0% {
+        background-position: -200% 0;
+    }
+
+    100% {
+        background-position: 200% 0;
+    }
+}
+
+@keyframes floatElement {
+
+    0%,
+    100% {
+        transform: translateY(0);
+    }
+
+    50% {
+        transform: translateY(-8px);
+    }
+}
+
+@keyframes glowPulse {
+
+    0%,
+    100% {
+        opacity: 0.4;
+    }
+
+    50% {
+        opacity: 0.8;
+    }
+}
+
+/* Animations Classes */
+.ani-fade {
+    animation: fadeIn var(--speed-base) var(--timing-soft) forwards;
+}
+
+.ani-slide-up {
+    animation: slideInUp var(--speed-base) var(--timing-soft) forwards;
+}
+
+.ani-slide-right {
+    animation: slideInRight var(--speed-base) var(--timing-soft) forwards;
+}
+
+.ani-breath {
+    animation: breathEffect 4s infinite var(--timing-soft);
+}
+
+.ani-float {
+    animation: floatElement 6s infinite var(--timing-soft);
+}
+
+/* Hover Animations Classes */
+.h-hover:hover {
+    transform: translateY(-4px);
+    transition: transform var(--speed-fast) var(--timing-soft);
+}
+
+.h-holographic {
+    background: linear-gradient(90deg,
+            rgba(255, 255, 255, 0) 0%,
+            rgba(255, 255, 255, 0.05) 50%,
+            rgba(255, 255, 255, 0) 100%);
+    background-size: 200% 100%;
+    transition: all var(--speed-base) var(--timing-soft);
+}
+
+.h-holographic:hover {
+    animation: holographicSweep 1.5s var(--timing-linear) infinite;
+}
+
+/* Specific component animations */
+.avatar-breath {
+    animation: breathEffect 3s infinite var(--timing-soft);
+    filter: drop-shadow(0 0 10px rgba(var(--accent-cyan-rgb), 0.5));
+}
+
+.neural-line-animate {
+    stroke-dasharray: 1000;
+    stroke-dashoffset: 1000;
+    animation: dashCycle 5s linear infinite;
+}
+
+@keyframes dashCycle {
+    to {
+        stroke-dashoffset: 0;
+    }
+}

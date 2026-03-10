@@ -28,3 +28,4 @@ pub mod validator;
 pub mod skill_arena;
 pub mod llm;
 pub mod security;
+pub mod publisher;

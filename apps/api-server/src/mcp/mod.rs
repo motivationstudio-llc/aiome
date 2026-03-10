@@ -1,6 +1,7 @@
 pub mod server;
 pub mod types;
 pub mod client;
+pub mod discovery;
 
 use axum::{
     routing::{get, post},

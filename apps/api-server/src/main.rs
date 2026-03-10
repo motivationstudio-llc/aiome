@@ -76,11 +76,16 @@ async fn main() {
         // Agent Routes
         .route("/api/agent/chat", axum::routing::post(routes::agent::trigger_agent_chat))
         .route("/api/agent/chat/stream", axum::routing::post(stream::trigger_agent_chat_stream))
+        .route("/api/system/vitality", get(stream::trigger_system_vitality_stream))
         // Biome & Expression Skeletons
         .route("/api/biome/status", get(routes::biome::biome_status))
         .route("/api/biome/list", get(routes::biome::list_messages))
         .route("/api/biome/send", axum::routing::post(routes::biome::send_message))
         .route("/api/expression/status", get(routes::expression::expression_status))
+        // Skill Management
+        .route("/api/skills", get(routes::skill::list_skills))
+        .route("/api/skills/import", axum::routing::post(routes::skill::import_skill))
+        .route("/api/skills/mcp/spawn", axum::routing::post(routes::skill::spawn_mcp_server))
         .nest("/api/v1/mcp", mcp::router())
         .layer(
             tower::ServiceBuilder::new()
@@ -395,6 +400,39 @@ async fn main() {
                     }
                 } else {
                     break;
+                }
+            }
+
+            // 3. Content Publishing: Pick up 'publication' jobs
+            if let Ok(Some(job)) = jq_clone.dequeue(&["publication"]).await {
+                use infrastructure::publisher::{PublishPipeline, mock_x::MockXPublisher};
+                let pipeline = PublishPipeline::new(vec![Box::new(MockXPublisher)]);
+                
+                let metadata = serde_json::from_str(job.karma_directives.as_deref().unwrap_or("{}")).unwrap_or(serde_json::json!({}));
+                let platform = metadata["platform"].as_str().unwrap_or("X");
+                
+                // For 'publication' jobs, the 'topic' field contains the content string
+                let content = job.topic.clone();
+                let artifacts_res: Result<Vec<String>, _> = serde_json::from_str(job.output_artifacts.as_deref().unwrap_or("[]"));
+                let artifacts: Vec<std::path::PathBuf> = artifacts_res.unwrap_or_default().into_iter().map(std::path::PathBuf::from).collect();
+                
+                match pipeline.run_job(platform, &content, &artifacts, &metadata).await {
+                    Ok(cid) => {
+                        let _ = jq_clone.complete_job(&job.id, None).await;
+                        let _ = jq_clone.link_sns_data(&job.id, platform, &cid).await;
+                        info!("✅ [BackgroundWorker] Publication successful (ID: {}).", cid);
+                    },
+                    Err(e) => {
+                        let _ = jq_clone.fail_job(&job.id, &e.to_string()).await;
+                        warn!("⚠️ [BackgroundWorker] Publication failed: {:?}", e);
+                    }
+                }
+            }
+
+            // 4. Storage GC: Maintain clean environment (Threshold: 10GB)
+            if let Ok(purged) = jq_clone.storage_gc(10.0).await {
+                if purged > 0 {
+                    info!("♻️ [BackgroundWorker] Storage GC: Purged {} old artifacts.", purged);
                 }
             }
 

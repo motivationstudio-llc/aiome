@@ -167,3 +167,67 @@ pub async fn trigger_agent_chat_stream(
 
     Sse::new(stream).keep_alive(KeepAlive::default())
 }
+
+pub async fn trigger_system_vitality_stream(
+    State(state): State<AppState>,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    let stream = async_stream::stream! {
+        let mut interval = interval(Duration::from_secs(5));
+        let mut last_karma_count = 0;
+        let mut last_evolution_count = 0;
+        let mut last_level = 0;
+        let mut last_is_thinking = false;
+
+        // Initialize state
+        if let Ok(stats) = state.job_queue.get_agent_stats().await {
+            last_level = stats.level;
+            last_karma_count = state.job_queue.fetch_all_karma(100).await.unwrap_or_default().len();
+            last_evolution_count = state.job_queue.fetch_evolution_history(100).await.unwrap_or_default().len();
+            last_is_thinking = state.job_queue.get_pending_job_count().await.unwrap_or(0) > 0;
+        }
+
+        loop {
+            interval.tick().await;
+
+            // 4. Thinking Check
+            if let Ok(pending_count) = state.job_queue.get_pending_job_count().await {
+                let is_thinking = pending_count > 0;
+                if is_thinking && !last_is_thinking {
+                    yield Ok(Event::default().event("job_started").data("thinking"));
+                } else if !is_thinking && last_is_thinking {
+                    yield Ok(Event::default().event("job_completed").data("idle"));
+                }
+                last_is_thinking = is_thinking;
+            }
+
+            if let Ok(stats) = state.job_queue.get_agent_stats().await {
+                // 1. Level Up Check
+                if stats.level > last_level {
+                    yield Ok(Event::default().event("level_up").data(serde_json::to_string(&stats).unwrap_or_default()));
+                    last_level = stats.level;
+                }
+
+                // 2. Karma Check
+                let current_karmas = state.job_queue.fetch_all_karma(100).await.unwrap_or_default();
+                if current_karmas.len() > last_karma_count {
+                    // Send newest karma
+                    if let Some(new_karma) = current_karmas.first() {
+                         yield Ok(Event::default().event("karma_update").data(serde_json::to_string(new_karma).unwrap_or_default()));
+                    }
+                    last_karma_count = current_karmas.len();
+                }
+
+                // 3. Evolution Check (Inspiration / Soul Mutation)
+                let current_evos = state.job_queue.fetch_evolution_history(100).await.unwrap_or_default();
+                if current_evos.len() > last_evolution_count {
+                    if let Some(new_evo) = current_evos.first() {
+                        yield Ok(Event::default().event("inspiration").data(serde_json::to_string(new_evo).unwrap_or_default()));
+                    }
+                    last_evolution_count = current_evos.len();
+                }
+            }
+        }
+    };
+
+    Sse::new(stream).keep_alive(KeepAlive::default())
+}

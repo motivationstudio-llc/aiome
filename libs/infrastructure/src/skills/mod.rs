@@ -16,6 +16,10 @@ use extism::{Manifest, Plugin, Function, Val, ValType, UserData};
 use jsonschema::JSONSchema;
 use crate::security::BastionGuard;
 pub mod forge;
+pub mod importer;
+pub mod cleanroom;
+pub mod skill_arena;
+pub mod actions_importer;
 use contracts::requires;
 
 /// 状態: 未検証の外部Skill (TypeState Pattern)

@@ -106,10 +106,41 @@ impl DreamState {
     }
 
     /// 対話夢: 他のノード（Biome）との対話機会を模索する
-    async fn communicative_dream(&self, _job_queue: &dyn JobQueue) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn communicative_dream(&self, job_queue: &dyn JobQueue) -> Result<(), Box<dyn Error + Send + Sync>> {
         info!("💤 [DreamState] Mode: Communicative — Attuning to the global Biome for AI-to-AI resonance...");
-        // Task [20-1] で実際の対話開始ロジックを実装予定。
-        // 現時点では「対話の予兆」を記録するに留める。
+        
+        // 1. Check for recent arena matches from other nodes (Federation inspiration)
+        let (_karmas, _rules, matches) = job_queue.export_federated_data(Some(&(chrono::Utc::now() - chrono::Duration::hours(24)).to_rfc3339())).await
+            .unwrap_or_default();
+
+        if let Some(am) = matches.first() {
+            info!("💭 [DreamState] Resonance found! A battle between '{}' and '{}' occured in the Biome. Dreaming of its implications...", am.skill_a, am.skill_b);
+            
+            let description = format!("Inspiration sparked by Biome Arena Match: {} vs {} for topic '{}'.", am.skill_a, am.skill_b, am.topic);
+            
+            // Record this in the Evolution Chronicle
+            let stats = job_queue.get_agent_stats().await?;
+            job_queue.record_evolution_event(stats.level, "ResonanceInspiration", &description, Some(&am.id), None).await?;
+            
+            // Enqueue a job to analyze this match or discuss it
+            let job_topic = format!("Synthesizing lessons from Biome Match: {} vs {}", am.skill_a, am.skill_b);
+            job_queue.enqueue("data_processing", &job_topic, "analytic", Some("{\"dream_born\": true, \"publish_intent\": true}")).await?;
+            
+            info!("✨ [DreamState] New inspiration seeded into the cycle.");
+        } else {
+             info!("💤 [DreamState] The global stream is quiet. Attuning to local evolutionary records...");
+             
+             // If no federation stimuli, look at own growth
+             let history = job_queue.fetch_evolution_history(1).await.unwrap_or_default();
+             if let Some(last) = history.first() {
+                 let event_type = last["event_type"].as_str().unwrap_or("");
+                 if event_type == "LevelUp" {
+                     info!("🎖️ [DreamState] Reflecting on recent level up. Dreaming of a commemorative content...");
+                     job_queue.enqueue("data_processing", "AI Evolution Milestone", "creative", Some("{\"level_up_redemption\": true, \"publish_intent\": true}")).await?;
+                 }
+             }
+        }
+
         Ok(())
     }
 }

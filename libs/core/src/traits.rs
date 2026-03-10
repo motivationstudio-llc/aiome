@@ -238,6 +238,19 @@ pub trait JobQueue: Send + Sync {
     /// Samsaraレベルを同期 (成長計算の実行)
     async fn sync_samsara_level(&self) -> Result<Option<crate::contracts::SamsaraEvent>, AiomeError>;
 
+    // --- Biome Dialogue Expansion ---
+    /// 対象トピックの現在のターン数とクールダウン期限を取得
+    async fn get_biome_topic_status(&self, topic_id: &str) -> Result<Option<(i32, Option<String>)>, AiomeError>;
+    /// トピックを1ターン進め、クールダウンを設定する
+    async fn advance_biome_turn(&self, topic_id: &str, cooldown_minutes: i64) -> Result<i32, AiomeError>;
+    /// 指定Pubkeyの評判（Reputation）を更新する
+    async fn update_biome_reputation(&self, pubkey: &str, delta: f64) -> Result<f64, AiomeError>;
+
+    /// 進化イベントの記録 (Evolution Chronicle)
+    async fn record_evolution_event(&self, level: i32, event_type: &str, description: &str, inspiration: Option<&str>, karma_json: Option<&str>) -> Result<(), AiomeError>;
+    /// 進化履歴の取得
+    async fn fetch_evolution_history(&self, limit: i64) -> Result<Vec<serde_json::Value>, AiomeError>;
+
     /// 保留中（Pending）のジョブ数を取得する
     async fn get_pending_job_count(&self) -> Result<i64, AiomeError>;
 
@@ -291,6 +304,23 @@ pub trait JobQueue: Send + Sync {
     async fn tick_local_clock(&self) -> Result<u64, AiomeError>;
     /// Update local clock based on a received remote clock value
     async fn sync_local_clock(&self, remote_clock: u64) -> Result<u64, AiomeError>;
+    
+    /// The Scavenger: Storage GC (Remove old artifact files if total size > threshold_gb)
+    async fn storage_gc(&self, threshold_gb: f64) -> Result<u64, AiomeError>;
+
+    // --- Chat & Memory (The Soul Persistence) ---
+    async fn store_chat_message(&self, channel_id: &str, role: &str, content: &str) -> Result<(), AiomeError>;
+    async fn fetch_chat_history(&self, channel_id: &str, limit: i64) -> Result<Vec<serde_json::Value>, AiomeError>;
+}
+
+/// コンテンツ・パブリッシャー (Publishing Engine)
+#[async_trait]
+pub trait Publisher: Send + Sync {
+    /// SNS やブログ等のプラットフォームに投稿する
+    async fn publish(&self, content: &str, media_paths: &[PathBuf], metadata: &serde_json::Value) -> Result<String, AiomeError>;
+    
+    /// プラットフォーム名を取得 (例: "Twitter", "LocalBlog", "MockX")
+    fn platform_name(&self) -> &str;
 }
 
 /// 相互監視型 LLM バリデーター (The Constitutional Prosecutor)
