@@ -35,6 +35,7 @@ mod guardrails;
 mod federation;
 mod swarm;
 mod watchtower;
+mod taxonomy;
 pub mod crdt;
 
 use migrations::DbInitializer;
@@ -134,8 +135,8 @@ impl JobQueue for SqliteJobQueue {
         self.do_fetch_relevant_karma(topic, skill_id, limit, current_soul_hash).await
     }
 
-    async fn store_karma(&self, job_id: &str, skill_id: &str, lesson: &str, karma_type: &str, soul_hash: &str) -> Result<(), AiomeError> {
-        self.do_store_karma(job_id, skill_id, lesson, karma_type, soul_hash).await
+    async fn store_karma(&self, job_id: &str, skill_id: &str, lesson: &str, karma_type: &str, soul_hash: &str, domain: Option<&str>, subtopic: Option<&str>) -> Result<(), AiomeError> {
+        self.do_store_karma(job_id, skill_id, lesson, karma_type, soul_hash, domain, subtopic).await
     }
 
     async fn adjust_karma_weight(&self, karma_id: &str, delta: i32) -> Result<(), AiomeError> {
@@ -409,8 +410,8 @@ impl SqliteJobQueue {
         self.do_fetch_raw_karma_for_skill(skill).await
     }
 
-    pub async fn apply_distilled_karma(&self, skill: &str, distilled_lesson: &str, old_karma_ids: &[String], soul_hash: &str) -> Result<(), AiomeError> {
-        self.do_apply_distilled_karma(skill, distilled_lesson, old_karma_ids, soul_hash).await
+    pub async fn apply_distilled_karma(&self, skill: &str, distilled_lesson: &str, old_karma_ids: &[String], soul_hash: &str, domain: Option<&str>, subtopic: Option<&str>) -> Result<(), AiomeError> {
+        self.do_apply_distilled_karma(skill, distilled_lesson, old_karma_ids, soul_hash, domain, subtopic).await
     }
 
     pub async fn increment_oracle_retry_count(&self, record_id: i64) -> Result<bool, AiomeError> {

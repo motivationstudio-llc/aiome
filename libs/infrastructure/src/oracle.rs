@@ -47,7 +47,19 @@ impl Oracle {
             self.soul_md, topic, style, views, likes, engagement_rate, comments_json
         );
 
-        let prompt_text = "審判を下せ。 JSON format: { \"alignment_score\": 0.0-1.0, \"growth_score\": 0.0-1.0, \"lesson\": \"string\", \"should_evolve\": bool, \"reasoning\": \"string\" }";
+        let prompt_text = r#"審判を下せ。必ず以下の JSON 形式で出力せよ。
+{
+  "alignment_score": 0.0-1.0,
+  "growth_score": 0.0-1.0,
+  "lesson": "string",
+  "should_evolve": bool,
+  "reasoning": "string",
+  "classification": {
+    "domain": "Technical | Creative | Governance | Social | Meta",
+    "subtopic": "string",
+    "reasoning": "why this category?"
+  }
+}"#;
 
         let response = self.provider.complete(prompt_text, Some(&preamble)).await?;
 

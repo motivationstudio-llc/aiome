@@ -78,6 +78,7 @@ async fn main() {
         // Agent Routes
         .route("/api/agent/chat", axum::routing::post(routes::agent::trigger_agent_chat))
         .route("/api/agent/chat/stream", axum::routing::post(stream::trigger_agent_chat_stream))
+        .route("/api/agent/feedback", axum::routing::post(routes::agent::handle_karma_feedback))
         .route("/api/system/vitality", get(stream::trigger_system_vitality_stream))
         // Biome & Expression Skeletons
         .route("/api/biome/status", get(routes::biome::biome_status))

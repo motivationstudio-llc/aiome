@@ -35,7 +35,7 @@ impl AdaptiveImmuneSystem {
             return Ok(0);
         }
 
-        let logs_concat = result.entries.join("\n---\n");
+        let logs_concat = result.entries.iter().map(|e| e.lesson.as_str()).collect::<Vec<_>>().join("\n---\n");
         let preamble = "あなたはシステムの自己防衛エンジンです。以下のログから攻撃パターンを特定し、防御ルールを1つ JSON 形式で作成してください。\nFormat: {\"pattern\": \"攻撃的な単語や正規表現\", \"severity\": 0-100, \"action\": \"Block/Alert\"}";
 
         let response = self.provider.complete(&logs_concat, Some(preamble)).await?;

@@ -6,21 +6,20 @@
  */
 
 use async_trait::async_trait;
-use aiome_core::traits::{Job, JobStatus, JobQueue};
+use aiome_core::traits::{Job, JobStatus, JobQueue, KarmaSearchResult, KarmaEntry};
 use aiome_core::error::AiomeError;
 use sqlx::Row;
 use uuid::Uuid;
 use chrono::Utc;
 use tracing::{warn, info};
 use std::time::Instant;
-use aiome_core::traits::KarmaSearchResult;
 use super::SqliteJobQueue;
 use super::{try_get_optional_string, cosine_similarity};
 
 #[async_trait]
 pub trait KarmaOps {
-    async fn do_fetch_relevant_karma(&self, topic: &str, skill_id: &str, limit: i64, current_soul_hash: &str) -> Result<aiome_core::traits::KarmaSearchResult, AiomeError>;
-    async fn do_store_karma(&self, job_id: &str, skill_id: &str, lesson: &str, karma_type: &str, soul_hash: &str) -> Result<(), AiomeError>;
+    async fn do_fetch_relevant_karma(&self, topic: &str, skill_id: &str, limit: i64, current_soul_hash: &str) -> Result<KarmaSearchResult, AiomeError>;
+    async fn do_store_karma(&self, job_id: &str, skill_id: &str, lesson: &str, karma_type: &str, soul_hash: &str, domain: Option<&str>, subtopic: Option<&str>) -> Result<(), AiomeError>;
     async fn do_fetch_undistilled_jobs(&self, limit: i64) -> Result<Vec<Job>, AiomeError>;
     async fn do_mark_karma_extracted(&self, job_id: &str) -> Result<(), AiomeError>;
     async fn do_fetch_all_karma(&self, limit: i64) -> Result<Vec<serde_json::Value>, AiomeError>;
@@ -43,14 +42,19 @@ impl KarmaOps for SqliteJobQueue {
             }
         }
 
+        // Sprint 3-C: FTS5 Query Sanitization (Red Team R4)
+        let sanitized_topic = topic.replace('"', "\"\"");
+        let fts_query = format!("\"{}\"", sanitized_topic);
+
         let candidate_limit = limit * 5;
         let rows = sqlx::query(
-            "SELECT id, lesson, soul_version_hash, karma_embedding,
-              max(0, weight - (julianday('now') - julianday(created_at)) * 0.5) AS sql_weight
-             FROM karma_logs 
-             WHERE weight > 0 AND is_archived = 0 AND (related_skill = ? OR related_skill = 'global') 
-             ORDER BY sql_weight DESC, created_at DESC LIMIT ?"
+            "SELECT k.id, k.lesson, k.soul_version_hash, k.karma_embedding,
+              (k.weight * 0.1 + (CASE WHEN k.rowid IN (SELECT rowid FROM karma_fts WHERE lesson MATCH ?) THEN 50.0 ELSE 0.0 END)) AS sql_weight
+             FROM karma_logs k
+             WHERE k.weight > 0 AND k.is_archived = 0 AND (k.related_skill = ? OR k.related_skill = 'global') 
+             ORDER BY sql_weight DESC, k.created_at DESC LIMIT ?"
         )
+        .bind(&fts_query)
         .bind(skill_id)
         .bind(candidate_limit)
         .fetch_all(&self.pool)
@@ -62,6 +66,7 @@ impl KarmaOps for SqliteJobQueue {
         }
 
         struct KarmaCandidate {
+            id: String,
             lesson: String,
             hash: Option<String>,
             sql_weight: f64,
@@ -78,6 +83,7 @@ impl KarmaOps for SqliteJobQueue {
             });
 
             KarmaCandidate {
+                id: r.get("id"),
                 lesson: r.get("lesson"),
                 hash: try_get_optional_string(r, "soul_version_hash"),
                 sql_weight: r.get("sql_weight"),
@@ -119,7 +125,10 @@ impl KarmaOps for SqliteJobQueue {
                     lesson_text = format!("[LEGACY KARMA - from an older Soul version]\n{}", lesson_text);
                 }
             }
-            final_entries.push(lesson_text);
+            final_entries.push(KarmaEntry {
+                id: candidate.id,
+                lesson: lesson_text,
+            });
         }
 
         // OOD Check (R3/Sprint 1-A)
@@ -151,7 +160,7 @@ impl KarmaOps for SqliteJobQueue {
         Ok(result)
     }
 
-    async fn do_store_karma(&self, job_id: &str, skill_id: &str, lesson: &str, karma_type: &str, soul_hash: &str) -> Result<(), AiomeError> {
+    async fn do_store_karma(&self, job_id: &str, skill_id: &str, lesson: &str, karma_type: &str, soul_hash: &str, domain: Option<&str>, subtopic: Option<&str>) -> Result<(), AiomeError> {
         let id = Uuid::new_v4().to_string();
         let now = Utc::now().to_rfc3339();
 
@@ -170,8 +179,10 @@ impl KarmaOps for SqliteJobQueue {
             }
         }
 
+        let domain = domain.unwrap_or("general");
+
         sqlx::query(
-            "INSERT INTO karma_logs (id, job_id, karma_type, related_skill, lesson, soul_version_hash, created_at, karma_embedding, node_id, lamport_clock, signature) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            "INSERT INTO karma_logs (id, job_id, karma_type, related_skill, lesson, soul_version_hash, created_at, karma_embedding, node_id, lamport_clock, signature, domain, subtopic) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         )
         .bind(&id)
         .bind(job_id)
@@ -184,6 +195,8 @@ impl KarmaOps for SqliteJobQueue {
         .bind(&node_id)
         .bind(clock as i64)
         .bind(signature)
+        .bind(domain)
+        .bind(subtopic)
         .execute(&self.pool)
         .await
         .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to store karma for job {}: {}", job_id, e) })?;

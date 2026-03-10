@@ -496,8 +496,8 @@ impl WasmSkillManager {
         for entry in result.entries {
             // エントリ内にスキル名が含まれているか、あるいはスキル名そのものが関連しているかチェック
             for skill in &available_skills {
-                if entry.to_lowercase().contains(&skill.to_lowercase()) {
-                    info!("🧠 [Self-Wiring] Found relevant skill '{}' via knowledge: {}", skill, entry);
+                if entry.lesson.to_lowercase().contains(&skill.to_lowercase()) {
+                    info!("🧠 [Self-Wiring] Found relevant skill '{}' via knowledge: {}", skill, entry.lesson);
                     return Ok(Some(skill.clone()));
                 }
             }

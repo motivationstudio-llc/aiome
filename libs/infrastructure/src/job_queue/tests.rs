@@ -14,12 +14,27 @@
 //! 全 15 テストで心臓部の不変性を機械的に保証する。
 
 use super::SqliteJobQueue;
-use aiome_core::traits::{JobQueue, JobStatus};
+use aiome_core::traits::{JobQueue, JobStatus, KarmaEntry, KarmaSearchResult};
+use sqlx::Row;
 use async_trait::async_trait;
 use tracing::{warn, info};
-use aiome_core::llm_provider::EmbeddingProvider;
+use aiome_core::llm_provider::{EmbeddingProvider, LlmProvider};
 use std::sync::Arc;
 use chrono::Utc;
+use aiome_core::error::AiomeError;
+
+#[derive(Debug)]
+struct MockLlmProvider {
+    json_response: String,
+}
+
+#[async_trait]
+impl LlmProvider for MockLlmProvider {
+    async fn complete(&self, _prompt: &str, _system: Option<&str>) -> Result<String, AiomeError> {
+        Ok(self.json_response.clone())
+    }
+    fn name(&self) -> &str { "Mock" }
+}
 
 /// テスト用のユニーク一時ファイル JobQueue を作成
 /// 各テストが独自のDBファイルを持ち、ロック競合を回避する
@@ -58,10 +73,10 @@ async fn test_sqlite_job_queue_dequeue_lifecycle() {
 async fn test_sqlite_job_queue_karma_storage() {
     let (jq, _tmp) = create_test_queue().await;
     let job_id = jq.enqueue("Task", "Topic", "Style", None).await.unwrap();
-    jq.store_karma(&job_id, "skill-1", "Lesson 1", "Technical", "hash1").await.unwrap();
+    jq.store_karma(&job_id, "skill-1", "Lesson 1", "Technical", "hash1", None, None).await.unwrap();
     let result = jq.fetch_relevant_karma("Topic", "skill-1", 10, "hash1").await.unwrap();
     assert_eq!(result.entries.len(), 1);
-    assert_eq!(result.entries[0], "Lesson 1");
+    assert_eq!(result.entries[0].lesson, "Lesson 1");
 }
 
 #[tokio::test]
@@ -166,7 +181,7 @@ async fn test_sqlite_job_queue_execution_logs() {
 async fn test_sqlite_job_queue_unincorporate_karma() {
     let (jq, _tmp) = create_test_queue().await;
     let job_id = jq.enqueue("Task", "Topic", "Style", None).await.unwrap();
-    jq.store_karma(&job_id, "skill-1", "Distilled Lesson", "Technical", "hash-old").await.unwrap();
+    jq.store_karma(&job_id, "skill-1", "Distilled Lesson", "Technical", "hash-old", None, None).await.unwrap();
     
     let uninc = jq.fetch_unincorporated_karma(10, "hash-new").await.unwrap();
     assert_eq!(uninc.len(), 1);
@@ -177,7 +192,7 @@ async fn test_sqlite_job_queue_unincorporate_karma() {
 async fn test_sqlite_job_queue_incorporate_karma() {
     let (jq, _tmp) = create_test_queue().await;
     let job_id = jq.enqueue("Task", "Topic", "Style", None).await.unwrap();
-    jq.store_karma(&job_id, "skill-1", "Distilled Lesson", "Technical", "hash-old").await.unwrap();
+    jq.store_karma(&job_id, "skill-1", "Distilled Lesson", "Technical", "hash-old", None, None).await.unwrap();
     let uninc = jq.fetch_unincorporated_karma(10, "hash-new").await.unwrap();
     let id = uninc[0].get("id").and_then(|v| v.as_str()).unwrap().to_string();
     
@@ -248,24 +263,24 @@ async fn test_sqlite_job_queue_karma_soul_coherence() {
     let soul_v1 = "550e8400-e29b-41d4-a716-446655440000";
     let soul_v2 = "660e8400-e29b-41d4-a716-446655440001";
     
-    jq.store_karma(&job_id, "soul_skill", "[V1 KARMA]", "Synthesized", soul_v1).await.unwrap();
+    jq.store_karma(&job_id, "soul_skill", "[V1 KARMA]", "Synthesized", soul_v1, None, None).await.unwrap();
     
     let result_v1 = jq.fetch_relevant_karma("Soul Test", "soul_skill", 10, soul_v1).await.unwrap();
     assert_eq!(result_v1.entries.len(), 1);
-    assert_eq!(result_v1.entries[0], "[V1 KARMA]");
+    assert_eq!(result_v1.entries[0].lesson, "[V1 KARMA]");
 
     // Implementation returns legacy marked karma instead of empty list
     let result_v2_legacy = jq.fetch_relevant_karma("Soul Test Legacy", "soul_skill", 10, soul_v2).await.unwrap();
     assert_eq!(result_v2_legacy.entries.len(), 1);
-    assert!(result_v2_legacy.entries[0].contains("[LEGACY KARMA"));
+    assert!(result_v2_legacy.entries[0].lesson.contains("[LEGACY KARMA"));
 
     let job_id2 = jq.enqueue("Task", "Topic 2", "Style", None).await.unwrap();
-    jq.store_karma(&job_id2, "soul_skill", "[V2 KARMA]", "Synthesized", soul_v2).await.unwrap();
+    jq.store_karma(&job_id2, "soul_skill", "[V2 KARMA]", "Synthesized", soul_v2, None, None).await.unwrap();
     
     let result_v2 = jq.fetch_relevant_karma("Soul Test Final", "soul_skill", 10, soul_v2).await.unwrap();
     assert_eq!(result_v2.entries.len(), 2); 
-    assert!(result_v2.entries.iter().any(|k| k.contains("[LEGACY KARMA") && k.contains("[V1 KARMA]")));
-    assert!(result_v2.entries.iter().any(|k| k == "[V2 KARMA]"));
+    assert!(result_v2.entries.iter().any(|k| k.lesson.contains("[LEGACY KARMA") && k.lesson.contains("[V1 KARMA]")));
+    assert!(result_v2.entries.iter().any(|k| k.lesson == "[V2 KARMA]"));
 }
 
 #[derive(Debug)]
@@ -307,7 +322,7 @@ async fn test_sqlite_job_queue_karma_ood_detection() {
 async fn test_sqlite_job_queue_karma_cache_hit() {
     let (jq, _tmp) = create_test_queue().await;
     let job_id = jq.enqueue("Task", "Cache Test", "Style", None).await.unwrap();
-    jq.store_karma(&job_id, "skill-1", "Cached Lesson", "Technical", "hash1").await.unwrap();
+    jq.store_karma(&job_id, "skill-1", "Cached Lesson", "Technical", "hash1", None, None).await.unwrap();
     
     // First call - fills cache
     let _ = jq.fetch_relevant_karma("Cache Test", "skill-1", 10, "hash1").await.unwrap();
@@ -317,5 +332,100 @@ async fn test_sqlite_job_queue_karma_cache_hit() {
     
     // Second call - should hit cache
     let result2 = jq.fetch_relevant_karma("Cache Test", "skill-1", 10, "hash1").await.unwrap();
-    assert_eq!(result2.entries[0], "Cached Lesson"); // Cache hit
+    assert_eq!(result2.entries[0].lesson, "Cached Lesson"); // Cache hit
+}
+
+#[tokio::test]
+async fn test_sqlite_job_queue_karma_weight_clamp() {
+    let (jq, _tmp) = create_test_queue().await;
+    let job_id = jq.enqueue("Task", "Topic", "Style", None).await.unwrap();
+    jq.store_karma(&job_id, "skill-1", "Lesson", "Technical", "hash1", None, None).await.unwrap();
+
+    // Default weight is 100 or inherited. Let's find the id.
+    let row = sqlx::query("SELECT id, weight FROM karma_logs LIMIT 1").fetch_one(&jq.pool).await.unwrap();
+    let kid: String = row.get("id");
+    
+    // Clamp Max
+    jq.adjust_karma_weight(&kid, 50).await.unwrap();
+    let row_max = sqlx::query("SELECT weight FROM karma_logs WHERE id = ?").bind(&kid).fetch_one(&jq.pool).await.unwrap();
+    assert_eq!(row_max.get::<i64, _>("weight"), 100);
+
+    // Clamp Min
+    jq.adjust_karma_weight(&kid, -150).await.unwrap();
+    let row_min = sqlx::query("SELECT weight FROM karma_logs WHERE id = ?").bind(&kid).fetch_one(&jq.pool).await.unwrap();
+    assert_eq!(row_min.get::<i64, _>("weight"), 0);
+}
+
+#[tokio::test]
+async fn test_sqlite_job_queue_karma_forgetting_sweep() {
+    let (jq, _tmp) = create_test_queue().await;
+    let job_id = jq.enqueue("Task", "Topic", "Style", None).await.unwrap();
+    
+    // 1. Weak memory (low weight) + unused
+    jq.store_karma(&job_id, "skill-1", "Weak Lesson", "Technical", "hash1", None, None).await.unwrap();
+    sqlx::query("UPDATE karma_logs SET weight = 2, last_applied_at = datetime('now', '-91 days') WHERE lesson = 'Weak Lesson'").execute(&jq.pool).await.unwrap();
+
+    // 2. Another weak/old memory
+    jq.store_karma(&job_id, "skill-1", "Old Lesson", "Technical", "hash1", None, None).await.unwrap();
+    sqlx::query("UPDATE karma_logs SET weight = 3, last_applied_at = datetime('now', '-100 days') WHERE lesson = 'Old Lesson'").execute(&jq.pool).await.unwrap();
+
+    // 3. Fresh strong memory
+    jq.store_karma(&job_id, "skill-1", "Strong Lesson", "Technical", "hash1", None, None).await.unwrap();
+    
+    // 4. Strong but old memory (should NOT be archived because weight is high)
+    jq.store_karma(&job_id, "skill-1", "Old Strong Lesson", "Technical", "hash1", None, None).await.unwrap();
+    sqlx::query("UPDATE karma_logs SET weight = 80, last_applied_at = datetime('now', '-200 days') WHERE lesson = 'Old Strong Lesson'").execute(&jq.pool).await.unwrap();
+
+    // Run sweep
+    let archived = jq.karma_decay_sweep().await.unwrap();
+    assert_eq!(archived, 2); // Weak + Old (now weak) should be archived
+
+    // Verify search excludes archived
+    let result = jq.fetch_relevant_karma("Topic", "skill-1", 10, "hash1").await.unwrap();
+    // Strong Lesson and Old Strong Lesson should remain
+    assert_eq!(result.entries.len(), 2);
+    let lessons: Vec<String> = result.entries.iter().map(|e| e.lesson.clone()).collect();
+    assert!(lessons.contains(&"Strong Lesson".to_string()));
+    assert!(lessons.contains(&"Old Strong Lesson".to_string()));
+}
+#[tokio::test]
+async fn test_sqlite_job_queue_karma_fts_match() {
+    let (jq, _tmp) = create_test_queue().await;
+    let job_id = jq.enqueue("Task", "Topic", "Style", None).await.unwrap();
+    
+    // 1. Generic lesson
+    jq.store_karma(&job_id, "skill-1", "Generic baking recipe", "Technical", "hash1", None, None).await.unwrap();
+    // 2. Focused lesson with keyword 'security'
+    jq.store_karma(&job_id, "skill-1", "Security Best Practices for bakers", "Technical", "hash1", None, None).await.unwrap();
+    
+    // Search for 'security'
+    let result = jq.fetch_relevant_karma("security", "skill-1", 10, "hash1").await.unwrap();
+    assert_eq!(result.entries.len(), 2);
+    // The one with 'Security' in text should be first due to FTS5 boost (50.0)
+    assert!(result.entries[0].lesson.contains("Security"));
+    assert!(!result.is_ood);
+}
+
+#[tokio::test]
+async fn test_karma_taxonomy_classification() {
+    let mock = MockLlmProvider {
+        json_response: r#"{ "domain": "Technical", "subtopic": "Security", "reasoning": "Lesson about security." }"#.to_string(),
+    };
+    
+    let result = super::taxonomy::KarmaTaxonomy::classify(&mock, "Always use parameterized queries").await.unwrap();
+    assert_eq!(result.domain, "Technical");
+    assert_eq!(result.subtopic, "Security");
+}
+
+#[tokio::test]
+async fn test_karma_taxonomy_fallback() {
+    let mock = MockLlmProvider {
+        json_response: "garbage".to_string(),
+    };
+    
+    let result = super::taxonomy::KarmaTaxonomy::classify(&mock, "Always use parameterized queries").await;
+    assert!(result.is_err());
+    
+    let fb = super::taxonomy::KarmaTaxonomy::fallback();
+    assert_eq!(fb.domain, "general");
 }

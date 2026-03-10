@@ -29,7 +29,7 @@ pub async fn execute_forge_command(
                         },
                         Err(e) => {
                             let err_msg = format!("Forge failed: {}", e);
-                            state.job_queue.store_karma("forge", &req.skill_name, &err_msg, "failure", "current").await.ok();
+                            state.job_queue.store_karma("forge", &req.skill_name, &err_msg, "failure", "current", None, None).await.ok();
                             Err(err_msg)
                         }
                     }

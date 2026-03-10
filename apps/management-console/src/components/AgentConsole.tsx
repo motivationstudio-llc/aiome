@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { Send, Cpu, Sparkles, Bot } from 'lucide-react';
+import { Bot, Send, Cpu, Brain, Sparkles, ThumbsUp, ThumbsDown } from 'lucide-react';
 import { API_BASE } from "../config";
 import { ChatMessage } from '../types';
 import { getAuthHeaders } from '../lib/auth';
@@ -12,6 +12,7 @@ const AgentConsole: React.FC = () => {
     const [streamingText, setStreamingText] = useState("");
     const chatEndRef = useRef<HTMLDivElement>(null);
     const [status, setStatus] = useState<string>("IDLE");
+    const [relevantKarma, setRelevantKarma] = useState<string | null>(null);
 
     const scrollToBottom = () => {
         chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -29,6 +30,7 @@ const AgentConsole: React.FC = () => {
         setIsTyping(true);
         setStreamingText("");
         setStatus("THINKING");
+        setRelevantKarma(null);
 
         try {
             const response = await fetch(`${API_BASE}/api/agent/chat/stream`, {
@@ -76,6 +78,8 @@ const AgentConsole: React.FC = () => {
                             setHistory(prev => [...prev, { role: "assistant", content: `🚨 Error: ${data}`, isError: true }]);
                         } else if (currentEvent === 'done') {
                             setStatus("IDLE");
+                        } else if (currentEvent === 'karma') {
+                            setRelevantKarma(data);
                         }
                     }
                 }
@@ -90,6 +94,32 @@ const AgentConsole: React.FC = () => {
         } finally {
             setIsTyping(false);
             setStatus("IDLE");
+        }
+    };
+
+    const handleFeedback = async (_index: number, type: 'positive' | 'negative') => {
+        if (!relevantKarma) return;
+
+        // Extract the first lesson from the karma string (simplified)
+        const lessonMatch = relevantKarma.match(/- (.*)/);
+        const lesson = lessonMatch ? lessonMatch[1] : relevantKarma;
+
+        try {
+            await fetch(`${API_BASE}/api/agent/feedback`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...getAuthHeaders()
+                },
+                body: JSON.stringify({
+                    lesson: lesson,
+                    is_positive: type === 'positive'
+                })
+            });
+            setStatus(`FEEDBACK RECORDED: ${type.toUpperCase()}`);
+            setTimeout(() => setStatus("IDLE"), 2000);
+        } catch (e) {
+            console.error("Failed to send feedback", e);
         }
     };
 
@@ -131,6 +161,33 @@ const AgentConsole: React.FC = () => {
                     </div>
                 )}
 
+                {relevantKarma && (
+                    <motion.div
+                        initial={{ opacity: 0, y: -10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="glass-panel"
+                        style={{
+                            padding: '1.2rem',
+                            background: relevantKarma.includes('見つかりませんでした')
+                                ? 'rgba(255, 82, 82, 0.08)'
+                                : 'rgba(0, 243, 255, 0.03)',
+                            border: `1px solid ${relevantKarma.includes('見つかりませんでした') ? 'rgba(255, 82, 82, 0.2)' : 'rgba(0, 243, 255, 0.1)'}`,
+                            borderLeftWidth: '4px',
+                            borderLeftColor: relevantKarma.includes('見つかりませんでした') ? '#ff5252' : '#00f3ff',
+                            fontSize: '0.8rem',
+                            marginBottom: '1rem',
+                        }}
+                    >
+                        <div style={{ fontWeight: 800, fontSize: '0.7rem', color: 'rgba(255,255,255,0.5)', marginBottom: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.6rem', letterSpacing: '0.1em' }}>
+                            <Brain size={14} color={relevantKarma.includes('見つかりませんでした') ? '#ff5252' : '#00f3ff'} />
+                            {relevantKarma.includes('見つかりませんでした') ? 'OUT-OF-DOMAIN DETECTED' : 'SYNAPTIC MEMORY RETRIEVED'}
+                        </div>
+                        <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.5, color: 'rgba(255,255,255,0.8)' }}>
+                            {relevantKarma}
+                        </div>
+                    </motion.div>
+                )}
+
                 {history.map((m, i) => (
                     <motion.div
                         key={i}
@@ -161,6 +218,25 @@ const AgentConsole: React.FC = () => {
                         }}>
                             {m.content}
                         </div>
+
+                        {m.role === 'assistant' && !m.isError && i === history.length - 1 && relevantKarma && (
+                            <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.2rem', opacity: 0.6 }}>
+                                <button
+                                    onClick={() => handleFeedback(i, 'positive')}
+                                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}
+                                    title="Helpful Lesson"
+                                >
+                                    <ThumbsUp size={14} hover-color="var(--accent-emerald)" />
+                                </button>
+                                <button
+                                    onClick={() => handleFeedback(i, 'negative')}
+                                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}
+                                    title="Not Helpful Lesson"
+                                >
+                                    <ThumbsDown size={14} hover-color="var(--accent-rose)" />
+                                </button>
+                            </div>
+                        )}
                     </motion.div>
                 ))}
 

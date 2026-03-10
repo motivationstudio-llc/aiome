@@ -162,8 +162,21 @@ pub async fn trigger_agent_chat(
         })).into_response();
     }
 
-    let karmas: Vec<serde_json::Value> = state.job_queue.fetch_all_karma(3).await.unwrap_or_default();
-    let karma_str = karmas.iter().map(|k| format!("- {}", k["lesson"].as_str().unwrap_or(""))).collect::<Vec<_>>().join("\n");
+    let soul_hash = {
+        let soul = std::fs::read_to_string("SOUL.md").unwrap_or_default();
+        let evolving_soul = std::fs::read_to_string("EVOLVING_SOUL.md").unwrap_or_default();
+        let mut h: u64 = 0;
+        for b in format!("{}{}", soul, evolving_soul).as_bytes() {
+            h = h.wrapping_add(*b as u64).wrapping_mul(31);
+        }
+        format!("{:x}", h)
+    };
+
+    let karma_result = state.job_queue.fetch_relevant_karma(&payload.prompt, "global", 5, &soul_hash).await.unwrap_or_else(|_| aiome_core::traits::KarmaSearchResult::empty());
+    let mut karma_str = karma_result.entries.iter().map(|e| format!("- {}", e.lesson)).collect::<Vec<_>>().join("\n");
+    if karma_result.is_ood {
+        karma_str.push_str("\n[NOTICE: 関連する過去の教訓は見つかりませんでした。]");
+    }
 
     let history_len = payload.history.len();
     let start_idx = if history_len > 10 { history_len - 10 } else { 0 };
@@ -238,7 +251,9 @@ pub async fn trigger_agent_chat(
                                         "docker_agent", 
                                         &lesson, 
                                         &k_type, 
-                                        "v1_genesis"
+                                        "v1_genesis",
+                                        None, 
+                                        None
                                     ).await;
                                 }
 
@@ -276,4 +291,21 @@ pub async fn trigger_agent_chat(
         "status": "success",
         "reply": final_reply
     })).into_response()
+}
+
+#[derive(Deserialize)]
+pub struct KarmaFeedbackRequest {
+    pub karma_id: String,
+    pub is_positive: bool,
+}
+
+pub async fn handle_karma_feedback(
+    State(state): State<AppState>,
+    Json(payload): Json<KarmaFeedbackRequest>,
+) -> impl IntoResponse {
+    let delta = if payload.is_positive { 5 } else { -10 };
+    match state.job_queue.adjust_karma_weight(&payload.karma_id, delta).await {
+        Ok(_) => (StatusCode::OK, "Feedback recorded").into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Error: {}", e)).into_response(),
+    }
 }

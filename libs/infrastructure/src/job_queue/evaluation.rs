@@ -183,9 +183,14 @@ impl EvaluationOps for SqliteJobQueue {
             let karma_id = Uuid::new_v4().to_string();
             let now = Utc::now().to_rfc3339();
 
+            let (domain, subtopic) = match &verdict.classification {
+                Some(c) => (Some(c.domain.as_str()), Some(c.subtopic.as_str())),
+                None => (None, None),
+            };
+
             sqlx::query(
-                "INSERT INTO karma_logs (id, job_id, karma_type, related_skill, lesson, weight, soul_version_hash, created_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+                "INSERT INTO karma_logs (id, job_id, karma_type, related_skill, lesson, weight, soul_version_hash, created_at, domain, subtopic)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
             )
             .bind(&karma_id)
             .bind(&job_id)
@@ -195,6 +200,8 @@ impl EvaluationOps for SqliteJobQueue {
             .bind(weight)
             .bind(soul_hash)
             .bind(&now)
+            .bind(domain.unwrap_or("general"))
+            .bind(subtopic)
             .execute(&mut *tx)
             .await
             .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to update Karma logs: {}", e) })?;

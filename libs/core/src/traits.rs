@@ -166,7 +166,7 @@ pub trait JobQueue: Send + Sync {
 
     /// 抽出された教訓（Karma）を保存する
     /// `karma_type`: 'Technical', 'Creative', 'Synthesized'
-    async fn store_karma(&self, job_id: &str, skill_id: &str, lesson: &str, karma_type: &str, soul_hash: &str) -> Result<(), AiomeError>;
+    async fn store_karma(&self, job_id: &str, skill_id: &str, lesson: &str, karma_type: &str, soul_hash: &str, domain: Option<&str>, subtopic: Option<&str>) -> Result<(), AiomeError>;
 
     /// 指定したKarmaの重みを調整する (Self-Editing)
     /// `delta`: 変化量 (-20..=20)
@@ -392,8 +392,14 @@ pub trait AgentAct: Send + Sync {
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct KarmaEntry {
+    pub id: String,
+    pub lesson: String,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct KarmaSearchResult {
-    pub entries: Vec<String>,
+    pub entries: Vec<KarmaEntry>,
     pub is_ood: bool,
     pub max_score: f64,
 }

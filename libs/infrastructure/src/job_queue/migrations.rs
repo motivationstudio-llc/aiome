@@ -328,6 +328,18 @@ impl DbInitializer for SqliteJobQueue {
         sqlx::query("ALTER TABLE karma_logs ADD COLUMN is_archived INTEGER NOT NULL DEFAULT 0;").execute(&self.pool).await.ok();
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_karma_logs_active ON karma_logs(is_archived) WHERE is_archived = 0;").execute(&self.pool).await.ok();
 
+        // Sprint 3-A: FTS5 (High-speed Text Search Layer)
+        sqlx::query("CREATE VIRTUAL TABLE IF NOT EXISTS karma_fts USING fts5(lesson, content=karma_logs, content_rowid=rowid);").execute(&self.pool).await.ok();
+        // Synchronization Triggers
+        sqlx::query("CREATE TRIGGER IF NOT EXISTS karma_fts_ai AFTER INSERT ON karma_logs BEGIN INSERT INTO karma_fts(rowid, lesson) VALUES (new.rowid, new.lesson); END;").execute(&self.pool).await.ok();
+        sqlx::query("CREATE TRIGGER IF NOT EXISTS karma_fts_ad AFTER DELETE ON karma_logs BEGIN INSERT INTO karma_fts(karma_fts, rowid, lesson) VALUES('delete', old.rowid, old.lesson); END;").execute(&self.pool).await.ok();
+        sqlx::query("CREATE TRIGGER IF NOT EXISTS karma_fts_au AFTER UPDATE OF lesson ON karma_logs BEGIN INSERT INTO karma_fts(karma_fts, rowid, lesson) VALUES('delete', old.rowid, old.lesson); INSERT INTO karma_fts(rowid, lesson) VALUES(new.rowid, new.lesson); END;").execute(&self.pool).await.ok();
+
+        // Sprint 3-B: Taxonomy (Hierarchical Classification)
+        sqlx::query("ALTER TABLE karma_logs ADD COLUMN domain TEXT DEFAULT 'general';").execute(&self.pool).await.ok();
+        sqlx::query("ALTER TABLE karma_logs ADD COLUMN subtopic TEXT;").execute(&self.pool).await.ok();
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_karma_taxonomy ON karma_logs(domain, related_skill);").execute(&self.pool).await.ok();
+
         info!("✅ [SqliteJobQueue] Database and migrations initialized successfully.");
         Ok(())
     }

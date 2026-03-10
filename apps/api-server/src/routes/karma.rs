@@ -28,7 +28,9 @@ pub async fn trigger_failure_demo(
         "wasm_bridge_skill",
         "Inconsistency during external binary calls (Buffer Overflow risk)",
         "Technical",
-        "genesis_soul"
+        "genesis_soul",
+        None, 
+        None
     ).await {
         Ok(_) => info!("✅ [DemoHandler] Karma stored successfully in local DB (Job: {}).", real_job_id),
         Err(e) => warn!("❌ [DemoHandler] Failed to store karma: {:?}", e),

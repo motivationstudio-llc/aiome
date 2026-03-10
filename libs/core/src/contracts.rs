@@ -303,6 +303,21 @@ pub struct OracleVerdict {
     pub should_evolve: bool,
     /// 内部推論
     pub reasoning: String,
+    /// Sprint 3-B: 教訓の分類 (Taxonomy)
+    pub classification: Option<KarmaClassification>,
+}
+
+/// Sprint 3-B: Hierarchical Classification (Taxonomy)
+/// R1: Strict JSON Protocol 準拠
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct KarmaClassification {
+    /// 大分類 (Technical, Creative, Governance, Social, etc.)
+    pub domain: String,
+    /// 小分類 (特定のトピック)
+    pub subtopic: String,
+    /// なぜその分類にしたかの推論 (デバッグ・監査用)
+    pub reasoning: String,
 }
 
 // --- Phase 12-C: Adaptive Immune System & Skill Arena ---

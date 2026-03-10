@@ -22,7 +22,7 @@ pub trait WatchtowerOps {
     async fn do_purge_old_distilled_chats(&self, days: i64) -> Result<u64, AiomeError>;
     async fn do_fetch_skills_for_distillation(&self, threshold: i64) -> Result<Vec<String>, AiomeError>;
     async fn do_fetch_raw_karma_for_skill(&self, skill: &str) -> Result<Vec<(String, String)>, AiomeError>;
-    async fn do_apply_distilled_karma(&self, skill: &str, distilled_lesson: &str, old_karma_ids: &[String], soul_hash: &str) -> Result<(), AiomeError>;
+    async fn do_apply_distilled_karma(&self, skill: &str, distilled_lesson: &str, old_karma_ids: &[String], soul_hash: &str, domain: Option<&str>, subtopic: Option<&str>) -> Result<(), AiomeError>;
     async fn do_adjust_karma_weight(&self, karma_id: &str, delta: i32) -> Result<(), AiomeError>;
     async fn do_karma_decay_sweep(&self) -> Result<u64, AiomeError>;
     async fn do_increment_oracle_retry_count(&self, record_id: i64) -> Result<bool, AiomeError>;
@@ -174,7 +174,7 @@ impl WatchtowerOps for SqliteJobQueue {
         Ok(result.rows_affected())
     }
 
-    async fn do_apply_distilled_karma(&self, skill: &str, distilled_lesson: &str, old_karma_ids: &[String], soul_hash: &str) -> Result<(), AiomeError> {
+    async fn do_apply_distilled_karma(&self, skill: &str, distilled_lesson: &str, old_karma_ids: &[String], soul_hash: &str, domain: Option<&str>, subtopic: Option<&str>) -> Result<(), AiomeError> {
         let mut tx = self.pool.begin().await
             .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to start tx for distillation: {}", e) })?;
 
@@ -185,14 +185,17 @@ impl WatchtowerOps for SqliteJobQueue {
         }
 
         let new_id = uuid::Uuid::new_v4().to_string();
+        let domain = domain.unwrap_or("general");
         sqlx::query(
-            "INSERT INTO karma_logs (id, karma_type, related_skill, lesson, weight, soul_version_hash, created_at)
-             VALUES (?, 'Synthesized', ?, ?, 100, ?, datetime('now'))"
+            "INSERT INTO karma_logs (id, karma_type, related_skill, lesson, weight, soul_version_hash, created_at, domain, subtopic)
+             VALUES (?, 'Synthesized', ?, ?, 100, ?, datetime('now'), ?, ?)"
         )
             .bind(&new_id)
             .bind(skill)
             .bind(distilled_lesson)
             .bind(soul_hash)
+            .bind(domain)
+            .bind(subtopic)
             .execute(&mut *tx)
             .await
             .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to insert synthesized karma: {}", e) })?;

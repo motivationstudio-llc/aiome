@@ -64,8 +64,30 @@ pub async fn trigger_agent_chat_stream(
             return;
         }
 
-        let karmas: Vec<serde_json::Value> = state.job_queue.fetch_all_karma(3).await.unwrap_or_default();
-        let karma_str = karmas.iter().map(|k| format!("- {}", k["lesson"].as_str().unwrap_or(""))).collect::<Vec<_>>().join("\n");
+        let soul = std::fs::read_to_string("SOUL.md").unwrap_or_default();
+        let evolving_soul = std::fs::read_to_string("EVOLVING_SOUL.md").unwrap_or_default();
+        let soul_hash = {
+            let mut h: u64 = 0;
+            for b in format!("{}{}", soul, evolving_soul).as_bytes() {
+                h = h.wrapping_add(*b as u64).wrapping_mul(31);
+            }
+            format!("{:x}", h)
+        };
+
+        // Sprint 1-A: Fetch relevant karma using proper search
+        let karma_result = state.job_queue.fetch_relevant_karma(&payload.prompt, "global", 5, &soul_hash).await.unwrap_or_else(|_| aiome_core::traits::KarmaSearchResult::empty());
+        
+        let mut karma_str = karma_result.entries.iter()
+            .map(|e| format!("- {}", e.lesson))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        if karma_result.is_ood {
+            karma_str.push_str("\n[NOTICE: 関連する過去の教訓は見つかりませんでした。このリクエストは新しいコンテキストである可能性があります。]");
+        }
+
+        // Notify client about relevant karma being used (Sprint 4-A)
+        yield Ok::<Event, Infallible>(Event::default().event("karma").data(&karma_str));
 
         let history_len = payload.history.len();
         let start_idx = if history_len > 10 { history_len - 10 } else { 0 };
