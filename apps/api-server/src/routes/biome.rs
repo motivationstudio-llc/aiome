@@ -106,7 +106,7 @@ pub async fn send_message(
         Ok(r) if r.status().is_success() => {
             // Store a copy in local history
             let _ = sqlx::query("INSERT INTO biome_messages (sender_pubkey, recipient_pubkey, topic_id, content, karma_root_cid, signature, lamport_clock, encryption) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
-                .bind(&msg.sender_pubkey).bind(&msg.recipient_pubkey).bind(&msg.topic_id).bind(&msg.content).bind(&msg.karma_root_cid).bind(&msg.signature).bind(msg.lamport_clock as i32).bind(&msg.encryption)
+                .bind(&msg.sender_pubkey).bind(&msg.recipient_pubkey).bind(&msg.topic_id).bind(&msg.content).bind(&msg.karma_root_cid).bind(&msg.signature).bind(msg.lamport_clock as i64).bind(&msg.encryption)
                 .execute(state.job_queue.get_pool()).await;
 
             Ok(Json(serde_json::json!({"status": "sent", "topic_id": msg.topic_id})))

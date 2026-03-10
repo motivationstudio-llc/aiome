@@ -20,6 +20,11 @@
     --accent-emerald: #10b981;
     --accent-amber: #f59e0b;
 
+    /* Glass Variants */
+    --accent-cyan-glass: rgba(0, 242, 255, 0.08);
+    --accent-purple-glass: rgba(188, 140, 255, 0.08);
+    --bg-deep-glass: rgba(10, 10, 15, 0.9);
+
     /* Text */
     --text-primary: #f0f2f5;
     --text-secondary: #94a3b8;

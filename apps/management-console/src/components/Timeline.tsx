@@ -127,7 +127,7 @@ const Timeline: React.FC = () => {
 
                                             <div style={{ marginTop: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                                                 {k.karma_type === 'Technical' ? <Terminal size={14} /> : <BrainCircuit size={14} />}
-                                                <span>{isLocal ? "Recorded in this instance" : `From Node: ${k.node_id.substring(0, 8)}...`}</span>
+                                                <span>{isLocal ? "Recorded in this instance" : `From Node: ${k.node_id?.substring(0, 8) ?? 'unknown'}...`}</span>
                                             </div>
                                         </div>
                                     </motion.div>

@@ -18,8 +18,24 @@ use crate::routes::agent::{AgentChatRequest, build_system_instructions, parse_to
 
 pub async fn trigger_agent_chat_stream(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     Json(payload): Json<AgentChatRequest>,
-) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+) -> impl axum::response::IntoResponse {
+    use subtle::ConstantTimeEq;
+    let auth = headers.get(axum::http::header::AUTHORIZATION).and_then(|h| h.to_str().ok()).unwrap_or("");
+    let expected = format!("Bearer {}", std::env::var("API_SERVER_SECRET").unwrap_or_else(|_| "dev_secret".to_string()));
+    let is_auth_valid = if auth.len() == expected.len() {
+        bool::from(auth.as_bytes().ct_eq(expected.as_bytes()))
+    } else {
+        false
+    };
+
+    if !is_auth_valid {
+        return (
+            axum::http::StatusCode::UNAUTHORIZED, 
+            "Unauthorized"
+        ).into_response();
+    }
 
     let ollama_host = std::env::var("OLLAMA_HOST").unwrap_or_else(|_| "http://127.0.0.1:11434".to_string());
     let ollama_model = std::env::var("OLLAMA_MODEL").unwrap_or_else(|_| "qwen2.5:0.5b".to_string());
@@ -165,7 +181,7 @@ pub async fn trigger_agent_chat_stream(
         yield Ok(Event::default().event("done").data("stream finished"));
     };
 
-    Sse::new(stream).keep_alive(KeepAlive::default())
+    Sse::new(stream).keep_alive(KeepAlive::default()).into_response()
 }
 
 pub async fn trigger_system_vitality_stream(

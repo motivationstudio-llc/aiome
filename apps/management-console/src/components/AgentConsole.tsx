@@ -31,7 +31,10 @@ const AgentConsole: React.FC = () => {
         try {
             const response = await fetch(`${API_BASE}/api/agent/chat/stream`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${localStorage.getItem('aiome_secret') || 'dev_secret'}`
+                },
                 body: JSON.stringify({ prompt: currentPrompt, history: history })
             });
 
@@ -40,26 +43,37 @@ const AgentConsole: React.FC = () => {
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
             let accumulatedText = "";
+            let currentEvent = "";
+            let buffer = "";
 
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) break;
 
-                const chunk = decoder.decode(value);
-                const lines = chunk.split('\n');
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+
+                // Keep the last partial line in the buffer
+                buffer = lines.pop() || "";
 
                 for (const line of lines) {
-                    if (line.startsWith('data: ')) {
-                        const data = line.slice(6);
-                        if (line.includes('event: text')) {
+                    const trimmedLine = line.trim();
+                    if (!trimmedLine) continue;
+
+                    if (trimmedLine.startsWith('event: ')) {
+                        currentEvent = trimmedLine.replace('event: ', '');
+                    } else if (trimmedLine.startsWith('data: ')) {
+                        const data = trimmedLine.replace('data: ', '');
+
+                        if (currentEvent === 'text') {
                             accumulatedText += data;
                             setStreamingText(accumulatedText);
-                        } else if (line.includes('event: tool_exec')) {
+                        } else if (currentEvent === 'tool_exec' || currentEvent === 'tool_detect') {
                             setStatus(`EXECUTING: ${data}`);
-                        } else if (line.includes('event: error')) {
+                        } else if (currentEvent === 'error') {
                             setHistory(prev => [...prev, { role: "assistant", content: `🚨 Error: ${data}`, isError: true }]);
-                        } else if (line.includes('event: done')) {
-                            // Finalize
+                        } else if (currentEvent === 'done') {
+                            setStatus("IDLE");
                         }
                     }
                 }
