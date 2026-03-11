@@ -438,6 +438,27 @@ pub struct ArtifactFile {
     pub hash: String,
 }
 
+/// アーティファクトの繋がり（Provenance DAG/血統）
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ArtifactEdge {
+    pub id: String,
+    pub source_id: String,
+    pub target_id: String,
+    pub source_type: String, // "Artifact" or "Karma"
+    pub relation: String,    // "DerivedFrom", "AssociatedWith"
+    pub metadata: serde_json::Value,
+    pub created_at: String,
+}
+
+/// アーティファクトの繋がり入力
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ArtifactEdgeInput {
+    pub target_id: String,
+    pub source_type: String,
+    pub relation: String,
+    pub metadata: Option<serde_json::Value>,
+}
+
 /// アーティファクトのメタデータ
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ArtifactMeta {
@@ -446,12 +467,14 @@ pub struct ArtifactMeta {
     pub category: ArtifactCategory,
     pub tags: Vec<String>,
     pub created_by: String,
+    #[serde(skip_serializing)]
     pub dir_path: String,
     pub files: Vec<ArtifactFile>,
     pub karma_refs: Vec<String>,
     pub job_ref: Option<String>,
     pub soul_version_hash: Option<String>,
     pub signature: Option<String>,
+    pub edges: Vec<ArtifactEdge>,
     pub created_at: String,
 }
 
@@ -465,6 +488,7 @@ pub struct CreateArtifactRequest {
     pub files: Vec<(String, Vec<u8>, String)>, // (filename, content, mime_type)
     pub karma_refs: Vec<String>,
     pub job_ref: Option<String>,
+    pub parent_refs: Vec<ArtifactEdgeInput>,
 }
 
 /// アーティファクト・ストレージ・トレイト
@@ -484,4 +508,15 @@ pub trait ArtifactStore: Send + Sync {
     
     /// 成果物を削除する（物理削除）
     async fn delete_artifact(&self, id: &str, jail: &bastion::fs_guard::Jail) -> Result<(), AiomeError>;
+
+    // --- Phase 1/2: Memory Crystal (Evolution) ---
+
+    /// 指定した成果物に関連するコネクション（血統）を取得する
+    async fn get_artifact_edges(&self, id: &str) -> Result<Vec<ArtifactEdge>, AiomeError>;
+
+    /// 成果物の間に新しいコネクションを追加する
+    async fn add_artifact_edge(&self, edge: ArtifactEdge) -> Result<(), AiomeError>;
+
+    /// セマンティック検索（自然言語検索）を行う
+    async fn search_artifacts_semantic(&self, query: &str, category: Option<ArtifactCategory>, limit: i64) -> Result<Vec<ArtifactMeta>, AiomeError>;
 }

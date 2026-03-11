@@ -46,7 +46,7 @@ Aiome:        [LLM] → Rust Validation Layer → Whitelisted Tool Execution →
 ### Layer 4: Build Isolation & Formal TDD Forge (S-Rank Defense)
 - **OS-Native Sandbox**: Autonomous compilation (`cargo build`) executed by the agent is forcibly containerized using OS-native guardrails (`sandbox-exec` / `bwrap`) to prevent supply chain attacks during the Forge process.
 - **Fail-Forward Training**: Instead of terminating agents when code fails to compile, the system employs TDD-based reinforcement loops without permanent Karma penalties, allowing self-healing code generation.
-- **Core State Actor**: Safe integration with Node.js NAPI layer uses a strictly serial MPSC Channel Actor Model, preventing async/sync deadlock scenarios inherently.
+- **Core State Actor**: The system uses a strictly serial MPSC Channel Actor Model to manage state updates, preventing async/sync deadlock scenarios inherently.
 
 ## 4. Operational Safety Layers
 

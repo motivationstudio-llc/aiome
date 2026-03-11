@@ -10,7 +10,15 @@ use axum::{
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use async_trait::async_trait;
 use tower_http::services::ServeDir;
+use tower_http::set_header::SetResponseHeaderLayer;
+use tower_http::cors::{CorsLayer, AllowOrigin};
+use axum::http::HeaderValue;
+use axum::http::header::{
+    X_CONTENT_TYPE_OPTIONS, X_FRAME_OPTIONS, CONTENT_SECURITY_POLICY, 
+    STRICT_TRANSPORT_SECURITY, CACHE_CONTROL
+};
 use tracing::{info, warn};
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
@@ -38,6 +46,9 @@ pub struct AppState {
     pub mcp_sessions: Arc<tokio::sync::RwLock<std::collections::HashMap<String, tokio::sync::mpsc::UnboundedSender<String>>>>,
     pub mcp_manager: Arc<mcp::client::McpProcessManager>,
     pub artifact_store: Arc<dyn aiome_core::traits::ArtifactStore>,
+    pub event_sender: tokio::sync::broadcast::Sender<shared::watchtower::CoreEvent>,
+    pub context_engine: Arc<infrastructure::context_engine::ContextEngine>,
+    pub provider: Arc<dyn aiome_core::llm_provider::LlmProvider + Send + Sync>,
 }
 
 #[tokio::main]
@@ -58,25 +69,63 @@ async fn main() {
     let job_queue = infrastructure::job_queue::SqliteJobQueue::new(&db_url).await.expect("Failed to init DB");
     let job_queue = Arc::new(job_queue);
 
-    let artifact_store = Arc::new(infrastructure::artifact_store::SqliteArtifactStore::new(
+    // Dynamic Provider that reads from DB settings
+    #[derive(Debug)]
+    struct DynamicOllamaProvider {
+        jq: Arc<infrastructure::job_queue::SqliteJobQueue>,
+        fallback_host: String,
+        fallback_model: String,
+    }
+
+    #[async_trait]
+    impl aiome_core::llm_provider::LlmProvider for DynamicOllamaProvider {
+        async fn complete(&self, prompt: &str, system: Option<&str>) -> Result<String, aiome_core::error::AiomeError> {
+            let host = self.jq.get_setting_value("ollama_host").await.ok().flatten().unwrap_or_else(|| self.fallback_host.clone());
+            let model = self.jq.get_setting_value("ollama_model").await.ok().flatten().unwrap_or_else(|| self.fallback_model.clone());
+            aiome_core::llm_provider::OllamaProvider::new(host, model).complete(prompt, system).await
+        }
+        async fn stream_complete(&self, prompt: &str, system: Option<&str>) -> Result<std::pin::Pin<Box<dyn tokio_stream::Stream<Item = Result<String, aiome_core::error::AiomeError>> + Send>>, aiome_core::error::AiomeError> {
+            let host = self.jq.get_setting_value("ollama_host").await.ok().flatten().unwrap_or_else(|| self.fallback_host.clone());
+            let model = self.jq.get_setting_value("ollama_model").await.ok().flatten().unwrap_or_else(|| self.fallback_model.clone());
+            aiome_core::llm_provider::OllamaProvider::new(host, model).stream_complete(prompt, system).await
+        }
+        fn name(&self) -> &str { "DynamicOllama" }
+    }
+
+    let fallback_model = std::env::var("OLLAMA_MODEL").unwrap_or_else(|_| "qwen3.5:9b".to_string());
+    let fallback_host = std::env::var("OLLAMA_HOST").unwrap_or_else(|_| "http://127.0.0.1:11434".to_string());
+    
+    let provider = Arc::new(DynamicOllamaProvider {
+        jq: job_queue.clone(),
+        fallback_host,
+        fallback_model,
+    });
+
+    let mut artifact_store = infrastructure::artifact_store::SqliteArtifactStore::new(
         job_queue.get_pool().clone(),
         std::path::PathBuf::from("workspace/artifacts"),
-    ));
+    );
+
+    if let Some(provider) = job_queue.get_embedding_provider() {
+        artifact_store = artifact_store.with_embeddings(provider);
+    }
+
+    let artifact_store = Arc::new(artifact_store);
 
     let wasm_skill_manager = Arc::new(infrastructure::skills::WasmSkillManager::new("workspace/skills", "workspace").expect("Skills directory not found"));
     let skill_forge = Arc::new(infrastructure::skills::forge::SkillForge::new("workspace/forge", "workspace/skills/custom"));
     
     let llm_semaphore = Arc::new(tokio::sync::Semaphore::new(3));
     let forge_semaphore = Arc::new(tokio::sync::Semaphore::new(1));
+    let event_sender = tokio::sync::broadcast::channel::<shared::watchtower::CoreEvent>(100).0;
 
     skill_forge.ensure_forge_workspace().expect("Failed to initialize skill_forge workspace");
 
     let app = Router::new()
+        // --- Protected Routes (Require Authentication) ---
         .route("/api/wiki", get(routes::general::list_wiki_files))
         .route("/api/wiki/:filename", get(routes::general::get_wiki_content))
         .route("/api/clouddoc/page", get(routes::general::get_mock_clouddoc_page))
-        .route("/api/health", get(routes::general::get_health_status))
-        // Karma Routes
         .route("/api/synergy/karma", get(routes::karma::get_karma_stream))
         .route("/api/synergy/graph", get(routes::karma::synergy_graph_handler))
         .route("/api/synergy/test/failure", axum::routing::post(routes::karma::trigger_failure_demo))
@@ -84,63 +133,88 @@ async fn main() {
         .route("/api/synergy/test/federation", axum::routing::post(routes::karma::trigger_federation_demo))
         .route("/api/synergy/rules", get(routes::karma::get_immune_rules_handler).post(routes::karma::add_immune_rule_handler).put(routes::karma::add_immune_rule_handler))
         .route("/api/synergy/rules/:id", axum::routing::delete(routes::karma::delete_immune_rule_handler))
-        // Artifact Routes
         .route("/api/artifacts", get(routes::artifacts::list_artifacts_handler))
         .route("/api/artifacts/:id", get(routes::artifacts::get_artifact_handler).delete(routes::artifacts::delete_artifact_handler))
+        .route("/api/artifacts/:id/edges", get(routes::artifacts::get_artifact_edges_handler))
         .route("/api/artifacts/:id/files/:filename", get(routes::artifacts::download_artifact_file_handler))
-        // Agent Routes
         .route("/api/agent/chat", axum::routing::post(routes::agent::trigger_agent_chat))
         .route("/api/agent/chat/stream", axum::routing::post(stream::trigger_agent_chat_stream))
         .route("/api/agent/feedback", axum::routing::post(routes::agent::handle_karma_feedback))
-        .route("/api/system/vitality", get(stream::trigger_system_vitality_stream))
         .route("/api/system/evolution", get(routes::karma::get_evolution_history_handler))
-        // Biome & Expression Skeletons
+        .route("/api/v1/settings", get(routes::settings::get_settings).put(routes::settings::update_setting))
+        .route("/api/v1/settings/test", axum::routing::post(routes::settings::test_connection))
         .route("/api/biome/status", get(routes::biome::biome_status))
         .route("/api/biome/list", get(routes::biome::list_messages))
         .route("/api/biome/send", axum::routing::post(routes::biome::send_message))
         .route("/api/expression/status", get(routes::expression::expression_status))
-        // Skill Management
         .route("/api/skills", get(routes::skill::list_skills))
         .route("/api/skills/import", axum::routing::post(routes::skill::import_skill))
         .route("/api/skills/mcp/spawn", axum::routing::post(routes::skill::spawn_mcp_server))
         .nest("/api/v1/mcp", mcp::router())
-        .layer(
-            tower::ServiceBuilder::new()
-                .layer(axum::error_handling::HandleErrorLayer::new(|err: tower::BoxError| async move {
-                    (StatusCode::INTERNAL_SERVER_ERROR, format!("Unhandled internal error: {}", err))
-                }))
-                .buffer(1024)
-                .rate_limit(200, std::time::Duration::from_secs(60))
-                .into_inner()
-        )
         .route_layer(axum::middleware::from_extractor::<auth::Authenticated>())
+
+        // --- Public Routes (Internal Monitoring / SSE / WS) ---
+        .route("/api/health", get(routes::general::get_health_status))
+        .route("/api/system/vitality", get(stream::trigger_system_vitality_stream))
+        .route("/api/v1/watchtower/ws", get(routes::watchtower::ws_handler))
+
         .with_state(AppState {
             health_monitor,
             job_queue: job_queue.clone(),
             wasm_skill_manager,
             skill_forge,
             docs_path: docs_path.to_string(),
-            llm_semaphore,
-            forge_semaphore,
+            llm_semaphore: llm_semaphore.clone(),
+            forge_semaphore: forge_semaphore.clone(),
             mcp_sessions: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
             mcp_manager: Arc::new(mcp::client::McpProcessManager::new()),
             artifact_store: artifact_store.clone(),
+            event_sender: event_sender.clone(),
+            context_engine: Arc::new(infrastructure::context_engine::ContextEngine::new(
+                provider.clone(),
+                job_queue.clone(),
+                llm_semaphore.clone()
+            )),
+            provider: provider.clone(),
         })
         .fallback_service(ServeDir::new(static_path).append_index_html_on_directories(true))
+        // --- Layer 3: Security Headers (Defense in Depth) ---
+        .layer(SetResponseHeaderLayer::if_not_present(X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff")))
+        .layer(SetResponseHeaderLayer::if_not_present(X_FRAME_OPTIONS, HeaderValue::from_static("DENY")))
+        .layer(SetResponseHeaderLayer::if_not_present(STRICT_TRANSPORT_SECURITY, HeaderValue::from_static("max-age=31536000; includeSubDomains")))
+        .layer(SetResponseHeaderLayer::if_not_present(CONTENT_SECURITY_POLICY, HeaderValue::from_static("default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ws: wss:;")))
+        // --- Layer 2: Dynamic CORS (Whitelisting) ---
         .layer({
-            use tower_http::cors::{CorsLayer, AllowOrigin};
+            let origins_str = std::env::var("ALLOWED_ORIGINS").unwrap_or_else(|_| 
+                "http://127.0.0.1:3015,http://127.0.0.1:3016,http://localhost:1420,http://localhost:5173,http://localhost:3016".to_string()
+            );
+            let allowed_origins: Vec<HeaderValue> = origins_str
+                .split(',')
+                .filter_map(|s| s.trim().parse::<HeaderValue>().ok())
+                .collect();
+            
             CorsLayer::new()
-                .allow_origin([
-                    "http://127.0.0.1:3015".parse().unwrap(),
-                    "http://localhost:1420".parse().unwrap(),
-                    "http://localhost:5173".parse().unwrap(),
-                ])
-                .allow_methods([axum::http::Method::GET, axum::http::Method::POST])
-                .allow_headers([
-                    axum::http::header::CONTENT_TYPE,
-                    axum::http::header::AUTHORIZATION,
-                ])
-        });
+                .allow_origin(AllowOrigin::list(allowed_origins))
+                .allow_methods([axum::http::Method::GET, axum::http::Method::POST, axum::http::Method::PUT, axum::http::Method::DELETE])
+                .allow_headers([axum::http::header::CONTENT_TYPE, axum::http::header::AUTHORIZATION])
+        })
+        // --- Layer 1: Global Rate Limiting & DoS Protection ---
+        .layer(
+            tower::ServiceBuilder::new()
+                .layer(axum::error_handling::HandleErrorLayer::new(|err: tower::BoxError| async move {
+                    (StatusCode::INTERNAL_SERVER_ERROR, format!("Security Layer Error: {}", err))
+                }))
+                .buffer(1024)
+                .rate_limit(50, std::time::Duration::from_secs(1)) // Spike protection
+                .into_inner()
+        );
+
+    // Initial Security Check
+    let secret_key = std::env::var("API_SERVER_SECRET").unwrap_or_default();
+    if secret_key == "dev_secret" || secret_key.is_empty() {
+        warn!("🚨 [SECURITY CRITICAL] API_SERVER_SECRET is set to fallback value or empty.");
+        warn!("🚨 Please set a strong random secret in your .env file immediately.");
+    }
 
     let port: u16 = std::env::var("PORT").unwrap_or_else(|_| "3015".to_string()).parse().expect("Invalid PORT");
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
@@ -157,6 +231,30 @@ async fn main() {
         let ollama_model = std::env::var("OLLAMA_MODEL").unwrap_or_else(|_| "qwen2.5:0.5b".to_string());
         let provider = Arc::new(aiome_core::llm_provider::OllamaProvider::new(ollama_host, ollama_model));
         let immune_system = infrastructure::immune_system::AdaptiveImmuneSystem::new(provider.clone());
+
+        // Heartbeat Wakeup Setup (Phase 1)
+        let wakeup_model = std::env::var("WAKEUP_MODEL")
+            .unwrap_or_else(|_| std::env::var("OLLAMA_MODEL").unwrap_or_else(|_| "qwen3.5:9b".to_string()));
+        let wakeup_provider = Arc::new(aiome_core::llm_provider::OllamaProvider::new(
+            std::env::var("OLLAMA_HOST").unwrap_or_else(|_| "http://127.0.0.1:11434".to_string()),
+            wakeup_model
+        ));
+        let llm_semaphore = llm_semaphore.clone();
+        let event_sender = event_sender.clone();
+        let heartbeat_service = infrastructure::heartbeat_wakeup::HeartbeatWakeupService::new(
+            wakeup_provider.clone(),
+            llm_semaphore.clone()
+        );
+        let crystallizer = infrastructure::memory_crystallizer::MemoryCrystallizer::new(
+            wakeup_provider.clone(),
+            jq_clone.clone(),
+            llm_semaphore.clone()
+        );
+        let learner = infrastructure::user_learner::UserLearner::new(
+            wakeup_provider,
+            llm_semaphore.clone()
+        );
+        let mut wakeup_counter = 0;
 
         // 🌐 2. Federation Sync: Connect to Samsara Hub WebSocket for real-time updates
         let hub_ws_url = std::env::var("SAMSARA_HUB_WS").unwrap_or_else(|_| "ws://127.0.0.1:3016/api/v1/federation/ws".to_string());
@@ -473,6 +571,40 @@ async fn main() {
             if let Ok(purged) = jq_clone.storage_gc(10.0).await {
                 if purged > 0 {
                     info!("♻️ [BackgroundWorker] Storage GC: Purged {} old artifacts.", purged);
+                }
+            }
+
+            // 6. Heartbeat Wakeup Ping (Phase 1) - Every 30 maintenance cycles (~30 mins)
+            if wakeup_counter % 30 == 0 {
+                if let Some(msg) = heartbeat_service.run_wakeup_ping().await {
+                    let _ = event_sender.send(shared::watchtower::CoreEvent::ProactiveTalk { 
+                        message: msg, 
+                        channel_id: 0 
+                    });
+                    info!("💓 [BackgroundWorker] Heartbeat: Proactive talk dispatched.");
+                }
+            }
+            wakeup_counter = (wakeup_counter + 1) % 1440; // Prevent overflow, reset dailyish
+
+            // 7. Memory Crystallization (Phase 2) - Daily maintenance
+            if wakeup_counter == 0 {
+                info!("💎 [BackgroundWorker] Memory Evolution: Starting Crystallization cycle...");
+                let _ = crystallizer.run_distillation_cycle().await;
+            }
+
+            // 8. User Learning (Phase 2) - Hourly preference updates
+            if wakeup_counter % 60 == 0 {
+                if let Ok(channels) = jq_clone.fetch_undistilled_chats_by_channel().await {
+                    for (channel_id, messages) in channels {
+                        let summary = messages.iter()
+                            .map(|(_, role, content)| format!("{}: {}", role, content))
+                            .collect::<Vec<_>>()
+                            .join("\n");
+                        if learner.learn_from_session(&summary).await.unwrap_or(false) {
+                            let last_id = messages.last().map(|(id, ..)| *id).unwrap_or(0);
+                            let _ = jq_clone.mark_chats_as_distilled(&channel_id, last_id).await;
+                        }
+                    }
                 }
             }
 

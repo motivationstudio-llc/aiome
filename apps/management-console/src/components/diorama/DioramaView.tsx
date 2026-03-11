@@ -36,7 +36,7 @@ const DioramaView: React.FC<DioramaViewProps> = ({ status, mode, activeTab }) =>
             (status === 'thinking' || status === 'learning' || status === 'speaking') ? 'thinking' :
                 (status === 'awakened') ? 'awakened' : 'idle';
         return (
-            <div style={{ position: 'fixed', top: 0, bottom: 0, left: leftOffset, right: rightOffset, display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 0, pointerEvents: 'none' }}>
+            <div style={{ position: 'fixed', top: 0, bottom: 0, left: leftOffset, right: rightOffset, display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 0, pointerEvents: 'none', transform: 'translateY(11vh)' }}>
                 <AiomeAvatar status={liteStatus} size={400} />
             </div>
         );
@@ -44,7 +44,7 @@ const DioramaView: React.FC<DioramaViewProps> = ({ status, mode, activeTab }) =>
 
     // Billboard mode
     return (
-        <div style={{ position: 'fixed', top: 0, bottom: 0, left: leftOffset, right: rightOffset, zIndex: 0, overflow: 'hidden', pointerEvents: 'none' }}>
+        <div style={{ position: 'fixed', top: 0, bottom: 0, left: leftOffset, right: rightOffset, zIndex: 0, overflow: 'hidden', pointerEvents: 'none', transform: 'translateY(11vh)' }}>
             <ErrorBoundary
                 fallback={null}
                 onError={() => {

@@ -14,7 +14,7 @@ Please delete options that are not relevant.
 ## Checklist:
 - [ ] I have read the `CONTRIBUTING.md` document.
 - [ ] I have signed the CLA (`CLA.md`).
-- [ ] My code follows the iron principles of this project (Result Type Mandatory, Async First, etc.).
+- [ ] My code follows the Aiome principles (Result Type Mandatory, Actor Model, etc.).
 - [ ] I have added tests to cover my changes.
 - [ ] `cargo test --workspace` passes locally with my changes.
 - [ ] `cargo deny check license` passes locally.

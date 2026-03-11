@@ -43,9 +43,6 @@ libs/shared         (Common Utils, Types)
   - **core**: 純粋なビジネスロジック (no IO ideally)
   - **infrastructure**: I/Oの実装 (SQLite, API Request, ConstitutionalValidator)
   - **shared**: 共通型定義、セキュリティ境界 (Guardrails)
-  - **napi-bridge**: Node.js 向けネイティブ・バインディング層
-- **packages/**: Node.js (OpenClaw) とのハイブリッド統合用 NPM パッケージ群
-  - **sentinel**: Aiome Core に接続する NAPI アドオン
 
 ## 🧪 テスト戦略
 

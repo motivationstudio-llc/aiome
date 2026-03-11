@@ -1,0 +1,41 @@
+json
+{
+  "target_and_goals": {
+    "AI's progress": {
+      "AI's evolution": {
+        "Online communication": "更なるコミュニケーションの効率性を維持し、より人間のようなコミュニケーションを提供します。",
+        "New view point": "AIは、より深く、より広い視野で学習し、より人間のように学びます。",
+        "New view point": "AIは、より深く、より広い視野で学習し、より人間のように学びます。"
+      },
+      "Online communication": {
+        "AI's evolution": {
+          "More efficient communication": "より効率的に通信を行うこと",
+          "New view point": "AIは、より深く、より広い視野で学習し、より人間のように学びます。"
+        },
+        "New view point": "AIは、より深く、より広い視野で学習し、より人間のように学びます。"
+      },
+      "AI's evolution": {
+        "Online communication": "より効率的で、より人間のようなコミュニケーションを提供します。",
+        "New view point": "AIは、より深く、より広い視野で学習し、より人間のように学びます。"
+      }
+    },
+    "AI's progress": {
+      "AI's evolution": {
+        "Online communication": "より効率的で、より人間のようなコミュニケーションを提供します。",
+        "New view point": "AIは、より深く、より広い視野で学習し、より人間のように学びます。",
+        "New view point": "AIは、より深く、より広い視野で学習し、より人間のように学びます。"
+      },
+      "Online communication": {
+        "AI's evolution": {
+          "More efficient communication": "より効率的に通信を行うこと",
+          "New view point": "AIは、より深く、より広い視野で学習し、より人間のように学びます。"
+        },
+        "New view point": "AIは、より深く、より広い視野で学習し、より人間のように学びます。"
+      },
+      "AI's evolution": {
+        "Online communication": "より効率的で、より人間のようなコミュニケーションを提供します。",
+        "New view point": "AIは、より深く、より広い視野で学習し、より人間のように学びます。"
+      }
+    }
+  }
+}

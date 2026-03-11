@@ -305,7 +305,7 @@ async fn test_sqlite_job_queue_karma_ood_detection() {
     let job_id = jq.enqueue("Task", "Real Topic", "Style", None).await.unwrap();
     // Use manual SQL to insert embedding matched to MockEmbedProvider's output
     let id = uuid::Uuid::new_v4().to_string();
-    let emb: Vec<u8> = vec![1.0f64; 1536].iter().flat_map(|f| f.to_le_bytes()).collect();
+    let emb: Vec<u8> = vec![1.0f32; 1536].iter().flat_map(|f| f.to_le_bytes()).collect();
     sqlx::query("INSERT INTO karma_logs (id, job_id, karma_type, related_skill, lesson, created_at, karma_embedding) VALUES (?, ?, 'Technical', 'skill-1', 'Real Lesson', datetime('now'), ?)")
         .bind(&id).bind(&job_id).bind(&emb).execute(&jq.pool).await.unwrap();
     

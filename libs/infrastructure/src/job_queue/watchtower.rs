@@ -43,7 +43,7 @@ impl WatchtowerOps for SqliteJobQueue {
 
     async fn do_fetch_chat_history(&self, channel_id: &str, limit: i64) -> Result<Vec<serde_json::Value>, AiomeError> {
         let rows = sqlx::query(
-            "SELECT role, content FROM chat_history WHERE channel_id = ? ORDER BY id DESC LIMIT ?"
+            "SELECT id, role, content FROM chat_history WHERE channel_id = ? AND is_distilled = 0 ORDER BY id DESC LIMIT ?"
         )
         .bind(channel_id)
         .bind(limit)
@@ -53,9 +53,11 @@ impl WatchtowerOps for SqliteJobQueue {
 
         let mut messages = Vec::new();
         for row in rows {
+            let id: i64 = row.get("id");
             let role: String = row.get("role");
             let content: String = row.get("content");
             messages.push(serde_json::json!({
+                "id": id,
                 "role": role,
                 "content": content
             }));

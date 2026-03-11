@@ -22,7 +22,7 @@
 | :--- | :--- |
 | **`WasmSkillManager`** | WASM プラグインの実行寿命、サンドボックス（WASI）、リソース制限を管理。 |
 | **`SkillForge`** | LLM による Rust コード生成と `cargo` を用いたコンパイルプロセスを制御。 |
-| **`McpProcessManager`** | 外部のプログラミング言語（Node.js, Python 等）で書かれた MCP サーバープロセスのライフサイクル（PGID ゾンビキル）と標準入出力を管理。 |
+| **`McpProcessManager`** | 外部プロセスとして提供される MCP サーバーのライフサイクル（PGID ゾンビキル）と標準入出力を管理。 |
 | **`DockerDelegator`** | WASM の制限を超える重い依存関係や信頼できない複雑なタスクを、使い捨ての Docker Agent コンテナ（Shadow Worker）へ安全に委譲（Delegation）する。 |
 | **`SKILL_FORGE_PROMPT.md`** | 高品質で安全なプラグインを生成するための「鉄の掟」を定めたシステム構成済プロンプト。 |
 

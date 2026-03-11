@@ -48,6 +48,7 @@ impl ExternalTrendSonar {
         Self {
             api_key,
             client: reqwest::Client::builder()
+                .redirect(reqwest::redirect::Policy::none()) // SEC-5: SSRF prevention via redirect blocking
                 .timeout(std::time::Duration::from_secs(10))
                 .build()
                 .unwrap_or_else(|_| reqwest::Client::new()),

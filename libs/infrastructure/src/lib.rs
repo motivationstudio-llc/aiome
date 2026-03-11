@@ -17,6 +17,10 @@
 
 pub mod concept_manager;
 pub mod aiome_log;
+pub mod heartbeat_wakeup;
+pub mod memory_crystallizer;
+pub mod user_learner;
+pub mod context_engine;
 pub mod trend_sonar;
 pub mod job_queue;
 pub mod workspace_manager;
@@ -32,3 +36,4 @@ pub mod llm;
 pub mod security;
 pub mod publisher;
 pub mod artifact_store;
+pub mod channel_bridge;

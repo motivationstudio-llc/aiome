@@ -36,6 +36,7 @@ mod federation;
 mod swarm;
 mod watchtower;
 mod taxonomy;
+pub mod settings;
 pub mod crdt;
 
 use migrations::DbInitializer;
@@ -47,10 +48,11 @@ use guardrails::GuardrailOps;
 use federation::FederationOps;
 use swarm::SwarmOps;
 use watchtower::WatchtowerOps;
+use settings::SettingsOps;
 use crdt::CrdtOps;
 
 /// Job Queue that utilizes SQLite in WAL Mode to allow multi-threaded queue operations.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SqliteJobQueue {
     pool: SqlitePool,
     embed_provider: Option<Arc<dyn EmbeddingProvider>>,
@@ -60,6 +62,10 @@ pub struct SqliteJobQueue {
 impl SqliteJobQueue {
     pub fn get_pool(&self) -> &sqlx::SqlitePool {
         &self.pool
+    }
+
+    pub fn get_embedding_provider(&self) -> Option<Arc<dyn EmbeddingProvider>> {
+        self.embed_provider.clone()
     }
 
     /// Connects to the SQLite database and initializes the WAL mode and schema.
@@ -440,6 +446,19 @@ impl SqliteJobQueue {
 
     pub async fn mark_as_federated(&self, karma_ids: Vec<String>, rule_ids: Vec<String>) -> Result<(), AiomeError> {
         self.do_mark_as_federated(karma_ids, rule_ids).await
+    }
+
+    // Settings
+    pub async fn get_setting_value(&self, key: &str) -> Result<Option<String>, AiomeError> {
+        self.get_setting(key).await
+    }
+
+    pub async fn update_setting(&self, key: &str, value: &str, category: &str, is_secret: bool) -> Result<(), AiomeError> {
+        self.set_setting(key, value, category, is_secret).await
+    }
+
+    pub async fn fetch_all_settings(&self) -> Result<Vec<settings::SettingEntry>, AiomeError> {
+        self.get_all_settings().await
     }
 }
 

@@ -15,7 +15,7 @@ use tracing::info;
 use crate::skill_handler;
 
 use crate::AppState;
-use crate::routes::agent::{AgentChatRequest, build_system_instructions, parse_tool_calls};
+use crate::routes::agent::{AgentChatRequest, build_system_instructions, parse_tool_calls, read_workspace_file};
 
 pub async fn trigger_agent_chat_stream(
     State(state): State<AppState>,
@@ -38,9 +38,7 @@ pub async fn trigger_agent_chat_stream(
         ).into_response();
     }
 
-    let ollama_host = std::env::var("OLLAMA_HOST").unwrap_or_else(|_| "http://127.0.0.1:11434".to_string());
-    let ollama_model = std::env::var("OLLAMA_MODEL").unwrap_or_else(|_| "qwen3.5:9b".to_string());
-    let provider = Arc::new(aiome_core::llm_provider::OllamaProvider::new(ollama_host, ollama_model));
+    let provider = state.provider.clone();
 
     let stream = async_stream::stream! {
         // Discovery H: Guardrails check (Security Layer 0)
@@ -64,8 +62,8 @@ pub async fn trigger_agent_chat_stream(
             return;
         }
 
-        let soul = std::fs::read_to_string("SOUL.md").unwrap_or_default();
-        let evolving_soul = std::fs::read_to_string("EVOLVING_SOUL.md").unwrap_or_default();
+        let soul = read_workspace_file("SOUL.md");
+        let evolving_soul = read_workspace_file("EVOLVING_SOUL.md");
         let soul_hash = {
             let mut h: u64 = 0;
             for b in format!("{}{}", soul, evolving_soul).as_bytes() {
@@ -96,20 +94,30 @@ pub async fn trigger_agent_chat_stream(
         });
         yield Ok::<Event, Infallible>(Event::default().event("karma_data").data(karma_json.to_string()));
 
-        let history_len = payload.history.len();
-        let start_idx = if history_len > 10 { history_len - 10 } else { 0 };
+        let channel_id = payload.channel_id.unwrap_or_else(|| "default_console".to_string());
         
+        // Phase 3-B: Persist user message
+        let _ = state.job_queue.insert_chat_message(&channel_id, "user", &payload.prompt).await;
+
+        // Phase 3-C: Fetch intelligent context
+        let (summary, db_history) = state.context_engine.get_intelligent_history(&channel_id, 10).await.unwrap_or((None, Vec::new()));
+
         let mut current_history = Vec::new();
-        for msg in &payload.history[start_idx..] {
-            let prefix = if msg.role == "user" { "USER: " } else { "AI: " };
-            current_history.push(format!("{}{}", prefix, msg.content));
+
+        // Combine DB history and current request history
+        for msg in db_history {
+            let role = msg["role"].as_str().unwrap_or("user");
+            let content = msg["content"].as_str().unwrap_or("");
+            let prefix = if role == "user" { "USER: " } else { "AI: " };
+            current_history.push(format!("{}{}", prefix, content));
         }
 
-        let system_instructions = build_system_instructions(&state, &karma_str);
+        let system_instructions = build_system_instructions(&state, &karma_str, summary.as_deref());
 
-        let max_turns = 15;
         let mut turn = 0;
+        let max_turns = 15;
         let original_prompt = payload.prompt.clone();
+        let mut full_reply_for_storage = String::new();
 
         while turn < max_turns {
             let full_prompt = format!(
@@ -133,6 +141,7 @@ pub async fn trigger_agent_chat_stream(
                 while let Some(chunk_res) = llm_stream.next().await {
                     let chunk: String = chunk_res.unwrap_or_default();
                     full_reply.push_str(&chunk);
+                    full_reply_for_storage.push_str(&chunk);
 
                     if !is_tool_call_mode {
                         buffer.push_str(&chunk);
@@ -199,6 +208,10 @@ pub async fn trigger_agent_chat_stream(
                                     }
                                 }
                             }
+                        } else if skill_name == "describe_skill" {
+                            let out = skill_handler::describe_skill(&skill_input, &state).await;
+                            skill_results.push(out.clone());
+                            yield Ok(Event::default().event("tool_result").data(format!("{}: metadata returned", skill_name)));
                         } else {
                             let out = skill_handler::execute_wasm_skill(&skill_name, &skill_input, &state).await;
                             
@@ -227,6 +240,14 @@ pub async fn trigger_agent_chat_stream(
                 break;
             }
         }
+        // Phase 3-D: Persist assistant message and maintain context
+        let _ = state.job_queue.insert_chat_message(&channel_id, "assistant", &full_reply_for_storage).await;
+        let ce = state.context_engine.clone();
+        let cid = channel_id.clone();
+        tokio::spawn(async move {
+            let _ = ce.maintain_context(&cid, 20).await;
+        });
+
         yield Ok(Event::default().event("done").data("stream finished"));
     };
 
@@ -253,66 +274,75 @@ pub async fn trigger_system_vitality_stream(
             last_stats = Some(stats);
         }
 
+        let mut rx = state.event_sender.subscribe();
+
         loop {
-            interval.tick().await;
-
-            // 4. Thinking Check
-            if let Ok(pending_count) = state.job_queue.get_pending_job_count().await {
-                let is_thinking = pending_count > 0;
-                if is_thinking && !last_is_thinking {
-                    yield Ok(Event::default().event("job_started").data("thinking"));
-                } else if !is_thinking && last_is_thinking {
-                    yield Ok(Event::default().event("job_completed").data("idle"));
-                }
-                last_is_thinking = is_thinking;
-            }
-
-            if let Ok(stats) = state.job_queue.get_agent_stats().await {
-                // 0. Continuous Stats Update
-                let stats_changed = if let Some(ref last) = last_stats {
-                    last.level != stats.level || 
-                    last.exp != stats.exp || 
-                    last.resonance != stats.resonance || 
-                    last.creativity != stats.creativity || 
-                    last.fatigue != stats.fatigue
-                } else {
-                    true
-                };
-
-                if stats_changed {
-                    yield Ok(Event::default().event("agent_stats").data(serde_json::to_string(&stats).unwrap_or_default()));
-                    last_stats = Some(stats.clone());
-                }
-
-                // 1. Level Up Check
-                if stats.level > last_level {
-                    yield Ok(Event::default().event("level_up").data(serde_json::to_string(&stats).unwrap_or_default()));
-                    last_level = stats.level;
-                }
-
-                // 2. Karma Check
-                let current_karmas = state.job_queue.fetch_all_karma(100).await.unwrap_or_default();
-                if current_karmas.len() > last_karma_count {
-                    // Send newest karma
-                    if let Some(new_karma) = current_karmas.first() {
-                         yield Ok(Event::default().event("karma_update").data(serde_json::to_string(new_karma).unwrap_or_default()));
+            tokio::select! {
+                _ = interval.tick() => {
+                    // 4. Thinking Check
+                    if let Ok(pending_count) = state.job_queue.get_pending_job_count().await {
+                        let is_thinking = pending_count > 0;
+                        if is_thinking && !last_is_thinking {
+                            yield Ok(Event::default().event("job_started").data("thinking"));
+                        } else if !is_thinking && last_is_thinking {
+                            yield Ok(Event::default().event("job_completed").data("idle"));
+                        }
+                        last_is_thinking = is_thinking;
                     }
-                    last_karma_count = current_karmas.len();
-                }
 
-                // 3. Evolution Check (Inspiration / Soul Mutation / Alerts / SkillExec)
-                let current_evos = state.job_queue.fetch_evolution_history(100).await.unwrap_or_default();
-                if current_evos.len() > last_evolution_count {
-                    if let Some(new_evo) = current_evos.first() {
-                        let event_type = new_evo["event_type"].as_str().unwrap_or("inspiration");
-                        let sse_event = match event_type {
-                            "ImmuneAlert" => "immune_alert",
-                            "SkillExecution" => "skill_execution",
-                            _ => "inspiration",
+                    if let Ok(stats) = state.job_queue.get_agent_stats().await {
+                        // 0. Continuous Stats Update
+                        let stats_changed = if let Some(ref last) = last_stats {
+                            last.level != stats.level || 
+                            last.exp != stats.exp || 
+                            last.resonance != stats.resonance || 
+                            last.creativity != stats.creativity || 
+                            last.fatigue != stats.fatigue
+                        } else {
+                            true
                         };
-                        yield Ok(Event::default().event(sse_event).data(serde_json::to_string(new_evo).unwrap_or_default()));
+
+                        if stats_changed {
+                            yield Ok(Event::default().event("agent_stats").data(serde_json::to_string(&stats).unwrap_or_default()));
+                            last_stats = Some(stats.clone());
+                        }
+
+                        // 1. Level Up Check
+                        if stats.level > last_level {
+                            yield Ok(Event::default().event("level_up").data(serde_json::to_string(&stats).unwrap_or_default()));
+                            last_level = stats.level;
+                        }
+
+                        // 2. Karma Check
+                        let current_karmas = state.job_queue.fetch_all_karma(100).await.unwrap_or_default();
+                        if current_karmas.len() > last_karma_count {
+                            // Send newest karma
+                            if let Some(new_karma) = current_karmas.first() {
+                                    yield Ok(Event::default().event("karma_update").data(serde_json::to_string(new_karma).unwrap_or_default()));
+                            }
+                            last_karma_count = current_karmas.len();
+                        }
+
+                        // 3. Evolution Check (Inspiration / Soul Mutation / Alerts / SkillExec)
+                        let current_evos = state.job_queue.fetch_evolution_history(100).await.unwrap_or_default();
+                        if current_evos.len() > last_evolution_count {
+                            if let Some(new_evo) = current_evos.first() {
+                                let event_type = new_evo["event_type"].as_str().unwrap_or("inspiration");
+                                let sse_event = match event_type {
+                                    "ImmuneAlert" => "immune_alert",
+                                    "SkillExecution" => "skill_execution",
+                                    _ => "inspiration",
+                                };
+                                yield Ok(Event::default().event(sse_event).data(serde_json::to_string(new_evo).unwrap_or_default()));
+                            }
+                            last_evolution_count = current_evos.len();
+                        }
                     }
-                    last_evolution_count = current_evos.len();
+                },
+                Ok(event) = rx.recv() => {
+                    if let shared::watchtower::CoreEvent::ProactiveTalk { message, .. } = event {
+                        yield Ok(Event::default().event("proactive_talk").data(message));
+                    }
                 }
             }
         }

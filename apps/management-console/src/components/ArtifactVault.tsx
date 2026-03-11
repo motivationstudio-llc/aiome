@@ -1,260 +1,312 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-    Box,
-    FileText,
-    Code,
-    Image as ImageIcon,
-    Music,
-    Share2,
-    Database,
-    Search,
-    Download,
-    Trash2,
-    Calendar,
-    User,
-    Tag,
-    Hash,
-    Shield,
-    Dna
+  Box,
+  FileText,
+  Code,
+  Image as ImageIcon,
+  Music,
+  Share2,
+  Database,
+  Search,
+  Download,
+  Trash2,
+  Calendar,
+  User,
+  Tag,
+  Hash,
+  Shield,
+  Dna
 } from "lucide-react";
 import { API_BASE } from "../config";
 import { getAuthHeaders } from "../lib/auth";
 
 interface ArtifactFile {
-    name: string;
-    mime_type: string;
-    size_bytes: number;
-    hash: string;
+  name: string;
+  mime_type: string;
+  size_bytes: number;
+  hash: string;
+}
+
+interface ArtifactEdge {
+  id: string;
+  source_id: string;
+  target_id: string;
+  source_type: string;
+  relation: string;
+  metadata: any;
+  created_at: string;
 }
 
 interface Artifact {
-    id: string;
-    title: string;
-    category: string;
-    tags: string[];
-    created_by: string;
-    dir_path: string;
-    files: ArtifactFile[];
-    karma_refs: string[];
-    job_ref?: string;
-    signature?: string;
-    created_at: string;
+  id: string;
+  title: string;
+  category: string;
+  tags: string[];
+  created_by: string;
+  dir_path: string;
+  files: ArtifactFile[];
+  karma_refs: string[];
+  job_ref?: string;
+  signature?: string;
+  edges: ArtifactEdge[];
+  created_at: string;
 }
 
 const ArtifactVault = () => {
-    const [artifacts, setArtifacts] = useState<Artifact[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [filter, setFilter] = useState<string | null>(null);
-    const [searchTerm, setSearchTerm] = useState("");
-    const [selectedArtifact, setSelectedArtifact] = useState<Artifact | null>(null);
+  const [artifacts, setArtifacts] = useState<Artifact[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [selectedArtifact, setSelectedArtifact] = useState<Artifact | null>(null);
 
-    useEffect(() => {
-        fetchArtifacts();
-    }, [filter]);
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      fetchArtifacts();
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [filter, searchTerm]);
 
-    const fetchArtifacts = async () => {
-        setLoading(true);
-        try {
-            let url = `${API_BASE}/api/artifacts?limit=50`;
-            if (filter) url += `&category=${filter}`;
+  const fetchArtifacts = async () => {
+    setLoading(true);
+    try {
+      let url = `${API_BASE}/api/artifacts?limit=50`;
+      if (filter) url += `&category=${filter}`;
+      if (searchTerm) url += `&q=${encodeURIComponent(searchTerm)}`;
 
-            const res = await fetch(url, { headers: getAuthHeaders() });
-            if (res.ok) {
-                const data = await res.json();
-                setArtifacts(data);
-            }
-        } catch (e) {
-            console.error("Failed to fetch artifacts", e);
-        } finally {
-            setLoading(false);
-        }
-    };
+      const res = await fetch(url, { headers: getAuthHeaders() });
+      if (res.ok) {
+        const data = await res.json();
+        setArtifacts(data);
+      }
+    } catch (e) {
+      console.error("Failed to fetch artifacts", e);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-    const getCategoryIcon = (category: string) => {
-        switch (category) {
-            case "report": return <FileText size={18} />;
-            case "code": return <Code size={18} />;
-            case "image": return <ImageIcon size={18} />;
-            case "audio": return <Music size={18} />;
-            case "expression": return <Share2 size={18} />;
-            case "data": return <Database size={18} />;
-            default: return <Box size={18} />;
-        }
-    };
+  const getCategoryIcon = (category: string) => {
+    switch (category) {
+      case "report": return <FileText size={18} />;
+      case "code": return <Code size={18} />;
+      case "image": return <ImageIcon size={18} />;
+      case "audio": return <Music size={18} />;
+      case "expression": return <Share2 size={18} />;
+      case "data": return <Database size={18} />;
+      default: return <Box size={18} />;
+    }
+  };
 
-    const filteredArtifacts = artifacts.filter(a =>
-        a.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        a.tags.some(t => t.toLowerCase().includes(searchTerm.toLowerCase()))
-    );
+  const deleteArtifact = async (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    if (!confirm("Are you sure you want to delete this artifact? This action is permanent and will purge physical files.")) return;
 
-    return (
-        <div className="vault-container">
-            <div style={{ display: 'flex', gap: '1rem', marginBottom: '2rem', alignItems: 'center' }}>
-                <div className="search-box">
-                    <Search size={18} />
-                    <input
-                        type="text"
-                        placeholder="Search artifacts or tags..."
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                    />
+    try {
+      const res = await fetch(`${API_BASE}/api/artifacts/${id}`, {
+        method: "DELETE",
+        headers: getAuthHeaders()
+      });
+      if (res.ok) {
+        setArtifacts(prev => prev.filter(a => a.id !== id));
+        if (selectedArtifact?.id === id) setSelectedArtifact(null);
+      }
+    } catch (e) {
+      console.error("Failed to delete artifact", e);
+    }
+  };
+
+  const filteredArtifacts = artifacts; // Filtered by API now (semantic support)
+
+  return (
+    <div className="vault-container">
+      <div style={{ display: 'flex', gap: '1rem', marginBottom: '2rem', alignItems: 'center' }}>
+        <div className="search-box">
+          <Search size={18} />
+          <input
+            type="text"
+            placeholder="Search artifacts or tags..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
+        </div>
+
+        <div className="filter-chips">
+          {['all', 'report', 'code', 'image', 'audio', 'expression', 'data'].map((cat) => (
+            <button
+              key={cat}
+              className={`chip ${cat === (filter || 'all') ? 'active' : ''}`}
+              onClick={() => setFilter(cat === 'all' ? null : cat)}
+            >
+              {cat === 'all' ? 'All' : cat.charAt(0).toUpperCase() + cat.slice(1)}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {loading ? (
+        <div style={{ padding: '4rem', textAlign: 'center' }}>
+          <Box className="ani-pulse" size={48} color="var(--accent-cyan)" style={{ margin: '0 auto 1.5rem' }} />
+          <p style={{ color: 'var(--text-secondary)' }}>Decrypting Artifact Vault...</p>
+        </div>
+      ) : (
+        <div className="artifact-grid">
+          {filteredArtifacts.map((artifact) => (
+            <motion.div
+              key={artifact.id}
+              layoutId={artifact.id}
+              className="artifact-card"
+              onClick={() => setSelectedArtifact(artifact)}
+            >
+              <div className="card-header">
+                <div className="category-tag">
+                  {getCategoryIcon(artifact.category)}
+                  <span>{artifact.category.toUpperCase()}</span>
                 </div>
+                <div className="timestamp">
+                  {new Date(artifact.created_at).toLocaleDateString()}
+                </div>
+              </div>
 
-                <div className="filter-chips">
-                    {['all', 'report', 'code', 'image', 'audio', 'expression', 'data'].map((cat) => (
-                        <button
-                            key={cat}
-                            className={`chip ${cat === (filter || 'all') ? 'active' : ''}`}
-                            onClick={() => setFilter(cat === 'all' ? null : cat)}
-                        >
-                            {cat === 'all' ? 'All' : cat.charAt(0).toUpperCase() + cat.slice(1)}
-                        </button>
+              <h3 className="card-title">{artifact.title}</h3>
+
+              <div className="card-meta">
+                <div className="meta-item">
+                  <User size={14} />
+                  <span>{artifact.created_by}</span>
+                </div>
+                <div className="meta-item">
+                  <Hash size={14} />
+                  <span>{artifact.files.length} files</span>
+                </div>
+              </div>
+
+              <div className="tag-list">
+                {artifact.tags.map(t => <span key={t} className="tag">#{t}</span>)}
+              </div>
+
+              {artifact.signature && (
+                <div className="signature-badge">
+                  <Shield size={10} />
+                  <span>VERIFIED</span>
+                </div>
+              )}
+
+              <button
+                className="delete-btn"
+                onClick={(e) => deleteArtifact(e, artifact.id)}
+                title="Purge Artifact"
+              >
+                <Trash2 size={14} />
+              </button>
+            </motion.div>
+          ))}
+        </div>
+      )}
+
+      {/* Details Modal */}
+      <AnimatePresence>
+        {selectedArtifact && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="modal-backdrop"
+              onClick={() => setSelectedArtifact(null)}
+            />
+            <motion.div
+              layoutId={selectedArtifact.id}
+              className="artifact-modal"
+            >
+              <div className="modal-header">
+                <div>
+                  <div className="category-tag">
+                    {getCategoryIcon(selectedArtifact.category)}
+                    <span>{selectedArtifact.category.toUpperCase()}</span>
+                  </div>
+                  <h2>{selectedArtifact.title}</h2>
+                </div>
+                <button onClick={() => setSelectedArtifact(null)}>✕</button>
+              </div>
+
+              <div className="modal-content">
+                <div className="file-section">
+                  <h3>Files <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>({selectedArtifact.files.length})</span></h3>
+                  <div className="file-list">
+                    {selectedArtifact.files.map(file => (
+                      <div key={file.name} className="file-item">
+                        <div className="file-info">
+                          <FileText size={16} color="var(--accent-cyan)" />
+                          <div className="file-name-meta">
+                            <span className="file-name">{file.name}</span>
+                            <span className="file-size">{(file.size_bytes / 1024).toFixed(1)} KB</span>
+                          </div>
+                        </div>
+                        <div className="file-actions">
+                          <a
+                            href={`${API_BASE}/api/artifacts/${selectedArtifact.id}/files/${file.name}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="icon-btn"
+                          >
+                            <Download size={16} />
+                          </a>
+                        </div>
+                      </div>
                     ))}
+                  </div>
                 </div>
-            </div>
 
-            {loading ? (
-                <div style={{ padding: '4rem', textAlign: 'center' }}>
-                    <Box className="ani-pulse" size={48} color="var(--accent-cyan)" style={{ margin: '0 auto 1.5rem' }} />
-                    <p style={{ color: 'var(--text-secondary)' }}>Decrypting Artifact Vault...</p>
+                <div className="detail-sidebar">
+                  <div className="detail-group">
+                    <label><User size={14} /> Generator</label>
+                    <p>{selectedArtifact.created_by}</p>
+                  </div>
+                  <div className="detail-group">
+                    <label><Calendar size={14} /> Created</label>
+                    <p>{new Date(selectedArtifact.created_at).toLocaleString()}</p>
+                  </div>
+                  <div className="detail-group">
+                    <label><Tag size={14} /> Tags</label>
+                    <div className="tag-list">
+                      {selectedArtifact.tags.map(t => <span key={t} className="tag">#{t}</span>)}
+                    </div>
+                  </div>
+                  {selectedArtifact.karma_refs.length > 0 && (
+                    <div className="detail-group">
+                      <label><Dna size={14} /> Karma Source</label>
+                      <p style={{ fontSize: '0.7rem', color: 'var(--accent-purple)' }}>{selectedArtifact.karma_refs.join(", ")}</p>
+                    </div>
+                  )}
+                  {selectedArtifact.signature && (
+                    <div className="detail-group">
+                      <label><Shield size={14} /> Audit Signature</label>
+                      <p className="signature-text">{selectedArtifact.signature}</p>
+                    </div>
+                  )}
+
+                  {selectedArtifact.edges && selectedArtifact.edges.length > 0 && (
+                    <div className="detail-group">
+                      <label><Hash size={14} /> Lineage (Provenance)</label>
+                      <div className="edge-list">
+                        {selectedArtifact.edges.map(edge => (
+                          <div key={edge.id} className="edge-item">
+                            <span className="edge-relation">{edge.relation}</span>
+                            <span className="edge-target">{edge.target_id === selectedArtifact.id ? "from: " + edge.source_id.slice(0, 8) : "to: " + edge.target_id.slice(0, 8)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
-            ) : (
-                <div className="artifact-grid">
-                    {filteredArtifacts.map((artifact) => (
-                        <motion.div
-                            key={artifact.id}
-                            layoutId={artifact.id}
-                            className="artifact-card"
-                            onClick={() => setSelectedArtifact(artifact)}
-                        >
-                            <div className="card-header">
-                                <div className="category-tag">
-                                    {getCategoryIcon(artifact.category)}
-                                    <span>{artifact.category.toUpperCase()}</span>
-                                </div>
-                                <div className="timestamp">
-                                    {new Date(artifact.created_at).toLocaleDateString()}
-                                </div>
-                            </div>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
 
-                            <h3 className="card-title">{artifact.title}</h3>
-
-                            <div className="card-meta">
-                                <div className="meta-item">
-                                    <User size={14} />
-                                    <span>{artifact.created_by}</span>
-                                </div>
-                                <div className="meta-item">
-                                    <Hash size={14} />
-                                    <span>{artifact.files.length} files</span>
-                                </div>
-                            </div>
-
-                            <div className="tag-list">
-                                {artifact.tags.map(t => <span key={t} className="tag">#{t}</span>)}
-                            </div>
-
-                            {artifact.signature && (
-                                <div className="signature-badge">
-                                    <Shield size={10} />
-                                    <span>VERIFIED</span>
-                                </div>
-                            )}
-                        </motion.div>
-                    ))}
-                </div>
-            )}
-
-            {/* Details Modal */}
-            <AnimatePresence>
-                {selectedArtifact && (
-                    <>
-                        <motion.div
-                            initial={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
-                            exit={{ opacity: 0 }}
-                            className="modal-backdrop"
-                            onClick={() => setSelectedArtifact(null)}
-                        />
-                        <motion.div
-                            layoutId={selectedArtifact.id}
-                            className="artifact-modal"
-                        >
-                            <div className="modal-header">
-                                <div>
-                                    <div className="category-tag">
-                                        {getCategoryIcon(selectedArtifact.category)}
-                                        <span>{selectedArtifact.category.toUpperCase()}</span>
-                                    </div>
-                                    <h2>{selectedArtifact.title}</h2>
-                                </div>
-                                <button onClick={() => setSelectedArtifact(null)}>✕</button>
-                            </div>
-
-                            <div className="modal-content">
-                                <div className="file-section">
-                                    <h3>Files <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>({selectedArtifact.files.length})</span></h3>
-                                    <div className="file-list">
-                                        {selectedArtifact.files.map(file => (
-                                            <div key={file.name} className="file-item">
-                                                <div className="file-info">
-                                                    <FileText size={16} color="var(--accent-cyan)" />
-                                                    <div className="file-name-meta">
-                                                        <span className="file-name">{file.name}</span>
-                                                        <span className="file-size">{(file.size_bytes / 1024).toFixed(1)} KB</span>
-                                                    </div>
-                                                </div>
-                                                <div className="file-actions">
-                                                    <a
-                                                        href={`${API_BASE}/api/artifacts/${selectedArtifact.id}/files/${file.name}`}
-                                                        target="_blank"
-                                                        rel="noreferrer"
-                                                        className="icon-btn"
-                                                    >
-                                                        <Download size={16} />
-                                                    </a>
-                                                </div>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-
-                                <div className="detail-sidebar">
-                                    <div className="detail-group">
-                                        <label><User size={14} /> Generator</label>
-                                        <p>{selectedArtifact.created_by}</p>
-                                    </div>
-                                    <div className="detail-group">
-                                        <label><Calendar size={14} /> Created</label>
-                                        <p>{new Date(selectedArtifact.created_at).toLocaleString()}</p>
-                                    </div>
-                                    <div className="detail-group">
-                                        <label><Tag size={14} /> Tags</label>
-                                        <div className="tag-list">
-                                            {selectedArtifact.tags.map(t => <span key={t} className="tag">#{t}</span>)}
-                                        </div>
-                                    </div>
-                                    {selectedArtifact.karma_refs.length > 0 && (
-                                        <div className="detail-group">
-                                            <label><Dna size={14} /> Karma Source</label>
-                                            <p style={{ fontSize: '0.7rem', color: 'var(--accent-purple)' }}>{selectedArtifact.karma_refs.join(", ")}</p>
-                                        </div>
-                                    )}
-                                    {selectedArtifact.signature && (
-                                        <div className="detail-group">
-                                            <label><Shield size={14} /> Audit Signature</label>
-                                            <p className="signature-text">{selectedArtifact.signature}</p>
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-                        </motion.div>
-                    </>
-                )}
-            </AnimatePresence>
-
-            <style>{`
+      <style>{`
         .vault-container {
           padding: 1rem;
         }
@@ -382,6 +434,29 @@ const ArtifactVault = () => {
           gap: 2px;
           font-weight: 800;
         }
+        .delete-btn {
+          position: absolute;
+          top: 1.2rem;
+          right: 1.2rem;
+          background: rgba(255, 71, 87, 0.1);
+          border: 1px solid rgba(255, 71, 87, 0.2);
+          color: #ff4757;
+          border-radius: 8px;
+          padding: 0.4rem;
+          cursor: pointer;
+          opacity: 0;
+          transition: all 0.2s;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        .artifact-card:hover .delete-btn {
+          opacity: 1;
+        }
+        .delete-btn:hover {
+          background: #ff4757;
+          color: white;
+        }
 
         .modal-backdrop {
           position: fixed;
@@ -502,9 +577,32 @@ const ArtifactVault = () => {
           padding: 0.5rem;
           border-radius: 6px;
         }
+        .edge-list {
+          display: flex;
+          flex-direction: column;
+          gap: 0.4rem;
+        }
+        .edge-item {
+          font-size: 0.75rem;
+          color: var(--text-secondary);
+          background: rgba(255,255,255,0.03);
+          padding: 0.4rem;
+          border-radius: 4px;
+          border-left: 2px solid var(--accent-cyan);
+          display: flex;
+          justify-content: space-between;
+        }
+        .edge-relation {
+          color: var(--accent-cyan);
+          font-weight: 600;
+        }
+        .edge-target {
+          color: var(--text-muted);
+          font-family: monospace;
+        }
       `}</style>
-        </div>
-    );
+    </div>
+  );
 };
 
 export default ArtifactVault;

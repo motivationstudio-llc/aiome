@@ -40,7 +40,7 @@ pub async fn trigger_failure_demo(
         "status": "success",
         "steps": [
             {"actor": "Gateway", "type": "info", "action_ja": "ジョブ要求を検知: scraper_trigger", "action_en": "Job request detected: scraper_trigger"},
-            {"actor": "OpenClaw", "type": "warn", "action_ja": "WASMブリッジ接続で想定外のセグメンテーション違反が発生", "action_en": "Unexpected segmentation fault in WASM bridge"},
+            {"actor": "Aiome", "type": "warn", "action_ja": "WASMブリッジ接続で想定外のセグメンテーション違反が発生", "action_en": "Unexpected segmentation fault in WASM bridge"},
             {"actor": "Aiome OS", "type": "error", "action_ja": "エージェントのクラッシュを検知。Abyss Vault にて状態を凍結中...", "action_en": "Agent crash detected. Freezing state in Abyss Vault..."},
             {"actor": "Aiome OS", "type": "success", "action_ja": "失敗から教訓(Karma)を抽出しました: 「外部バイナリ呼び出し時の不整合」", "action_en": "Extracted Karma from failure: 'Inconsistency during external binary calls'"}
         ],

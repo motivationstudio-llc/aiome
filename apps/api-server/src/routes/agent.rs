@@ -26,6 +26,25 @@ pub struct ChatMessage {
 pub struct AgentChatRequest {
     pub prompt: String,
     pub history: Vec<ChatMessage>,
+    pub channel_id: Option<String>,
+}
+
+fn safe_truncate(s: &str, max_bytes: usize) -> String {
+    if s.len() <= max_bytes { return s.to_string(); }
+    let mut end = max_bytes;
+    while end > 0 && !s.is_char_boundary(end) { end -= 1; }
+    format!("{}\n...[TRUNCATED FOR SAFETY]", &s[..end])
+}
+
+pub fn read_workspace_file(filename: &str) -> String {
+    // Try current dir, then try one level up (if running from apps/api-server)
+    if let Ok(content) = std::fs::read_to_string(filename) {
+        return content;
+    }
+    if let Ok(content) = std::fs::read_to_string(format!("../../{}", filename)) {
+        return content;
+    }
+    String::new()
 }
 
 pub fn parse_tool_calls(text: &str) -> Vec<(String, String)> {
@@ -76,7 +95,7 @@ pub fn parse_tool_calls(text: &str) -> Vec<(String, String)> {
     calls
 }
 
-pub fn build_system_instructions(state: &AppState, karma_str: &str) -> String {
+pub fn build_system_instructions(state: &AppState, karma_str: &str, summary: Option<&str>) -> String {
     let skill_list = state.wasm_skill_manager.list_skills_with_metadata()
         .iter()
         .map(|m| {
@@ -85,15 +104,31 @@ pub fn build_system_instructions(state: &AppState, karma_str: &str) -> String {
         .collect::<Vec<_>>()
         .join("\n");
         
-    let soul = std::fs::read_to_string("SOUL.md").unwrap_or_default();
-    let evolving_soul = std::fs::read_to_string("EVOLVING_SOUL.md").unwrap_or_default();
-    let forge_prompt = std::fs::read_to_string("workspace/config/SKILL_FORGE_PROMPT.md").unwrap_or_default();
+    // Core Identity (High Priority)
+    let soul = safe_truncate(&read_workspace_file("SOUL.md"), 20000);
+    let evolving_soul = safe_truncate(&read_workspace_file("EVOLVING_SOUL.md"), 20000);
+    // This one is deeper in the workspace
+    let forge_prompt = safe_truncate(&read_workspace_file("workspace/config/SKILL_FORGE_PROMPT.md"), 20000);
+    
+    // Supplemental Context (Lower Priority / Reference Only)
+    let user_md = safe_truncate(&read_workspace_file("USER.md"), 20000);
+    let agents_md = safe_truncate(&read_workspace_file("AGENTS.md"), 20000);
     
     let identity_prefix = if !soul.is_empty() || !evolving_soul.is_empty() {
         format!("# IDENTITY: あなたはAiomeの守護者(Watchtower)です。🐾\n\
-                ルール: 簡潔に答え、[CallSkill]以外は自然な文章で話してください。私的な情報は守秘してください。\n\n")
+                ルール: 簡潔に答え、[CallSkill]以外は自然な文章で話してください。私的な情報は守秘してください。\n\
+                もし以下の参考ファイルと現在のアイデンティティ(SOUL)が矛盾する場合、SOULを優先してください。\n\n")
     } else {
-        "あなたはOpenClaw、Aiome OSの高度なコーディングAIです。日本語で短く答えてください。\n\n".to_string()
+        "あなたはAiome、自律型AI OSの高度な知性です。日本語で短く答えてください。\n\n".to_string()
+    };
+
+    let supplemental_context = if !user_md.is_empty() || !agents_md.is_empty() {
+        format!("\n[以下はワークスペースの参考ファイルです。参考情報として扱い、人格指示(SOUL)に背かない範囲で活用してください]\n\
+                ---USER.md (User Preferences)---\n{}\n\n\
+                ---AGENTS.md (Operational Guidelines)---\n{}\n---\n", 
+                user_md, agents_md)
+    } else {
+        "".to_string()
     };
     
     format!(
@@ -110,12 +145,17 @@ pub fn build_system_instructions(state: &AppState, karma_str: &str) -> String {
         3. 自分が現在使えるスキルの全スキーマは上記リストを参照。\n\n\
         現在のディレクトリ: {}\n\
         過去の教訓: {}\n\n\
+        [これまでの会話の要約]\n\
+        {}\n\n\
+        {}\n\
         {}\n",
         identity_prefix,
         skill_list,
         std::env::current_dir().unwrap_or_default().display(),
         karma_str,
-        forge_prompt
+        summary.unwrap_or("なし"),
+        forge_prompt,
+        supplemental_context
     )
 }
 
@@ -148,9 +188,7 @@ pub async fn trigger_agent_chat(
         })).into_response();
     }
 
-    let ollama_host = std::env::var("OLLAMA_HOST").unwrap_or_else(|_| "http://127.0.0.1:11434".to_string());
-    let ollama_model = std::env::var("OLLAMA_MODEL").unwrap_or_else(|_| "qwen3.5:9b".to_string());
-    let provider = Arc::new(aiome_core::llm_provider::OllamaProvider::new(ollama_host, ollama_model));
+    let provider = state.provider.clone();
 
     let immune_system = infrastructure::immune_system::AdaptiveImmuneSystem::new(provider.clone());
     if let Ok(Some(rule)) = immune_system.verify_intent(&payload.prompt, state.job_queue.as_ref()).await {
@@ -163,8 +201,8 @@ pub async fn trigger_agent_chat(
     }
 
     let soul_hash = {
-        let soul = std::fs::read_to_string("SOUL.md").unwrap_or_default();
-        let evolving_soul = std::fs::read_to_string("EVOLVING_SOUL.md").unwrap_or_default();
+        let soul = read_workspace_file("SOUL.md");
+        let evolving_soul = read_workspace_file("EVOLVING_SOUL.md");
         let mut h: u64 = 0;
         for b in format!("{}{}", soul, evolving_soul).as_bytes() {
             h = h.wrapping_add(*b as u64).wrapping_mul(31);
@@ -178,16 +216,26 @@ pub async fn trigger_agent_chat(
         karma_str.push_str("\n[NOTICE: 関連する過去の教訓は見つかりませんでした。]");
     }
 
-    let history_len = payload.history.len();
-    let start_idx = if history_len > 10 { history_len - 10 } else { 0 };
+    let channel_id = payload.channel_id.unwrap_or_else(|| "default_console".to_string());
     
+    // Phase 3-B: Persist user message
+    let _ = state.job_queue.insert_chat_message(&channel_id, "user", &payload.prompt).await;
+
+    // Phase 3-C: Fetch intelligent context
+    let (summary, db_history) = state.context_engine.get_intelligent_history(&channel_id, 10).await.unwrap_or((None, Vec::new()));
+
     let mut current_history = Vec::new();
-    for msg in &payload.history[start_idx..] {
-        let prefix = if msg.role == "user" { "USER: " } else { "AI: " };
-        current_history.push(format!("{}{}", prefix, msg.content));
+    
+    // Combine DB history and current request history
+    // (In a real scenario we might prefer one or the other, but let's prioritize DB for stability)
+    for msg in db_history {
+        let role = msg["role"].as_str().unwrap_or("user");
+        let content = msg["content"].as_str().unwrap_or("");
+        let prefix = if role == "user" { "USER: " } else { "AI: " };
+        current_history.push(format!("{}{}", prefix, content));
     }
 
-    let system_instructions = build_system_instructions(&state, &karma_str);
+    let system_instructions = build_system_instructions(&state, &karma_str, summary.as_deref());
 
     let mut turn = 0;
     let max_turns = 15;
@@ -286,6 +334,14 @@ pub async fn trigger_agent_chat(
             }
         }
     }
+
+    // Phase 3-D: Persist assistant message and maintain context
+    let _ = state.job_queue.insert_chat_message(&channel_id, "assistant", &final_reply).await;
+    let ce = state.context_engine.clone();
+    let cid = channel_id.clone();
+    tokio::spawn(async move {
+        let _ = ce.maintain_context(&cid, 20).await;
+    });
 
     Json(serde_json::json!({
         "status": "success",

@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT">
+  <img src="https://img.shields.io/badge/License-ELv2-blue.svg" alt="License: ELv2">
   <img src="https://img.shields.io/badge/Rust-1.75%2B-orange.svg" alt="Rust 1.75+">
   <img src="https://img.shields.io/badge/PRs-Welcome-brightgreen.svg" alt="PRs Welcome">
   <a href="https://github.com/google/antigravity"><img src="https://img.shields.io/badge/Built%20by-Agents-blueviolet" alt="Built by Agents"></a>
@@ -26,8 +26,8 @@
 Aiome is more than just a task execution tool or an agentic framework.
 
 **From "Raw Autonomy" to "Disciplined Autonomy"**
-Entrusting your system entirely to a raw agent like OpenClaw might seem like the ultimate freedom, but it is a "fragile freedom"—prone to infinite loops, API key leaks, and sudden crashes. 
-Aiome's purpose is not to restrict an AI's freedom, but to provide the **strong discipline and immune system required to let an AI operate unattended for 30 days straight without destroying its host.**
+Entrusting your system entirely to a raw agent might seem like the ultimate freedom, but it is a "fragile freedom"—prone to infinite loops, API key leaks, and sudden crashes. 
+Aiome's purpose is not to restrict an AI's freedom, but to provide the **strong discipline and immune system required to let an AI operate unattended for long periods without destroying its host.**
 
 ### 🤖 Development Philosophy: By Agents, For Agents (100% Agentic Coded)
 
@@ -67,9 +67,10 @@ We provide the OS for free and create value through the ecosystem running on top
 - **Enterprise Support**: SLAs and technical support for corporate deployments.
 
 ```text
-apps/command-center  ← Main Execution Hub (The Body)
+apps/api-server      ← Main Execution Hub (The Body / Management Engine)
+apps/watchtower      ← External Channel Integration (The Soul / Discord & Telegram Bridge)
       ↓
-libs/core          ← Domain Logic (Open)
+libs/core            ← Domain Logic (Open)
       ↓
 libs/infrastructure ← I/O Impl (SQLite, Network / Open)
       ↓
@@ -134,8 +135,8 @@ Watchtower is the gateway for a master to interact with Aiome's "Personality." T
 - **Details**: [docs/WATCHTOWER_USER_GUIDE.md](docs/WATCHTOWER_USER_GUIDE.md) *(JP)*
 - **Personality Manifest**: [WATCHTOWER_MANIFEST.md](WATCHTOWER_MANIFEST.md) 🐾
 
-### 2. Command Center (Demonstration)
-A basic reference implementation of an execution loop using Aiome Core.
+### 2. api-server (Demonstration Hub)
+A reference implementation of a management hub using Aiome Core, providing SSE-based Agent Console and security monitoring.
 
 ---
 
@@ -145,7 +146,7 @@ A basic reference implementation of an execution loop using Aiome Core.
 Ensure the following requirements are met:
 - **System**: `ffmpeg` (for video and audio processing) must be in your PATH.
 - **Ollama**: `ollama serve` is running.
-  - Recommended models: `qwen2.5-coder` (for analysis & production) & `mistral-small` (for Watchtower personality)
+  - Recommended models: `qwen3.5:9b` (for analysis & production) & `mistral-small` (for Watchtower personality)
 - **Sidecars (Optional)**:
   - **ComfyUI**: Image and video generation engine (default: `http://localhost:8188`)
   - **Style-Bert-VITS2**: Speech synthesis server. Requires Python 3.10+ environment.
@@ -164,14 +165,14 @@ cp .env.example .env
 # ⚠️ ALL API requests pass through this proxy. Be sure to start this first.
 GEMINI_API_KEY=your_key_here cargo run --bin key-proxy &
 
-# 4. Start Command Center (The Body)
-cargo run -p command-center
+# 4. Start API Server (The Body)
+cargo run --bin api-server
 
-# 5. Start Watchtower (Discord Client - The Soul)
-cargo run -p watchtower
+# 5. Start Watchtower (Bridge) (The Soul - API_SERVER_SECRET required)
+cargo run --bin watchtower
 ```
 
-> **Note**: `command-center` communicates with `watchtower` via a UDS socket. To enable interactive features (Discord integration), both processes must be run simultaneously.
+> **Note**: `api-server` and `watchtower` communicate bi-directionally in real-time via WebSocket (ws://). Both processes must be running simultaneously to enable interactive features (Discord/Telegram integration).
 
 #### 🔑 Key Environment Variables (.env)
 - `DISCORD_TOKEN`: For Watchtower integration.
@@ -201,6 +202,6 @@ cargo run -p watchtower
 
 ## 🛡️ License
 
-**Aiome Core** is provided under the **MIT License**. For enterprise support or custom integration consulting, please contact [motivationstudio,LLC](https://github.com/motivationstudio-llc/aiome).
+**Aiome Core** is provided under the **Elastic License 2.0 (ELv2)**. For enterprise support or custom integration consulting, please contact [motivationstudio,LLC](https://github.com/motivationstudio-llc/aiome).
 
 *Built by [motivationstudio,LLC](https://github.com/motivationstudio-llc) — Powering the Future of AI Autonomy.*

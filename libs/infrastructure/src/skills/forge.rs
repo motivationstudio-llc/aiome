@@ -58,15 +58,16 @@ serde_json = "1.0"
 
     /// macOS Seatbelt (sandbox-exec) 用のプロファイル生成
     pub(crate) fn generate_seatbelt_profile(&self, temp_dir: &Path) -> String {
-        let user = std::env::var("USER").unwrap_or_else(|_| "motista".to_string());
+        let current_dir = std::env::current_dir()
+            .unwrap_or_else(|_| PathBuf::from("."));
         format!(
             r#"(version 1)
 (allow default)
-(deny file-write* (subpath "/Users/{user}/Desktop/antigravity/modular-open-claw"))
+(deny file-write* (subpath "{current_dir}"))
 (allow file-write* (subpath "{temp_dir}"))
 (allow file-write* (subpath "/tmp") (subpath "/private/tmp"))
 "#,
-            user = user,
+            current_dir = current_dir.to_string_lossy(),
             temp_dir = temp_dir.to_string_lossy()
         )
     }

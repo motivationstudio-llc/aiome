@@ -14,6 +14,13 @@ const AgentConsole: React.FC = () => {
     const [status, setStatus] = useState<string>("IDLE");
     const [relevantKarma, setRelevantKarma] = useState<string | null>(null);
     const [relevantKarmaData, setRelevantKarmaData] = useState<{ is_ood: boolean, entries: { id: string, lesson: string }[] } | null>(null);
+    const [channelId] = useState(() => {
+        const stored = sessionStorage.getItem('aiome_console_channel_id');
+        if (stored) return stored;
+        const newId = crypto.randomUUID();
+        sessionStorage.setItem('aiome_console_channel_id', newId);
+        return newId;
+    });
 
     const scrollToBottom = () => {
         chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -41,7 +48,11 @@ const AgentConsole: React.FC = () => {
                     'Content-Type': 'application/json',
                     ...getAuthHeaders()
                 },
-                body: JSON.stringify({ prompt: currentPrompt, history: history })
+                body: JSON.stringify({
+                    prompt: currentPrompt,
+                    history: history,
+                    channel_id: channelId
+                })
             });
 
             if (!response.body) throw new Error("No response body");
@@ -98,7 +109,7 @@ const AgentConsole: React.FC = () => {
                 setStreamingText("");
             }
         } catch (e) {
-            setHistory(prev => [...prev, { role: "assistant", content: "⚠️ Connection error to OpenClaw layer.", isError: true }]);
+            setHistory(prev => [...prev, { role: "assistant", content: "⚠️ Connection error to Aiome layer.", isError: true }]);
         } finally {
             setIsTyping(false);
             setStatus("IDLE");

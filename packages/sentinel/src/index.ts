@@ -1,6 +1,4 @@
-/**
- * @aiome/sentinel OpenClaw Plugin
- */
+ * @aiome / sentinel Legacy Integration Plugin
 
 import { native } from './native';
 

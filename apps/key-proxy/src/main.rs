@@ -82,7 +82,7 @@ async fn main() -> anyhow::Result<()> {
     quotas.insert("daemon".to_string(), 1000);
     quotas.insert("watchtower".to_string(), 100);
     quotas.insert("api-server".to_string(), 1000);
-    quotas.insert("openclaw-agent".to_string(), 1000);
+    quotas.insert("aiome-agent".to_string(), 1000);
 
     let state = AppState {
         gemini_key: Arc::new(SecretString::from(gemini_key)),
@@ -144,7 +144,7 @@ async fn handle_llm_complete(
     // DEMO MOCK MODE
     if state.gemini_key.expose_secret() == "mock_key_for_testing" {
         return Json(ProxyResponse { 
-            result: format!("I am OpenClaw. I hear you loud and clear. Your prompt was: '{}'. Currently operating in Mock Offline Mode inside the Aiome Abyss Vault.", payload.prompt)
+            result: format!("I am Aiome. I hear you loud and clear. Your prompt was: '{}'. Currently operating in Mock Offline Mode inside the Aiome Abyss Vault.", payload.prompt)
         }).into_response();
     }
     

@@ -34,12 +34,22 @@ impl SoulMutator {
     pub async fn transmute(&self, job_queue: &dyn JobQueue) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
         info!("🧬 [SoulMutator] Starting Transmigration phase using {}...", self.provider.name());
 
-        let root_dir = std::env::current_dir()?;
-        let soul_path = root_dir.join("SOUL.md");
-        let evolving_soul_path = root_dir.join("EVOLVING_SOUL.md");
+        let soul_filename = "SOUL.md";
+        let evolving_soul_filename = "EVOLVING_SOUL.md";
+        
+        let mut soul_path = std::path::PathBuf::from(soul_filename);
+        let mut evolving_soul_path = std::path::PathBuf::from(evolving_soul_filename);
+
+        if !soul_path.exists() {
+            let parent_soul = std::path::PathBuf::from(format!("../../{}", soul_filename));
+            if parent_soul.exists() {
+                soul_path = parent_soul;
+                evolving_soul_path = std::path::PathBuf::from(format!("../../{}", evolving_soul_filename));
+            }
+        }
 
         if !soul_path.exists() || !evolving_soul_path.exists() {
-            return Err("SOUL.md or EVOLVING_SOUL.md not found. Transmutation impossible.".into());
+            return Err(format!("{} or {} not found. Transmutation impossible.", soul_filename, evolving_soul_filename).into());
         }
 
         // 1. Read Current Soul State
@@ -124,9 +134,19 @@ impl SoulMutator {
     pub async fn evolve_tactics(&self, job_queue: &dyn JobQueue, old_level: i32, new_level: i32) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         info!("🌟 [SoulMutator] Level Up detected ({} -> {}). Initiating Behavioral Shift...", old_level, new_level);
 
-        let root_dir = std::env::current_dir()?;
-        let soul_path = root_dir.join("SOUL.md");
-        let evolving_soul_path = root_dir.join("EVOLVING_SOUL.md");
+        let soul_filename = "SOUL.md";
+        let evolving_soul_filename = "EVOLVING_SOUL.md";
+        
+        let mut soul_path = std::path::PathBuf::from(soul_filename);
+        let mut evolving_soul_path = std::path::PathBuf::from(evolving_soul_filename);
+
+        if !soul_path.exists() {
+            let parent_soul = std::path::PathBuf::from(format!("../../{}", soul_filename));
+            if parent_soul.exists() {
+                soul_path = parent_soul;
+                evolving_soul_path = std::path::PathBuf::from(format!("../../{}", evolving_soul_filename));
+            }
+        }
 
         if !soul_path.exists() || !evolving_soul_path.exists() {
             return Err("SOUL.md or EVOLVING_SOUL.md not found.".into());

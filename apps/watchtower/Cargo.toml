@@ -1,0 +1,22 @@
+[package]
+name = "watchtower"
+version = "0.1.0"
+edition = "2021"
+license = "ELv2"
+
+[dependencies]
+tokio = { workspace = true, features = ["full"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+reqwest = { workspace = true, features = ["json"] }
+aiome-core = { path = "../../libs/core" }
+infrastructure = { path = "../../libs/infrastructure" }
+shared = { path = "../../libs/shared" }
+serenity = { version = "0.12", default-features = false, features = ["client", "gateway", "rustls_backend", "model", "http"] }
+teloxide = { version = "0.13", features = ["macros"] }
+futures-util = "0.3"
+tokio-tungstenite = "0.21"
+url = "2.5"

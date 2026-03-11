@@ -1,7 +1,7 @@
 import { native } from './native';
 
 export function registerRoutes(api: any) {
-    // Expose dashboard or endpoints for local OpenClaw Gateway
+    // Expose dashboard or endpoints for local Legacy Gateway
     api.registerRoute({
         method: "GET",
         path: "/aiome/status",

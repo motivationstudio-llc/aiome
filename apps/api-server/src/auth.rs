@@ -20,7 +20,7 @@ where
             .headers
             .get(AUTHORIZATION)
             .and_then(|h| h.to_str().ok())
-            .unwrap_or("");
+            .unwrap_or_default();
 
         let expected_secret = std::env::var("API_SERVER_SECRET").unwrap_or_else(|_| {
             if cfg!(debug_assertions) {

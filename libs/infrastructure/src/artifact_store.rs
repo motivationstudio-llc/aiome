@@ -8,20 +8,29 @@
 use async_trait::async_trait;
 use aiome_core::error::AiomeError;
 use aiome_core::traits::{ArtifactStore, ArtifactMeta, ArtifactCategory, ArtifactFile, CreateArtifactRequest};
+use shared::sandbox::PathSandbox;
 use sqlx::{SqlitePool, Row};
 use uuid::Uuid;
 use sha2::{Sha256, Digest};
 use std::path::{Path, PathBuf};
-use tracing::info;
+use std::sync::Arc;
+use aiome_core::llm_provider::EmbeddingProvider;
+use tracing::{info, warn};
 
 pub struct SqliteArtifactStore {
     pool: SqlitePool,
     base_dir: PathBuf, // workspace/artifacts
+    embed_provider: Option<Arc<dyn EmbeddingProvider>>,
 }
 
 impl SqliteArtifactStore {
     pub fn new(pool: SqlitePool, base_dir: PathBuf) -> Self {
-        Self { pool, base_dir }
+        Self { pool, base_dir, embed_provider: None }
+    }
+
+    pub fn with_embeddings(mut self, provider: Arc<dyn EmbeddingProvider>) -> Self {
+        self.embed_provider = Some(provider);
+        self
     }
 
     fn calculate_hash(content: &[u8]) -> String {
@@ -38,9 +47,13 @@ impl ArtifactStore for SqliteArtifactStore {
         let timestamp = chrono::Utc::now();
         let dir_name = format!("{}_{}", timestamp.format("%Y-%m-%d"), id[..8].to_string());
         
-        // 1. Create directory using standard fs after validation
+        // 1. Create directory using PathSandbox for secure jail confinement
+        let sandbox = PathSandbox::new(jail.root())
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to initialize sandbox: {}", e) })?;
+            
         let relative_dir = Path::new("artifacts").join(&dir_name);
-        let full_dir = jail.root().join(&relative_dir);
+        let full_dir = sandbox.validate_path(&relative_dir)
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Security violation - invalid artifact path: {}", e) })?;
         
         std::fs::create_dir_all(&full_dir)
             .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to create artifact dir: {}", e) })?;
@@ -51,7 +64,8 @@ impl ArtifactStore for SqliteArtifactStore {
         // 2. Save files and calculate hashes
         for (filename, content, mime_type) in req.files {
             let hash = Self::calculate_hash(&content);
-            let file_path = full_dir.join(&filename);
+            let file_path = sandbox.validate_path(full_dir.join(&filename))
+                .map_err(|e| AiomeError::Infrastructure { reason: format!("Security violation - invalid file path: {}", e) })?;
             
             std::fs::write(&file_path, &content)
                 .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to write artifact file {}: {}", filename, e) })?;
@@ -70,12 +84,27 @@ impl ArtifactStore for SqliteArtifactStore {
         let file_manifest_json = serde_json::to_string(&artifact_files).unwrap();
         let tags_json = serde_json::to_string(&req.tags).unwrap();
         let karma_refs_json = serde_json::to_string(&req.karma_refs).unwrap();
+        
+        // SEC-6: Enforce payload size limits (max 500KB total for metadata)
+        if file_manifest_json.len() + tags_json.len() + karma_refs_json.len() > 500 * 1024 {
+            return Err(AiomeError::SecurityViolation { reason: "Artifact metadata exceeds safety limits (500KB)".into() });
+        }
+
+        // Phase 2: Generate Embedding
+        let mut embedding_blob: Option<Vec<u8>> = None;
+        if let Some(ref provider) = self.embed_provider {
+            let context = format!("{} {:?} {}", req.title, req.category, req.tags.join(" "));
+            if let Ok(vec) = provider.embed(&context).await {
+                embedding_blob = Some(vec.iter().flat_map(|f| f.to_le_bytes()).collect());
+            }
+        }
+
         let signature = format!("{:x}", manifest_hasher.finalize());
 
         // 3. Store in SQLite
         sqlx::query(
-            "INSERT INTO ai_artifacts (id, title, category, tags, created_by, dir_path, file_manifest, karma_refs, job_ref, signature) 
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            "INSERT INTO ai_artifacts (id, title, category, tags, created_by, dir_path, file_manifest, karma_refs, job_ref, signature, embedding) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         )
         .bind(&id)
         .bind(&req.title)
@@ -87,9 +116,27 @@ impl ArtifactStore for SqliteArtifactStore {
         .bind(&karma_refs_json)
         .bind(req.job_ref)
         .bind(&signature)
+        .bind(embedding_blob)
         .execute(&self.pool)
         .await
         .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to store artifact metadata: {}", e) })?;
+
+        // Phase 1: Store Edges (Provenance DAG)
+        for edge_req in req.parent_refs {
+            let edge_id = Uuid::new_v4().to_string();
+            sqlx::query(
+                "INSERT INTO artifact_edges (id, source_id, target_id, source_type, relation, metadata) VALUES (?, ?, ?, ?, ?, ?)"
+            )
+            .bind(&edge_id)
+            .bind(&id)
+            .bind(&edge_req.target_id)
+            .bind(&edge_req.source_type)
+            .bind(&edge_req.relation)
+            .bind(serde_json::to_string(&edge_req.metadata.unwrap_or(serde_json::json!({}))).unwrap_or_default())
+            .execute(&self.pool)
+            .await
+            .ok();
+        }
 
         info!("📦 Artifact saved: {} (ID: {})", req.title, id);
         Ok(id)
@@ -114,7 +161,7 @@ impl ArtifactStore for SqliteArtifactStore {
         for row in rows {
             results.push(ArtifactMeta {
                 id: row.get("id"),
-                title: row.get("id"),
+                title: row.get("title"),
                 category: serde_json::from_str(&format!("\"{}\"", row.get::<String, _>("category"))).unwrap_or(ArtifactCategory::Report),
                 tags: serde_json::from_str(row.get("tags")).unwrap_or_default(),
                 created_by: row.get("created_by"),
@@ -124,6 +171,7 @@ impl ArtifactStore for SqliteArtifactStore {
                 job_ref: row.get("job_ref"),
                 soul_version_hash: row.get("soul_version_hash"),
                 signature: row.get("signature"),
+                edges: Vec::new(), // Populated on-demand or with specific fetch
                 created_at: row.get("created_at"),
             });
         }
@@ -138,20 +186,28 @@ impl ArtifactStore for SqliteArtifactStore {
             .await
             .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to fetch artifact details: {}", e) })?;
 
-        Ok(row.map(|r| ArtifactMeta {
-            id: r.get("id"),
-            title: r.get("id"),
-            category: serde_json::from_str(&format!("\"{}\"", r.get::<String, _>("category"))).unwrap_or(ArtifactCategory::Report),
-            tags: serde_json::from_str(r.get("tags")).unwrap_or_default(),
-            created_by: r.get("created_by"),
-            dir_path: r.get("dir_path"),
-            files: serde_json::from_str(r.get("file_manifest")).unwrap_or_default(),
-            karma_refs: serde_json::from_str(r.get("karma_refs")).unwrap_or_default(),
-            job_ref: r.get("job_ref"),
-            soul_version_hash: r.get("soul_version_hash"),
-            signature: r.get("signature"),
-            created_at: r.get("created_at"),
-        }))
+        if let Some(r) = row {
+            let id: String = r.get("id");
+            let edges = self.get_artifact_edges(&id).await.unwrap_or_default();
+
+            Ok(Some(ArtifactMeta {
+                id,
+                title: r.get("title"),
+                category: serde_json::from_str(&format!("\"{}\"", r.get::<String, _>("category"))).unwrap_or(ArtifactCategory::Report),
+                tags: serde_json::from_str(r.get("tags")).unwrap_or_default(),
+                created_by: r.get("created_by"),
+                dir_path: r.get("dir_path"),
+                files: serde_json::from_str(r.get("file_manifest")).unwrap_or_default(),
+                karma_refs: serde_json::from_str(r.get("karma_refs")).unwrap_or_default(),
+                job_ref: r.get("job_ref"),
+                soul_version_hash: r.get("soul_version_hash"),
+                signature: r.get("signature"),
+                edges,
+                created_at: r.get("created_at"),
+            }))
+        } else {
+            Ok(None)
+        }
     }
 
     async fn read_artifact_file(&self, id: &str, filename: &str, jail: &bastion::fs_guard::Jail) -> Result<Vec<u8>, AiomeError> {
@@ -163,7 +219,12 @@ impl ArtifactStore for SqliteArtifactStore {
             return Err(AiomeError::ArtifactNotFound { path: format!("{}/{}", id, filename) });
         }
 
-        let full_path = jail.root().join(&meta.dir_path).join(filename);
+        let sandbox = PathSandbox::new(jail.root())
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to initialize sandbox: {}", e) })?;
+            
+        let full_path = sandbox.validate_path(Path::new(&meta.dir_path).join(filename))
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Security violation - unauthorized file access: {}", e) })?;
+
         let content = std::fs::read(full_path)
             .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to read artifact file: {}", e) })?;
             
@@ -174,8 +235,13 @@ impl ArtifactStore for SqliteArtifactStore {
         let meta = self.fetch_artifact(id).await?
             .ok_or_else(|| AiomeError::ArtifactNotFound { path: id.to_string() })?;
 
-        // 1. Delete files from disk using standard fs after validation
-        let full_dir = jail.root().join(&meta.dir_path);
+        // 1. Delete files from disk using sandbox
+        let sandbox = PathSandbox::new(jail.root())
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to initialize sandbox: {}", e) })?;
+            
+        let full_dir = sandbox.validate_path(&meta.dir_path)
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Security violation - unauthorized directory access: {}", e) })?;
+
         for file in meta.files {
             let file_path = full_dir.join(&file.name);
             let _ = std::fs::remove_file(file_path);
@@ -185,12 +251,90 @@ impl ArtifactStore for SqliteArtifactStore {
         let _ = std::fs::remove_dir(full_dir);
 
         // 3. Delete from DB
-        sqlx::query("DELETE FROM ai_artifacts WHERE id = ?")
-            .bind(id)
-            .execute(&self.pool)
-            .await
-            .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to delete artifact metadata: {}", e) })?;
+        sqlx::query("DELETE FROM ai_artifacts WHERE id = ?").bind(id).execute(&self.pool).await.ok();
+        sqlx::query("DELETE FROM artifact_edges WHERE source_id = ? OR target_id = ?").bind(id).bind(id).execute(&self.pool).await.ok();
 
         Ok(())
+    }
+
+    async fn get_artifact_edges(&self, id: &str) -> Result<Vec<aiome_core::traits::ArtifactEdge>, AiomeError> {
+        let rows = sqlx::query("SELECT * FROM artifact_edges WHERE source_id = ? OR target_id = ?")
+            .bind(id).bind(id)
+            .fetch_all(&self.pool).await
+            .map_err(|e| AiomeError::Infrastructure { reason: e.to_string() })?;
+
+        let mut edges = Vec::new();
+        for r in rows {
+            edges.push(aiome_core::traits::ArtifactEdge {
+                id: r.get("id"),
+                source_id: r.get("source_id"),
+                target_id: r.get("target_id"),
+                source_type: r.get("source_type"),
+                relation: r.get("relation"),
+                metadata: serde_json::from_str(r.get("metadata")).unwrap_or(serde_json::json!({})),
+                created_at: r.get("created_at"),
+            });
+        }
+        Ok(edges)
+    }
+
+    async fn add_artifact_edge(&self, edge: aiome_core::traits::ArtifactEdge) -> Result<(), AiomeError> {
+        sqlx::query(
+            "INSERT INTO artifact_edges (id, source_id, target_id, source_type, relation, metadata) VALUES (?, ?, ?, ?, ?, ?)"
+        )
+        .bind(&edge.id).bind(&edge.source_id).bind(&edge.target_id).bind(&edge.source_type)
+        .bind(&edge.relation).bind(serde_json::to_string(&edge.metadata).unwrap_or_default())
+        .execute(&self.pool).await
+        .map_err(|e| AiomeError::Infrastructure { reason: e.to_string() })?;
+        Ok(())
+    }
+
+    async fn search_artifacts_semantic(&self, query: &str, _category: Option<ArtifactCategory>, limit: i64) -> Result<Vec<ArtifactMeta>, AiomeError> {
+        let provider = self.embed_provider.as_ref()
+            .ok_or_else(|| AiomeError::Infrastructure { reason: "Embedding provider not configured for Semantic Search".into() })?;
+
+        let query_vec = provider.embed(query).await?;
+        let query_vec_f64: Vec<f64> = query_vec.iter().map(|&f| f as f64).collect();
+
+        // SEC-7: Safety-clamp SQL fetch to avoid DoS on large datasets
+        let rows = sqlx::query("SELECT id, title, category, tags, created_by, dir_path, file_manifest, embedding, created_at FROM ai_artifacts WHERE embedding IS NOT NULL ORDER BY created_at DESC LIMIT 1000")
+            .fetch_all(&self.pool).await
+            .map_err(|e| AiomeError::Infrastructure { reason: e.to_string() })?;
+
+        let mut candidates = Vec::new();
+        for r in rows {
+            let emb_bytes: Vec<u8> = r.get("embedding");
+            let emb_vec: Vec<f64> = emb_bytes.chunks_exact(4)
+                .map(|c| f32::from_le_bytes(c.try_into().unwrap()) as f64)
+                .collect();
+            
+            // Re-using cosine_similarity from job_queue (it's in the same crate, so let's check accessibility)
+            // Since artifact_store.rs and karma.rs are in libs/infrastructure/src, we can access crate-level helpers.
+            let score = crate::job_queue::cosine_similarity(&query_vec_f64, &emb_vec);
+            candidates.push((score, r));
+        }
+
+        candidates.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+        
+        let mut results = Vec::new();
+        for (_, r) in candidates.into_iter().take(limit as usize) {
+            results.push(ArtifactMeta {
+                id: r.get("id"),
+                title: r.get("title"),
+                category: serde_json::from_str(&format!("\"{}\"", r.get::<String, _>("category"))).unwrap_or(ArtifactCategory::Report),
+                tags: serde_json::from_str(r.get("tags")).unwrap_or_default(),
+                created_by: r.get("created_by"),
+                dir_path: r.get("dir_path"),
+                files: serde_json::from_str(r.get("file_manifest")).unwrap_or_default(),
+                karma_refs: Vec::new(), // Omitted for performance in search
+                job_ref: None,
+                soul_version_hash: None,
+                signature: None,
+                edges: Vec::new(),
+                created_at: r.get("created_at"),
+            });
+        }
+
+        Ok(results)
     }
 }

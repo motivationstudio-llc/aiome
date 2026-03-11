@@ -95,7 +95,7 @@ impl LlmProvider for OllamaProvider {
             "messages": messages,
             "stream": false,
             "options": {
-                "num_predict": 512,
+                "num_predict": 4096,
                 "temperature": 0.7
             }
         });
@@ -137,7 +137,7 @@ impl LlmProvider for OllamaProvider {
             "messages": messages,
             "stream": true,
             "options": {
-                "num_predict": 512,
+                "num_predict": 4096,
                 "temperature": 0.7
             }
         });

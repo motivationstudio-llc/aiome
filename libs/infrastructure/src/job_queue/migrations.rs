@@ -361,6 +361,41 @@ impl DbInitializer for SqliteJobQueue {
         .await
         .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to create ai_artifacts table: {}", e) })?;
 
+        // Phase 1: Artifact Evolution (Memory Crystal)
+        sqlx::query("ALTER TABLE ai_artifacts ADD COLUMN embedding BLOB;").execute(&self.pool).await.ok();
+        
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS artifact_edges (
+                id TEXT PRIMARY KEY,
+                source_id TEXT NOT NULL,
+                target_id TEXT NOT NULL,
+                source_type TEXT NOT NULL, -- 'Artifact' or 'Karma'
+                relation TEXT NOT NULL,    -- 'DerivedFrom', 'AssociatedWith'
+                metadata TEXT DEFAULT '{}',
+                created_at TEXT DEFAULT (datetime('now'))
+            );"
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to create artifact_edges table: {}", e) })?;
+
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_edge_source ON artifact_edges(source_id);").execute(&self.pool).await.ok();
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_edge_target ON artifact_edges(target_id);").execute(&self.pool).await.ok();
+        
+        // Phase 5: System Settings (Dashboard Connectivity)
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS system_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                category TEXT NOT NULL DEFAULT 'system',
+                is_secret INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT DEFAULT (datetime('now'))
+            );"
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to create system_settings table: {}", e) })?;
+
         info!("✅ [SqliteJobQueue] Database and migrations initialized successfully.");
         Ok(())
     }

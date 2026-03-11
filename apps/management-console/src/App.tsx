@@ -8,11 +8,9 @@ import {
   MessageSquare,
   BrainCircuit,
   Package,
-  Sparkles,
-  Dna,
-  Terminal,
   Box,
-  Settings as SettingsIcon
+  Settings as SettingsIcon,
+  Zap
 } from "lucide-react";
 const OnboardingModal = React.lazy(() => import("./components/OnboardingModal"));
 const SystemBirth = React.lazy(() => import("./components/SystemBirth"));
@@ -27,20 +25,19 @@ const SettingsPage = React.lazy(() => import("./components/SettingsPage"));
 import DioramaView from "./components/diorama/DioramaView";
 import { useAvatarState } from "./hooks/useAvatarState";
 import { useDisplayMode } from "./hooks/useDisplayMode";
-import { API_BASE } from "./config";
-import { AgentStats, VitalityUIEvent } from "./types";
+import { AgentStats, VitalityUIEvent, Karma } from "./types";
 import { useSystemVitality } from "./hooks/useSystemVitality";
-import { getAuthHeaders } from "./lib/auth";
 
 function App() {
   const [activeTab, setActiveTab] = useState("dashboard");
   const [stats, setStats] = useState<AgentStats>({ level: 1, exp: 0, resonance: 0, creativity: 0, fatigue: 0 });
-  const [isConnected, setIsConnected] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [showBirth, setShowBirth] = useState(false);
   const [recentEvents, setRecentEvents] = useState<VitalityUIEvent[]>([]);
 
-  const { lastEvent } = useSystemVitality();
+  const { lastEvent, connectionStatus, toggleConnection } = useSystemVitality();
+
+  const isConnected = connectionStatus === 'connected';
 
   const avatarState = useAvatarState();
   const { mode } = useDisplayMode();
@@ -50,23 +47,6 @@ function App() {
     if (isFirstVisit) {
       setShowOnboarding(true);
     }
-
-    const fetchStatus = async () => {
-      try {
-        const res = await fetch(`${API_BASE}/api/health`, {
-          headers: getAuthHeaders()
-        });
-        if (res.ok) {
-          setIsConnected(true);
-        }
-      } catch (e) {
-        setIsConnected(false);
-      }
-    };
-
-    fetchStatus();
-    const timer = setInterval(fetchStatus, 5000);
-    return () => clearInterval(timer);
   }, []);
 
   // Global event processor & stats updater
@@ -83,12 +63,12 @@ function App() {
       case 'level_up': {
         const d = data as AgentStats;
         setStats(prev => ({ ...prev, level: d.level, exp: d.exp }));
-        addEvent('Level Up!', `System ascended to level ${d.level}.`, 'var(--accent-cyan)', <Sparkles size={16} />);
+        addEvent('Level Up', `Ascension Level ${d.level}`, 'var(--accent-cyan)', <Activity size={16} />);
         break;
       }
       case 'karma_update': {
-        const d = data as any;
-        addEvent('New Karma', d.lesson || "Moral evolution detected.", 'var(--accent-purple)', <Dna size={16} />);
+        const d = data as Karma;
+        addEvent('Karma Assimilated', `Synapses merged: ${d.id.substring(0, 8)}`, 'var(--accent-purple)', <GitMerge size={16} />);
         break;
       }
       case 'immune_alert': {
@@ -96,9 +76,12 @@ function App() {
         addEvent('Security Alert', d.description || "Anomaly detected.", 'var(--accent-rose)', <Shield size={16} />);
         break;
       }
+      case 'job_started': {
+        addEvent('Deliberation Started', typeof data === 'string' ? data : 'Thinking...', 'var(--accent-amber)', <Activity size={16} />);
+        break;
+      }
       case 'skill_execution': {
-        const d = data as any;
-        addEvent('Skill Active', d.description || "Neural pattern engaged.", 'var(--accent-amber)', <Terminal size={16} />);
+        addEvent('Skill Activating', typeof data === 'string' ? data : 'Tool Execution', 'var(--accent-emerald)', <Zap size={16} />);
         break;
       }
       case 'inspiration': {
@@ -111,10 +94,65 @@ function App() {
         setStats(d);
         break;
       }
+      case 'proactive_talk': {
+        const d = data as string;
+        addEvent('Aiome Message', d, 'var(--accent-cyan)', <MessageSquare size={16} />);
+        break;
+      }
       default:
         break;
     }
   }, [lastEvent]);
+
+  // Status Badge Rendering Logic
+  const renderStatusBadge = () => {
+    let badgeClass = "status-badge";
+    let dotClass = "status-dot";
+    let text = "";
+
+    switch (connectionStatus) {
+      case "connected":
+        text = "Samsara Hub Connected";
+        // Default classes are fine
+        break;
+      case "connecting":
+        badgeClass += ' disconnected'; // Using disconnected style for connecting state
+        dotClass += ' offline'; // Using offline dot style for connecting state
+        dotClass += ' ani-pulse';
+        text = "Reconnecting...";
+        break;
+      case "paused":
+        badgeClass += ' paused';
+        dotClass += ' offline';
+        dotClass = dotClass.replace('offline', 'paused'); // Custom styling inline if needed
+        text = "Sync Paused";
+        break;
+      case "disconnected":
+      default:
+        badgeClass += ' disconnected';
+        dotClass += ' offline';
+        text = "Connection Lost";
+        break;
+    }
+
+    return (
+      <button
+        className={badgeClass}
+        onClick={toggleConnection}
+        style={{
+          cursor: 'pointer', border: '1px solid rgba(255,255,255,0.05)', background: 'rgba(0,0,0,0.4)',
+          outline: 'none', transition: 'all 0.2s', padding: '0.5rem 1rem'
+        }}
+        title="Click to toggle connection sync"
+      >
+        <div className={dotClass} style={{
+          background: connectionStatus === 'paused' ? 'var(--accent-amber)' : undefined,
+          boxShadow: connectionStatus === 'paused' ? 'var(--glow-amber)' : undefined
+        }} />
+        {text}
+      </button>
+    );
+  };
 
   return (
     <div className="app-container">
@@ -224,7 +262,7 @@ function App() {
             />
           </div>
           <div style={{ marginTop: '0.5rem', textAlign: 'center', fontSize: '0.65rem', color: 'var(--text-muted)' }}>
-            OPENCLAW CORE v1.0.2
+            AIOME v1.0.2
           </div>
         </div>
       </aside>
@@ -248,10 +286,7 @@ function App() {
           </motion.h2>
 
           <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
-            <div className={`status-badge ${isConnected ? '' : 'disconnected'}`}>
-              <div className={`status-dot ${isConnected ? '' : 'offline'}`} />
-              {isConnected ? "Samsara Hub Connected" : "Connection Lost"}
-            </div>
+            {renderStatusBadge()}
           </div>
         </header>
 

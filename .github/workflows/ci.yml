@@ -49,11 +49,14 @@ jobs:
       - uses: rustsec/audit-check@v1.4.1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-
-      # Layer 2: Secure Workspace Audit (Check unsafe & dependencies)
-      - name: Workspace Audit
+      
+      # Layer 2: cargo deny
+      - name: Run cargo-deny
         run: |
-          cargo audit
+          if ! command -v cargo-deny \u0026\u003e /dev/null; then
+            cargo install cargo-deny --locked
+          fi
+          cargo deny check
 
   docs:
     name: Generate Wiki
