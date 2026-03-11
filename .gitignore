@@ -18,6 +18,9 @@
 *.log
 aiome.log
 watchtower.log
+server_logs.txt
+api_logs.txt
+test_out.json
 test.wav
 
 # Strategic & Private documents

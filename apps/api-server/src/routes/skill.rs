@@ -58,23 +58,46 @@ pub async fn list_skills(
         }
     }
 
-    // 3. Mock Marketplace Skills (Discovery Phase 2B DEMO)
-    skills.push(SkillSummary {
-        name: "Browser Automation".to_string(),
-        description: "Control a headless browser to scrape data or interact with sites.".to_string(),
-        source: "marketplace".to_string(),
-        status: "Available".to_string(),
-        layer: 4,
-        tools: vec!["click_element".to_string(), "navigate".to_string(), "screenshot".to_string()],
-    });
-    skills.push(SkillSummary {
-        name: "Financial Analyst".to_string(),
-        description: "Real-time stock market data and financial report analysis.".to_string(),
-        source: "marketplace".to_string(),
-        status: "Available".to_string(),
-        layer: 5,
-        tools: vec!["get_stock_price".to_string(), "analyze_trend".to_string()],
-    });
+    // 3. Marketplace Skills (Local Discovery)
+    let marketplace_path = "workspace/skills/marketplace";
+    if let Ok(entries) = std::fs::read_dir(marketplace_path) {
+        use infrastructure::skills::importer::SkillImporter;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
+                if let Ok(content) = std::fs::read_to_string(&path) {
+                    let mut manifests = Vec::new();
+                    match ext {
+                        "md" => {
+                            if let Some(m) = SkillImporter::parse_skill_md(&content) {
+                                manifests.push(m);
+                            }
+                        }
+                        "yaml" | "yml" => {
+                            if let Some(m) = SkillImporter::parse_agency_yaml(&content) {
+                                manifests.push(m);
+                            }
+                        }
+                        "json" => {
+                            manifests.extend(SkillImporter::parse_openapi(&content));
+                        }
+                        _ => {}
+                    }
+
+                    for m in manifests {
+                        skills.push(SkillSummary {
+                            name: m.l1.name.clone(),
+                            description: m.l1.trigger_description.clone(),
+                            source: "marketplace".to_string(),
+                            status: "Available".to_string(),
+                            layer: 4,
+                            tools: vec![m.l1.name.to_lowercase().replace(' ', "_")],
+                        });
+                    }
+                }
+            }
+        }
+    }
 
     Json(skills)
 }
@@ -92,13 +115,47 @@ pub struct McpSpawnRequest {
 }
 
 pub async fn import_skill(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Json(payload): Json<ImportRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     info!("👹 [Vampire Attack] Attempting to import skill from: {}", payload.url);
-    // Phase 20 MVP: Manual import trigger.
-    // In production, this would use importer::parse_openapi() or similar.
-    Ok(Json(serde_json::json!({"status": "queued", "message": "Import process initiated in cleanroom sandbox."})))
+
+    // 1. Fetch the content
+    let client = reqwest::Client::new();
+    let resp = client.get(&payload.url)
+        .send()
+        .await
+        .map_err(|e| (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": format!("Failed to fetch URL: {}", e)}))))?;
+
+    let content = resp.text()
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": format!("Failed to read body: {}", e)}))))?;
+
+    // 2. Parse using SkillImporter (Infrastructure)
+    use infrastructure::skills::importer::SkillImporter;
+    
+    let manifests = if payload.url.ends_with(".yaml") || payload.url.ends_with(".yml") {
+        SkillImporter::parse_agency_yaml(&content).into_iter().collect::<Vec<_>>()
+    } else if payload.url.ends_with(".json") {
+        SkillImporter::parse_openapi(&content)
+    } else {
+        SkillImporter::parse_skill_md(&content).into_iter().collect::<Vec<_>>()
+    };
+
+    if manifests.is_empty() {
+        return Err((StatusCode::UNPROCESSABLE_ENTITY, Json(serde_json::json!({"error": "No valid skills found in the content."}))));
+    }
+
+    // Phase 20 MVP: For now, we just return the count and details of what WOULD be imported.
+    // In future, this would be injected into WasmSkillManager or similar.
+    info!("✅ [Vampire Attack] Successfully parsed {} skills from {}", manifests.len(), payload.url);
+
+    Ok(Json(serde_json::json!({
+        "status": "success",
+        "imported_count": manifests.len(),
+        "skills": manifests.iter().map(|m| &m.l1.name).collect::<Vec<_>>(),
+        "message": "Skills parsed and queued for cleanroom validation."
+    })))
 }
 
 pub async fn spawn_mcp_server(

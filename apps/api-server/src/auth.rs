@@ -4,6 +4,7 @@ use axum::{
     http::{header::AUTHORIZATION, request::Parts, StatusCode},
 };
 use subtle::ConstantTimeEq;
+use tracing::warn;
 
 pub struct Authenticated;
 

@@ -29,9 +29,14 @@ export class AiomeContextEngine {
         const karmas = native.karmaFetchRelevant ? await native.karmaFetchRelevant(sessionId, 5) : "";
         const warnings = native.immuneGetWarnings ? native.immuneGetWarnings() : "";
 
+        const estimatedTokens = messages.reduce((acc: number, m: any) => {
+            const contentLen = typeof m.content === 'string' ? m.content.length : JSON.stringify(m.content || '').length;
+            return acc + Math.ceil(contentLen / 3);
+        }, 0);
+
         return {
             messages,
-            estimatedTokens: messages.length * 50, // naive estimate
+            estimatedTokens,
             prependSystemContext: warnings || undefined,
             prependContext: karmas || undefined,
         };

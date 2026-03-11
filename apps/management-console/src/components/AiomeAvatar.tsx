@@ -1,5 +1,6 @@
 import React from 'react';
 import { motion } from 'framer-motion';
+import { useAvatarCharacter } from '../hooks/AvatarContext';
 
 interface AiomeAvatarProps {
     status: 'idle' | 'thinking' | 'awakened';
@@ -7,6 +8,9 @@ interface AiomeAvatarProps {
 }
 
 const AiomeAvatar: React.FC<AiomeAvatarProps> = ({ status, size = 120 }) => {
+    const { getAssetPath } = useAvatarCharacter();
+    const imagePath = getAssetPath('lite');
+
     return (
         <div style={{
             width: size,
@@ -58,7 +62,7 @@ const AiomeAvatar: React.FC<AiomeAvatarProps> = ({ status, size = 120 }) => {
                 }}
             >
                 <img
-                    src="/avatar/aiome-chibi.png"
+                    src={imagePath}
                     alt="Aiome Chibi"
                     style={{
                         width: '100%',

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import AiomeAvatar from '../AiomeAvatar';
 import VrmRenderer from '../../lib/vrm/VrmRenderer';
 import ErrorBoundary from '../common/ErrorBoundary';
+import { useAvatarCharacter } from '../../hooks/AvatarContext';
 
 interface DioramaViewProps {
     status: 'idle' | 'thinking' | 'speaking' | 'learning' | 'meditating' | 'awakened';
@@ -11,6 +12,8 @@ interface DioramaViewProps {
 
 const DioramaView: React.FC<DioramaViewProps> = ({ status, mode, activeTab }) => {
     const [hasError, setHasError] = useState(false);
+    const { getAssetPath } = useAvatarCharacter();
+    const modelUrl = getAssetPath('vrm');
 
     // Layout offsets are derived from CSS custom properties defined in tokens.css.
     // This ensures DioramaView always aligns with the main content area
@@ -50,7 +53,7 @@ const DioramaView: React.FC<DioramaViewProps> = ({ status, mode, activeTab }) =>
                 }}
             >
                 <VrmRenderer
-                    modelUrl="/avatar/aiome-main.png"
+                    modelUrl={modelUrl}
                     avatarState={status}
                 />
             </ErrorBoundary>

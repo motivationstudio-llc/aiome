@@ -9,15 +9,45 @@
  */
 
 use aiome_core::error::AiomeError;
-
 use tracing::{info, error};
 use serde::{Deserialize, Serialize};
 
-const COMMAND_WHITELIST: &[&str] = &[
-    "ls", "cat", "cargo", "grep", "find", "wc", "echo", "pwd",
-    "git", "rustc", "node", "npm", "python3", "mkdir", "cp", "mv",
-    "head", "tail", "diff", "tree", "which", "env"
-];
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecurityConfig {
+    pub allowed_binaries: Vec<String>,
+}
+
+impl Default for SecurityConfig {
+    fn default() -> Self {
+        Self {
+            allowed_binaries: vec![
+                "ls".to_string(), "cat".to_string(), "cargo".to_string(), 
+                "grep".to_string(), "find".to_string(), "wc".to_string(), 
+                "echo".to_string(), "pwd".to_string(), "git".to_string(), 
+                "rustc".to_string(), "node".to_string(), "npm".to_string(), 
+                "python3".to_string(), "mkdir".to_string(), "cp".to_string(), 
+                "mv".to_string(), "head".to_string(), "tail".to_string(), 
+                "diff".to_string(), "tree".to_string(), "which".to_string(), 
+                "env".to_string()
+            ],
+        }
+    }
+}
+
+impl SecurityConfig {
+    pub fn load_or_default() -> Self {
+        let path = std::path::Path::new("workspace/config/security.json");
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(path) {
+                if let Ok(config) = serde_json::from_str::<SecurityConfig>(&content) {
+                    info!("🛡️ [SecurityConfig] Loaded whitelist from workspace/config/security.json.");
+                    return config;
+                }
+            }
+        }
+        Self::default()
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PermissionManifest {
@@ -84,8 +114,9 @@ impl BastionGuard {
         let binary = parts[0];
         let args = &parts[1..];
 
-        // Strict Whitelist check against COMMAND_WHITELIST
-        if !COMMAND_WHITELIST.contains(&binary) {
+        // Strict Whitelist check against SecurityConfig
+        let config = SecurityConfig::load_or_default();
+        if !config.allowed_binaries.contains(&binary.to_string()) {
              return Err(AiomeError::Infrastructure { 
                 reason: format!("Security Violation: Binary '{}' is not in the whitelist.", binary) 
              });

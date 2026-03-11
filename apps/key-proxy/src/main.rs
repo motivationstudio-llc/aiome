@@ -54,6 +54,9 @@ async fn main() -> anyhow::Result<()> {
             error!("❌ [KeyProxy] mlockall failed: {}. ABORTING for safety.", e);
             panic!("SECURITY VIOLATION: Could not lock memory to RAM.");
         }
+        info!("🧠 [KeyProxy] Memory locked to RAM (no swap).");
+    }
+
     // 7. Security: Anti-Debugger (petersen's trick / ptrace)
     #[cfg(target_os = "macos")]
     {
@@ -62,9 +65,6 @@ async fn main() -> anyhow::Result<()> {
             error!("🚨 [KeyProxy] Debugger detected! Panic for safety.");
             panic!("SECURITY VIOLATION: Debugger attached.");
         }
-    }
-    
-    info!("🧠 [KeyProxy] Memory locked to RAM (no swap).");
     }
 
     // 2. Load keys and SELF-WIPE ENV
@@ -96,12 +96,13 @@ async fn main() -> anyhow::Result<()> {
 
     let app = Router::new()
         .route("/api/v1/llm/complete", post(handle_llm_complete))
+        .route("/api/v1/llm/stream", post(handle_llm_stream))
         .route("/api/v1/llm/embed", post(handle_llm_embed))
         .with_state(state);
 
     // 4. Level 5: Unix Domain Sockets (Optional/Configurable)
     // For now, let's start with TCP but keep the design ready for UDS
-    let port = env::var("KEY_PROXY_PORT").unwrap_or_else(|_| "3016".to_string());
+    let port = env::var("KEY_PROXY_PORT").unwrap_or_else(|_| "3010".to_string());
     let bind_addr = if env::var("BIND_ALL").map(|v| v == "true").unwrap_or(false) {
         "0.0.0.0"
     } else {
@@ -249,5 +250,67 @@ async fn handle_llm_embed(
             error!("❌ [KeyProxy] Request failed: {:?}", e);
             (StatusCode::INTERNAL_SERVER_ERROR, "Upstream Provider Error").into_response()
         }
+    }
+}
+
+async fn handle_llm_stream(
+    State(state): State<AppState>,
+    Json(payload): Json<ProxyRequest>,
+) -> impl IntoResponse {
+    info!("🌊 [KeyProxy] Streaming request from caller: {}", payload.caller_id);
+
+    if !state.caller_quotas.contains_key(&payload.caller_id) {
+        return (StatusCode::FORBIDDEN, "Unknown caller").into_response();
+    }
+    state.total_calls.fetch_add(1, Ordering::SeqCst);
+
+    let url = match payload.endpoint.as_str() {
+        "gemini" => "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:streamGenerateContent?alt=sse",
+        _ => return (StatusCode::BAD_REQUEST, "Invalid endpoint").into_response(),
+    };
+
+    let gemini_payload = serde_json::json!({
+        "contents": [{
+            "parts": [{
+                "text": payload.prompt
+            }]
+        }],
+        "system_instruction": payload.system.map(|s| {
+            serde_json::json!({ "parts": [{ "text": s }] })
+        })
+    });
+
+    let res = state.client.post(url)
+        .header("Content-Type", "application/json")
+        .header("x-goog-api-key", state.gemini_key.expose_secret())
+        .json(&gemini_payload)
+        .send()
+        .await;
+
+    match res {
+        Ok(resp) => {
+            if resp.status().is_success() {
+                use futures::StreamExt;
+                let stream = resp.bytes_stream().map(|chunk_res| {
+                    match chunk_res {
+                        Ok(bytes) => {
+                            let text = String::from_utf8_lossy(&bytes).to_string();
+                            Ok::<axum::response::sse::Event, std::convert::Infallible>(
+                                axum::response::sse::Event::default().data(text)
+                            )
+                        }
+                        Err(e) => {
+                            Ok::<axum::response::sse::Event, std::convert::Infallible>(
+                                axum::response::sse::Event::default().data(format!("{{\"error\": \"{}\"}}", e))
+                            )
+                        }
+                    }
+                });
+                axum::response::sse::Sse::new(stream).into_response()
+            } else {
+                (StatusCode::INTERNAL_SERVER_ERROR, "Upstream Provider Error").into_response()
+            }
+        }
+        Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, "Upstream Provider Error").into_response(),
     }
 }

@@ -236,11 +236,52 @@ impl LlmProvider for AbyssVaultProvider {
         prompt: &str,
         system: Option<&str>
     ) -> Result<Pin<Box<dyn Stream<Item = Result<String, AiomeError>> + Send>>, AiomeError> {
-        // VaultProxy streaming is not implemented yet. For now, we fallback to non-streaming.
-        let full_text = self.complete(prompt, system).await?;
+        let payload = serde_json::json!({
+            "caller_id": self.caller_id,
+            "prompt": prompt,
+            "system": system,
+            "endpoint": "gemini"
+        });
+
+        let mut resp = self.client.post(format!("{}/api/v1/llm/stream", self.proxy_url))
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("VaultProxy stream request failed: {}", e) })?;
+
+        if !resp.status().is_success() {
+            return Err(AiomeError::Infrastructure { reason: format!("VaultProxy returned error: {}", resp.status()) });
+        }
+
         let stream = async_stream::stream! {
-            yield Ok(full_text);
+            let mut buffer = String::new();
+            while let Ok(Some(chunk)) = resp.chunk().await {
+                if let Ok(text) = String::from_utf8(chunk.to_vec()) {
+                    buffer.push_str(&text);
+                    
+                    // SSE format: data: {...}\n\n
+                    while let Some(data_idx) = buffer.find("data: ") {
+                        let remainder = &buffer[data_idx + 6..];
+                        if let Some(end_idx) = remainder.find("\n\n") {
+                            let json_str = remainder[..end_idx].to_string();
+                            // Update buffer to after this event
+                            let total_len = data_idx + 6 + end_idx + 2;
+                            buffer = buffer[total_len..].to_string();
+
+                            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&json_str) {
+                                // Extract text from Gemini format
+                                if let Some(text_chunk) = json["candidates"][0]["content"]["parts"][0]["text"].as_str() {
+                                    yield Ok(text_chunk.to_string());
+                                }
+                            }
+                        } else {
+                            break; // Wait for more data
+                        }
+                    }
+                }
+            }
         };
+
         Ok(Box::pin(stream))
     }
 

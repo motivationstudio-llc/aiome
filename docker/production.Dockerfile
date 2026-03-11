@@ -25,7 +25,7 @@ RUN cargo build --release --bin ${BIN_NAME}
 # --- Runtime Stage ---
 FROM debian:bookworm-slim
 
-ARG BIN_NAME=command-center
+ARG BIN_NAME=api-server
 ENV BIN_NAME=${BIN_NAME}
 
 # Labels for security visibility

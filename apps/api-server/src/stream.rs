@@ -242,7 +242,7 @@ pub async fn trigger_system_vitality_stream(
         let mut last_evolution_count = 0;
         let mut last_level = 0;
         let mut last_is_thinking = false;
-        let mut last_stats: Option<infrastructure::shared::watchtower::AgentStats> = None;
+        let mut last_stats: Option<shared::watchtower::AgentStats> = None;
 
         // Initialize state
         if let Ok(stats) = state.job_queue.get_agent_stats().await {

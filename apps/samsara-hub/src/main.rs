@@ -20,6 +20,7 @@ use tokio_util::sync::CancellationToken;
 use std::sync::Arc;
 use tokio::sync::broadcast;
 use sqlx::SqlitePool;
+use sqlx::Row;
 use aiome_core::contracts::{FederationSyncRequest, FederationSyncResponse, FederationPushRequest, FederationPushResponse, FederatedKarma, ImmuneRule, HubMessage};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
 use std::str::FromStr;
@@ -101,12 +102,32 @@ async fn main() -> anyhow::Result<()> {
     // Spawn the Approval Worker to process quarantine
     tokio::spawn(approval_worker(pool, token.clone()));
 
-    // Secure CORS Policy: Restrict to specific trusted origins or localhost for development
+    // Secure CORS Policy: Restrict to specific trusted origins
     let cors = CorsLayer::new()
-        .allow_origin(tower_http::cors::Any) 
+        .allow_origin([
+            "http://localhost:3000".parse().unwrap(),
+            "http://127.0.0.1:3000".parse().unwrap(),
+            "http://localhost:3015".parse().unwrap(), // Management Console
+            "http://localhost:3016".parse().unwrap(),
+        ]) 
         .allow_methods([axum::http::Method::GET, axum::http::Method::POST])
         .allow_headers([axum::http::header::CONTENT_TYPE, axum::http::header::AUTHORIZATION]);
 
+
+    let state_bg = state.clone();
+    let token_bg = token.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(3600)); // Every hour
+        loop {
+            tokio::select! {
+                _ = interval.tick() => {
+                    info!("♻️ [HubMaintenance] Running WAL Checkpoint...");
+                    let _ = sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)").execute(&state_bg.pool).await;
+                }
+                _ = token_bg.cancelled() => break,
+            }
+        }
+    });
 
     let app = Router::new()
         .route("/api/v1/federation/sync", post(sync_handler))
@@ -243,6 +264,34 @@ async fn init_hub_db(pool: &SqlitePool) -> anyhow::Result<()> {
     // BFT: Composite indexes for O(1) Equivocation (Double-Signing) Detection
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_q_karma_node_clock ON quarantined_karma(node_id, lamport_clock);").execute(pool).await?;
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_q_rules_node_clock ON quarantined_rules(node_id, lamport_clock);").execute(pool).await?;
+
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS approved_arena_matches (
+            id TEXT PRIMARY KEY,
+            skill_a TEXT NOT NULL,
+            skill_b TEXT NOT NULL,
+            topic TEXT NOT NULL,
+            winner TEXT,
+            reasoning TEXT,
+            approved_at TEXT,
+            created_at TEXT NOT NULL
+        );"
+    ).execute(pool).await?;
+
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS quarantined_arena_matches (
+            id TEXT PRIMARY KEY,
+            skill_a TEXT NOT NULL,
+            skill_b TEXT NOT NULL,
+            topic TEXT NOT NULL,
+            winner TEXT,
+            reasoning TEXT,
+            received_at TEXT,
+            created_at TEXT NOT NULL
+        );"
+    ).execute(pool).await?;
+
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_approved_arena_at ON approved_arena_matches(approved_at);").execute(pool).await?;
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_a_karma_node_clock ON approved_karma(node_id, lamport_clock);").execute(pool).await?;
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_a_rules_node_clock ON approved_rules(node_id, lamport_clock);").execute(pool).await?;
 
@@ -426,6 +475,12 @@ async fn sync_handler(
         None
     };
 
+    let arena_rows = sqlx::query("SELECT id, skill_a, skill_b, topic, winner, reasoning, created_at FROM approved_arena_matches WHERE approved_at > ? ORDER BY approved_at ASC LIMIT 500")
+        .bind(&since)
+        .fetch_all(&state.pool)
+        .await
+        .unwrap_or_default();
+
     let response = FederationSyncResponse {
         new_karmas: karmas.into_iter().map(|k| FederatedKarma {
             id: k.id,
@@ -450,9 +505,17 @@ async fn sync_handler(
             node_id: r.node_id,
             signature: r.signature,
         }).collect(),
-        new_arena_matches: Vec::new(), // TODO
+        new_arena_matches: arena_rows.into_iter().map(|a| aiome_core::contracts::ArenaMatch {
+            id: a.get("id"),
+            skill_a: a.get("skill_a"),
+            skill_b: a.get("skill_b"),
+            topic: a.get("topic"),
+            winner: a.get("winner"),
+            reasoning: a.get("reasoning"),
+            created_at: a.get("created_at"),
+        }).collect(),
         server_time: chrono::Utc::now().to_rfc3339(),
-        next_cursor: None, // Stateless: client just uses latest server_time or item timestamp
+        next_cursor: None, 
         has_more,
     };
 
@@ -559,10 +622,23 @@ async fn push_handler(
         .execute(&mut *tx).await;
     }
 
+    for a in &payload.arena_matches {
+        let _ = sqlx::query(
+            "INSERT INTO quarantined_arena_matches (id, skill_a, skill_b, topic, winner, reasoning, created_at, received_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(id) DO NOTHING"
+        )
+        .bind(&a.id).bind(&a.skill_a).bind(&a.skill_b).bind(&a.topic).bind(&a.winner)
+        .bind(&a.reasoning).bind(&a.created_at).bind(&received_at)
+        .execute(&mut *tx).await;
+    }
+
     if let Err(e) = tx.commit().await {
         error!("❌ Push commit failed: {}", e);
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": e.to_string()}))).into_response();
     }
+
+    let arenas_count = payload.arena_matches.len();
 
     // BFT: Update reputation / last_seen
     let _ = sqlx::query(
@@ -579,7 +655,7 @@ async fn push_handler(
     }
 
     (StatusCode::OK, Json(FederationPushResponse {
-        accepted_count: karma_count + rule_count,
+        accepted_count: karma_count + rule_count + arenas_count,
         message: "Data received and placed in quarantine for validation.".to_string(),
     })).into_response()
 }

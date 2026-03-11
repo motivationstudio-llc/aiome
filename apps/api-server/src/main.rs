@@ -22,6 +22,7 @@ mod stream;
 mod skill_handler;
 mod mcp;
 mod docker;
+mod auth;
 
 use aiome_core::traits::JobQueue;
 
@@ -75,7 +76,7 @@ async fn main() {
         .route("/api/synergy/test/failure", axum::routing::post(routes::karma::trigger_failure_demo))
         .route("/api/synergy/test/security", axum::routing::post(routes::karma::trigger_security_demo))
         .route("/api/synergy/test/federation", axum::routing::post(routes::karma::trigger_federation_demo))
-        .route("/api/synergy/rules", get(routes::karma::get_immune_rules_handler).post(routes::karma::add_immune_rule_handler))
+        .route("/api/synergy/rules", get(routes::karma::get_immune_rules_handler).post(routes::karma::add_immune_rule_handler).put(routes::karma::add_immune_rule_handler))
         .route("/api/synergy/rules/:id", axum::routing::delete(routes::karma::delete_immune_rule_handler))
         // Agent Routes
         .route("/api/agent/chat", axum::routing::post(routes::agent::trigger_agent_chat))
@@ -102,6 +103,7 @@ async fn main() {
                 .rate_limit(200, std::time::Duration::from_secs(60))
                 .into_inner()
         )
+        .route_layer(axum::middleware::from_extractor::<auth::Authenticated>())
         .with_state(AppState {
             health_monitor,
             job_queue: job_queue.clone(),
@@ -143,7 +145,7 @@ async fn main() {
         let ollama_host = std::env::var("OLLAMA_HOST").unwrap_or_else(|_| "http://127.0.0.1:11434".to_string());
         let ollama_model = std::env::var("OLLAMA_MODEL").unwrap_or_else(|_| "qwen2.5:0.5b".to_string());
         let provider = Arc::new(aiome_core::llm_provider::OllamaProvider::new(ollama_host, ollama_model));
-        let immune_system = infrastructure::immune_system::AdaptiveImmuneSystem::new(provider);
+        let immune_system = infrastructure::immune_system::AdaptiveImmuneSystem::new(provider.clone());
 
         // 🌐 2. Federation Sync: Connect to Samsara Hub WebSocket for real-time updates
         let hub_ws_url = std::env::var("SAMSARA_HUB_WS").unwrap_or_else(|_| "ws://127.0.0.1:3016/api/v1/federation/ws".to_string());
@@ -326,6 +328,16 @@ async fn main() {
                 Err(e) => warn!("⚠️ [BackgroundWorker] Threat analysis failed: {:?}", e),
             }
 
+            // 🧬 1.5 Soul Mutation: Attempt autonomous evolution
+            info!("⚙️ [BackgroundWorker] Checking for Soul Mutation (Autonomous Evolution)...");
+            let mutator = infrastructure::soul_mutator::SoulMutator::new(provider.clone(), std::path::PathBuf::from("workspace"))
+                .with_prosecutor(provider.clone());
+            match mutator.transmute(jq_clone.as_ref()).await {
+                Ok(true) => info!("🧬 [BackgroundWorker] Soul mutated successfully."),
+                Ok(false) => info!("🧬 [BackgroundWorker] No soul mutation triggered."),
+                Err(e) => warn!("⚠️ [BackgroundWorker] Soul mutation failed: {:?}", e),
+            }
+
             // 🌐 2. Swarm Sync: Push local data and Sync remote data via REST API
             info!("🌐 [BackgroundWorker] Starting Swarm Sync cycle...");
             let hub_base = std::env::var("SAMSARA_HUB_REST").unwrap_or_else(|_| "http://127.0.0.1:3016".to_string());
@@ -345,6 +357,7 @@ async fn main() {
                         node_id: self_node_id,
                         karmas,
                         rules,
+                        arena_matches: vec![],
                     };
                     
                     let res = client.post(format!("{}/api/v1/federation/push", hub_base))

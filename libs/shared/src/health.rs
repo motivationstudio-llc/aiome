@@ -96,11 +96,32 @@ impl HealthMonitor {
             .map(|d| (d.available_space() / 1024 / 1024 / 1024, d.total_space() / 1024 / 1024 / 1024))
             .unwrap_or((0, 0));
 
+        let mut vram_usage_mb = None;
+        #[cfg(target_os = "macos")]
+        {
+            // Simple heuristic for macOS VRAM usage using ioreg
+            if let Ok(output) = std::process::Command::new("ioreg")
+                .args(["-l", "-d0", "-w0", "-r", "-c", "IOAccelerator"])
+                .output() {
+                let out_str = String::from_utf8_lossy(&output.stdout);
+                if let Some(idx) = out_str.find("\"vram-free-bytes\"=") {
+                    let remainder = &out_str[idx+18..];
+                    if let Some(end) = remainder.find(',') {
+                        if let Ok(free_bytes) = remainder[..end].trim().parse::<u64>() {
+                            // Total VRAM is hard to get reliably via ioreg, so we just return what we find
+                            // Note: This is an example, actual Apple Silicon uses shared memory
+                            vram_usage_mb = Some(free_bytes / 1024 / 1024);
+                        }
+                    }
+                }
+            }
+        }
+
         ResourceStatus {
             memory_usage_mb,
             total_memory_mb,
             cpu_usage_percent,
-            vram_usage_mb: None, // TODO: macOS/Linux GPU monitoring
+            vram_usage_mb,
             disk_free_gb: disk_info.0,
             total_disk_gb: disk_info.1,
             open_files: None,

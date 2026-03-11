@@ -10,7 +10,8 @@ import {
   Package,
   Sparkles,
   Dna,
-  Terminal
+  Terminal,
+  Settings as SettingsIcon
 } from "lucide-react";
 const OnboardingModal = React.lazy(() => import("./components/OnboardingModal"));
 const SystemBirth = React.lazy(() => import("./components/SystemBirth"));
@@ -20,6 +21,7 @@ const ImmuneSystem = React.lazy(() => import("./components/ImmuneSystem"));
 const AgentConsole = React.lazy(() => import("./components/AgentConsole"));
 const SkillVault = React.lazy(() => import("./components/SkillVault"));
 const GraphView = React.lazy(() => import("./components/GraphView"));
+const SettingsPage = React.lazy(() => import("./components/SettingsPage"));
 import DioramaView from "./components/diorama/DioramaView";
 import { useAvatarState } from "./hooks/useAvatarState";
 import { useDisplayMode } from "./hooks/useDisplayMode";
@@ -39,7 +41,7 @@ function App() {
   const { lastEvent } = useSystemVitality();
 
   const avatarState = useAvatarState();
-  const { mode, setMode } = useDisplayMode();
+  const { mode } = useDisplayMode();
 
   useEffect(() => {
     const isFirstVisit = localStorage.getItem("aiome_onboarding_done") !== "true";
@@ -193,6 +195,12 @@ function App() {
             active={activeTab === "vault"}
             onClick={() => setActiveTab("vault")}
           />
+          <NavItem
+            icon={<SettingsIcon size={20} />}
+            label="Settings"
+            active={activeTab === "settings"}
+            onClick={() => setActiveTab("settings")}
+          />
         </nav>
 
         <div style={{ marginTop: 'auto', padding: '1rem', background: 'rgba(255,255,255,0.03)', borderRadius: '12px', fontSize: '0.8rem' }}>
@@ -227,33 +235,10 @@ function App() {
             {activeTab === "immune" && "Immune System"}
             {activeTab === "agent" && "Agent Console"}
             {activeTab === "vault" && "Neural Skill Vault"}
+            {activeTab === "settings" && "System Settings"}
           </motion.h2>
 
-          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-            <div className="display-mode-toggle" style={{ display: 'flex', background: 'rgba(255,255,255,0.05)', padding: '2px', borderRadius: '8px', marginRight: '1rem' }}>
-              <button
-                onClick={() => setMode('vrm')}
-                style={{
-                  padding: '4px 8px', fontSize: '0.7rem', border: 'none', background: mode === 'vrm' ? 'var(--accent-cyan)' : 'transparent',
-                  color: mode === 'vrm' ? '#000' : 'var(--text-muted)', borderRadius: '6px', cursor: 'pointer', transition: 'all 0.2s'
-                }}
-              >🌟 VRM</button>
-              <button
-                onClick={() => setMode('lite')}
-                style={{
-                  padding: '4px 8px', fontSize: '0.7rem', border: 'none', background: mode === 'lite' ? 'var(--accent-cyan)' : 'transparent',
-                  color: mode === 'lite' ? '#000' : 'var(--text-muted)', borderRadius: '6px', cursor: 'pointer', transition: 'all 0.2s'
-                }}
-              >⚡ Lite</button>
-              <button
-                onClick={() => setMode('off')}
-                style={{
-                  padding: '4px 8px', fontSize: '0.7rem', border: 'none', background: mode === 'off' ? 'var(--accent-cyan)' : 'transparent',
-                  color: mode === 'off' ? '#000' : 'var(--text-muted)', borderRadius: '6px', cursor: 'pointer', transition: 'all 0.2s'
-                }}
-              >🚫 Off</button>
-            </div>
-
+          <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
             <div className={`status-badge ${isConnected ? '' : 'disconnected'}`}>
               <div className={`status-dot ${isConnected ? '' : 'offline'}`} />
               {isConnected ? "Samsara Hub Connected" : "Connection Lost"}
@@ -277,6 +262,7 @@ function App() {
               {activeTab === "immune" && <ImmuneSystem />}
               {activeTab === "agent" && <AgentConsole />}
               {activeTab === "vault" && <SkillVault />}
+              {activeTab === "settings" && <SettingsPage />}
             </motion.div>
           </React.Suspense>
         </AnimatePresence>

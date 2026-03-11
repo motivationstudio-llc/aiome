@@ -4,7 +4,17 @@
  * 開発環境では 'dev_secret' をフォールバックとして使用します。
  */
 export const getAuthToken = (): string => {
-    return localStorage.getItem('aiome_secret') || 'dev_secret';
+    const token = localStorage.getItem('aiome_secret') || 'dev_secret';
+    const updatedAt = localStorage.getItem('aiome_secret_updated_at');
+
+    if (updatedAt) {
+        const age = Date.now() - parseInt(updatedAt);
+        if (age > 24 * 60 * 60 * 1000) {
+            console.warn("🔐 [Auth] Token is over 24h old. Consider rotation.");
+        }
+    }
+
+    return token;
 };
 
 /**

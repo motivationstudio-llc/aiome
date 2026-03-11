@@ -406,6 +406,8 @@ pub struct FederationPushRequest {
     pub node_id: String,
     pub karmas: Vec<FederatedKarma>,
     pub rules: Vec<ImmuneRule>,
+    #[serde(default)]
+    pub arena_matches: Vec<ArenaMatch>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

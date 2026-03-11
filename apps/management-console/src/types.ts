@@ -44,6 +44,7 @@ export interface ImmuneRule {
     pattern: string;
     severity: number;
     action: string;
+    created_at: string;
     risk?: string;
     active?: boolean;
 }

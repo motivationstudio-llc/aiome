@@ -62,6 +62,42 @@ const ImmuneSystem: React.FC = () => {
         }
     };
 
+    const [editingId, setEditingId] = useState<string | null>(null);
+
+    const handleEditRule = (rule: ImmuneRule) => {
+        setEditingId(rule.id);
+        setNewRule({ pattern: rule.pattern, severity: rule.severity, action: rule.action });
+        setIsAdding(true);
+    };
+
+    const handleUpdateRule = async () => {
+        if (!editingId) return;
+        try {
+            const res = await fetch(`${API_BASE}/api/synergy/rules`, {
+                method: 'PUT',
+                headers: {
+                    ...getAuthHeaders(),
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    id: editingId,
+                    pattern: newRule.pattern,
+                    severity: newRule.severity,
+                    action: newRule.action,
+                    created_at: rules.find(r => r.id === editingId)?.created_at || '',
+                })
+            });
+            if (res.ok) {
+                setIsAdding(false);
+                setEditingId(null);
+                setNewRule({ pattern: '', severity: 50, action: 'BLOCK' });
+                fetchRules();
+            }
+        } catch (e) {
+            console.error("Failed to update rule", e);
+        }
+    };
+
     const handleDeleteRule = async (id: string) => {
         if (!confirm("Are you sure you want to delete this immune rule?")) return;
         try {
@@ -86,7 +122,13 @@ const ImmuneSystem: React.FC = () => {
                 </div>
                 <div style={{ display: 'flex', gap: '1rem' }}>
                     <button
-                        onClick={() => setIsAdding(!isAdding)}
+                        onClick={() => {
+                            setIsAdding(!isAdding);
+                            if (isAdding) {
+                                setEditingId(null);
+                                setNewRule({ pattern: '', severity: 50, action: 'BLOCK' });
+                            }
+                        }}
                         className="nav-item"
                         style={{ margin: 0, padding: '0 1rem', background: isAdding ? 'var(--accent-rose)' : 'var(--accent-cyan)', color: '#000', fontWeight: 700 }}
                     >
@@ -107,9 +149,9 @@ const ImmuneSystem: React.FC = () => {
                             exit={{ height: 0, opacity: 0 }}
                             style={{ overflow: 'hidden', marginBottom: '2rem' }}
                         >
-                            <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--accent-cyan)', borderRadius: 'var(--radius-lg)', padding: '1.5rem', display: 'flex', flexWrap: 'wrap', gap: '1rem', alignItems: 'flex-end' }}>
+                            <div style={{ background: 'rgba(255,255,255,0.03)', border: `1px solid ${editingId ? 'var(--accent-amber)' : 'var(--accent-cyan)'}`, borderRadius: 'var(--radius-lg)', padding: '1.5rem', display: 'flex', flexWrap: 'wrap', gap: '1rem', alignItems: 'flex-end' }}>
                                 <div style={{ flex: 2 }}>
-                                    <label style={{ fontSize: '0.7rem', color: 'var(--accent-cyan)', display: 'block', marginBottom: '0.5rem' }}>PATTERN (REGEX OR TEXT)</label>
+                                    <label style={{ fontSize: '0.7rem', color: editingId ? 'var(--accent-amber)' : 'var(--accent-cyan)', display: 'block', marginBottom: '0.5rem' }}>PATTERN (REGEX OR TEXT)</label>
                                     <input
                                         value={newRule.pattern}
                                         onChange={e => setNewRule({ ...newRule, pattern: e.target.value })}
@@ -118,7 +160,7 @@ const ImmuneSystem: React.FC = () => {
                                     />
                                 </div>
                                 <div style={{ flex: 1 }}>
-                                    <label style={{ fontSize: '0.7rem', color: 'var(--accent-cyan)', display: 'block', marginBottom: '0.5rem' }}>SEVERITY (0-100)</label>
+                                    <label style={{ fontSize: '0.7rem', color: editingId ? 'var(--accent-amber)' : 'var(--accent-cyan)', display: 'block', marginBottom: '0.5rem' }}>SEVERITY (0-100)</label>
                                     <input
                                         type="number"
                                         value={newRule.severity}
@@ -127,7 +169,7 @@ const ImmuneSystem: React.FC = () => {
                                     />
                                 </div>
                                 <div style={{ flex: 1 }}>
-                                    <label style={{ fontSize: '0.7rem', color: 'var(--accent-cyan)', display: 'block', marginBottom: '0.5rem' }}>ACTION</label>
+                                    <label style={{ fontSize: '0.7rem', color: editingId ? 'var(--accent-amber)' : 'var(--accent-cyan)', display: 'block', marginBottom: '0.5rem' }}>ACTION</label>
                                     <select
                                         value={newRule.action}
                                         onChange={e => setNewRule({ ...newRule, action: e.target.value })}
@@ -139,10 +181,10 @@ const ImmuneSystem: React.FC = () => {
                                     </select>
                                 </div>
                                 <button
-                                    onClick={handleAddRule}
-                                    style={{ background: 'var(--accent-cyan)', color: '#000', border: 'none', borderRadius: 'var(--radius-md)', padding: '0.75rem 1.5rem', fontWeight: 700, cursor: 'pointer' }}
+                                    onClick={editingId ? handleUpdateRule : handleAddRule}
+                                    style={{ background: editingId ? 'var(--accent-amber)' : 'var(--accent-cyan)', color: '#000', border: 'none', borderRadius: 'var(--radius-md)', padding: '0.75rem 1.5rem', fontWeight: 700, cursor: 'pointer' }}
                                 >
-                                    ACTIVATE RULE
+                                    {editingId ? 'UPDATE RULE' : 'ACTIVATE RULE'}
                                 </button>
                             </div>
                         </motion.div>
@@ -181,7 +223,7 @@ const ImmuneSystem: React.FC = () => {
                                 transition={{ delay: i * 0.1 }}
                                 style={{
                                     background: 'var(--bg-glass-heavy)',
-                                    border: '1px solid var(--border-glass)',
+                                    border: editingId === rule.id ? '1px solid var(--accent-amber)' : '1px solid var(--border-glass)',
                                     borderRadius: 'var(--radius-lg)',
                                     padding: '1.5rem',
                                     display: 'flex',
@@ -233,6 +275,21 @@ const ImmuneSystem: React.FC = () => {
                                 </div>
 
                                 <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                    <button
+                                        onClick={() => handleEditRule(rule)}
+                                        style={{
+                                            background: 'rgba(255,255,255,0.05)',
+                                            border: '1px solid var(--border-glass)',
+                                            color: '#fff',
+                                            padding: '0.5rem 1rem',
+                                            borderRadius: '8px',
+                                            fontSize: '0.8rem',
+                                            cursor: 'pointer',
+                                            fontWeight: 600
+                                        }}
+                                    >
+                                        EDIT
+                                    </button>
                                     <button
                                         onClick={() => handleDeleteRule(rule.id)}
                                         style={{

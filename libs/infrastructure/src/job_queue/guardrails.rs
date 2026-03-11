@@ -31,7 +31,7 @@ impl GuardrailOps for SqliteJobQueue {
         let sign_target = format!("{}:{}:{}", rule.id, rule.pattern, clock);
         let signature = self.sign_swarm_payload(&sign_target).await.ok();
 
-        sqlx::query("INSERT INTO immune_rules (id, pattern, severity, action, created_at, node_id, lamport_clock, signature) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING")
+        sqlx::query("INSERT INTO immune_rules (id, pattern, severity, action, created_at, node_id, lamport_clock, signature) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET pattern = EXCLUDED.pattern, severity = EXCLUDED.severity, action = EXCLUDED.action, lamport_clock = EXCLUDED.lamport_clock, signature = EXCLUDED.signature")
             .bind(&rule.id)
             .bind(&rule.pattern)
             .bind(rule.severity as i64)
