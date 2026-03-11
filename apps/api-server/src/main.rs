@@ -37,6 +37,7 @@ pub struct AppState {
     pub forge_semaphore: Arc<tokio::sync::Semaphore>,
     pub mcp_sessions: Arc<tokio::sync::RwLock<std::collections::HashMap<String, tokio::sync::mpsc::UnboundedSender<String>>>>,
     pub mcp_manager: Arc<mcp::client::McpProcessManager>,
+    pub artifact_store: Arc<dyn aiome_core::traits::ArtifactStore>,
 }
 
 #[tokio::main]
@@ -56,6 +57,11 @@ async fn main() {
 
     let job_queue = infrastructure::job_queue::SqliteJobQueue::new(&db_url).await.expect("Failed to init DB");
     let job_queue = Arc::new(job_queue);
+
+    let artifact_store = Arc::new(infrastructure::artifact_store::SqliteArtifactStore::new(
+        job_queue.get_pool().clone(),
+        std::path::PathBuf::from("workspace/artifacts"),
+    ));
 
     let wasm_skill_manager = Arc::new(infrastructure::skills::WasmSkillManager::new("workspace/skills", "workspace").expect("Skills directory not found"));
     let skill_forge = Arc::new(infrastructure::skills::forge::SkillForge::new("workspace/forge", "workspace/skills/custom"));
@@ -78,6 +84,10 @@ async fn main() {
         .route("/api/synergy/test/federation", axum::routing::post(routes::karma::trigger_federation_demo))
         .route("/api/synergy/rules", get(routes::karma::get_immune_rules_handler).post(routes::karma::add_immune_rule_handler).put(routes::karma::add_immune_rule_handler))
         .route("/api/synergy/rules/:id", axum::routing::delete(routes::karma::delete_immune_rule_handler))
+        // Artifact Routes
+        .route("/api/artifacts", get(routes::artifacts::list_artifacts_handler))
+        .route("/api/artifacts/:id", get(routes::artifacts::get_artifact_handler).delete(routes::artifacts::delete_artifact_handler))
+        .route("/api/artifacts/:id/files/:filename", get(routes::artifacts::download_artifact_file_handler))
         // Agent Routes
         .route("/api/agent/chat", axum::routing::post(routes::agent::trigger_agent_chat))
         .route("/api/agent/chat/stream", axum::routing::post(stream::trigger_agent_chat_stream))
@@ -114,6 +124,7 @@ async fn main() {
             forge_semaphore,
             mcp_sessions: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
             mcp_manager: Arc::new(mcp::client::McpProcessManager::new()),
+            artifact_store: artifact_store.clone(),
         })
         .fallback_service(ServeDir::new(static_path).append_index_html_on_directories(true))
         .layer({

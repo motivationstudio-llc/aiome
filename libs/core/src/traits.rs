@@ -414,3 +414,74 @@ impl KarmaSearchResult {
         }
     }
 }
+
+// --- AI Artifacts Storage System ---
+
+/// AI生成物のカテゴリ
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ArtifactCategory {
+    Report,
+    Code,
+    Image,
+    Audio,
+    Expression,
+    Data,
+}
+
+/// 個別ファイルのメタデータ
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ArtifactFile {
+    pub name: String,
+    pub mime_type: String,
+    pub size_bytes: u64,
+    pub hash: String,
+}
+
+/// アーティファクトのメタデータ
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ArtifactMeta {
+    pub id: String,
+    pub title: String,
+    pub category: ArtifactCategory,
+    pub tags: Vec<String>,
+    pub created_by: String,
+    pub dir_path: String,
+    pub files: Vec<ArtifactFile>,
+    pub karma_refs: Vec<String>,
+    pub job_ref: Option<String>,
+    pub soul_version_hash: Option<String>,
+    pub signature: Option<String>,
+    pub created_at: String,
+}
+
+/// アーティファクト保存リクエスト
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CreateArtifactRequest {
+    pub title: String,
+    pub category: ArtifactCategory,
+    pub tags: Vec<String>,
+    pub created_by: String,
+    pub files: Vec<(String, Vec<u8>, String)>, // (filename, content, mime_type)
+    pub karma_refs: Vec<String>,
+    pub job_ref: Option<String>,
+}
+
+/// アーティファクト・ストレージ・トレイト
+#[async_trait]
+pub trait ArtifactStore: Send + Sync {
+    /// 新しい成果物を保存する
+    async fn save_artifact(&self, req: CreateArtifactRequest, jail: &bastion::fs_guard::Jail) -> Result<String, AiomeError>;
+    
+    /// 成果物の一覧を取得する
+    async fn list_artifacts(&self, category: Option<ArtifactCategory>, limit: i64) -> Result<Vec<ArtifactMeta>, AiomeError>;
+    
+    /// 特定の成果物の詳細（メタデータ）を取得する
+    async fn fetch_artifact(&self, id: &str) -> Result<Option<ArtifactMeta>, AiomeError>;
+    
+    /// ファイル実体を読み込む
+    async fn read_artifact_file(&self, id: &str, filename: &str, jail: &bastion::fs_guard::Jail) -> Result<Vec<u8>, AiomeError>;
+    
+    /// 成果物を削除する（物理削除）
+    async fn delete_artifact(&self, id: &str, jail: &bastion::fs_guard::Jail) -> Result<(), AiomeError>;
+}

@@ -340,6 +340,27 @@ impl DbInitializer for SqliteJobQueue {
         sqlx::query("ALTER TABLE karma_logs ADD COLUMN subtopic TEXT;").execute(&self.pool).await.ok();
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_karma_taxonomy ON karma_logs(domain, related_skill);").execute(&self.pool).await.ok();
 
+        // AI Artifacts Storage System
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS ai_artifacts (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                category TEXT NOT NULL,
+                tags TEXT DEFAULT '[]',
+                created_by TEXT NOT NULL,
+                dir_path TEXT NOT NULL,
+                file_manifest TEXT NOT NULL,
+                karma_refs TEXT DEFAULT '[]',
+                job_ref TEXT,
+                soul_version_hash TEXT,
+                signature TEXT,
+                created_at TEXT DEFAULT (datetime('now'))
+            );"
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to create ai_artifacts table: {}", e) })?;
+
         info!("✅ [SqliteJobQueue] Database and migrations initialized successfully.");
         Ok(())
     }

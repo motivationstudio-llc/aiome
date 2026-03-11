@@ -31,3 +31,4 @@ pub mod skill_arena;
 pub mod llm;
 pub mod security;
 pub mod publisher;
+pub mod artifact_store;

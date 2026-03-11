@@ -33,3 +33,5 @@ nix.workspace = true
 sqlx.workspace = true
 ed25519-dalek = "2.1"
 base64 = "0.22"
+mime_guess = "2.0"
+bastion = { package = "bastion-core", git = "https://github.com/for4xex-droid/bastion.git", branch = "main", features = ["net", "fs"] }

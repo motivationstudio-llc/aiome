@@ -11,6 +11,7 @@ import {
   Sparkles,
   Dna,
   Terminal,
+  Box,
   Settings as SettingsIcon
 } from "lucide-react";
 const OnboardingModal = React.lazy(() => import("./components/OnboardingModal"));
@@ -20,6 +21,7 @@ const Timeline = React.lazy(() => import("./components/Timeline"));
 const ImmuneSystem = React.lazy(() => import("./components/ImmuneSystem"));
 const AgentConsole = React.lazy(() => import("./components/AgentConsole"));
 const SkillVault = React.lazy(() => import("./components/SkillVault"));
+const ArtifactVault = React.lazy(() => import("./components/ArtifactVault"));
 const GraphView = React.lazy(() => import("./components/GraphView"));
 const SettingsPage = React.lazy(() => import("./components/SettingsPage"));
 import DioramaView from "./components/diorama/DioramaView";
@@ -173,6 +175,12 @@ function App() {
             active={activeTab === "graph"}
             onClick={() => setActiveTab("graph")}
           />
+          <NavItem
+            icon={<Box size={20} />}
+            label="Artifact Vault"
+            active={activeTab === "artifacts"}
+            onClick={() => setActiveTab("artifacts")}
+          />
         </nav>
 
         <nav className="nav-group">
@@ -235,6 +243,7 @@ function App() {
             {activeTab === "immune" && "Immune System"}
             {activeTab === "agent" && "Agent Console"}
             {activeTab === "vault" && "Neural Skill Vault"}
+            {activeTab === "artifacts" && "Artifact Vault"}
             {activeTab === "settings" && "System Settings"}
           </motion.h2>
 
@@ -262,6 +271,7 @@ function App() {
               {activeTab === "immune" && <ImmuneSystem />}
               {activeTab === "agent" && <AgentConsole />}
               {activeTab === "vault" && <SkillVault />}
+              {activeTab === "artifacts" && <ArtifactVault />}
               {activeTab === "settings" && <SettingsPage />}
             </motion.div>
           </React.Suspense>
