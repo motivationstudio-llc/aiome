@@ -1,6 +1,6 @@
 "use strict";
 /**
- * @aiome/sentinel OpenClaw Plugin
+ * @aiome / sentinel Legacy Integration Plugin
  */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.register = register;

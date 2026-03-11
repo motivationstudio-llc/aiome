@@ -1,4 +1,6 @@
+/**
  * @aiome / sentinel Legacy Integration Plugin
+ */
 
 import { native } from './native';
 

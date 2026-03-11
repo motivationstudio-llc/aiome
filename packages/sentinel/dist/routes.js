@@ -2,7 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.registerRoutes = registerRoutes;
 function registerRoutes(api) {
-    // Expose dashboard or endpoints for local OpenClaw Gateway
+    // Expose dashboard or endpoints for local Legacy Gateway
     api.registerRoute({
         method: "GET",
         path: "/aiome/status",
