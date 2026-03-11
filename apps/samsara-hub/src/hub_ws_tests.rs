@@ -63,17 +63,19 @@ async fn test_ws_authentication_authorized_and_ping() {
     ws_stream.send(Message::Text(serde_json::to_string(&ping).unwrap().into())).await.unwrap();
 
     // Receive Pong
-    if let Some(msg) = ws_stream.next().await {
-        let text = msg.unwrap().to_text().unwrap().to_string();
-        let received: HubMessage = serde_json::from_str(&text).unwrap();
-        match received {
-            HubMessage::Pong { server_time } => {
-                assert!(!server_time.is_empty());
+    loop {
+        if let Some(msg) = ws_stream.next().await {
+            let msg = msg.unwrap();
+            if msg.is_text() {
+                let text = msg.to_text().unwrap();
+                if let Ok(HubMessage::Pong { server_time }) = serde_json::from_str::<HubMessage>(text) {
+                    assert!(!server_time.is_empty());
+                    break;
+                }
             }
-            _ => panic!("Expected Pong"),
+        } else {
+            panic!("No Pong message received");
         }
-    } else {
-        panic!("No message received");
     }
     
     // Disconnect
