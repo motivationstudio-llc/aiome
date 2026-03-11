@@ -80,31 +80,59 @@ const BiotopeView: React.FC<BiotopeViewProps> = ({ stats, isConnected, recentEve
                     {/* Space for the Avatar to sit */}
                     <div style={{ height: '320px' }} />
 
-                    <div style={{ textAlign: 'center', background: 'rgba(5, 7, 10, 0.6)', padding: '1rem 2rem', borderRadius: 'var(--radius-lg)', backdropFilter: 'blur(10px)', border: '1px solid var(--border-glass-bright)' }}>
-                        <h2 style={{ fontSize: '1.8rem', fontWeight: 800, marginBottom: '0.8rem', textShadow: '0 0 15px rgba(255,255,255,0.3)' }}>
-                            Level {stats.level} <span style={{ color: 'var(--accent-purple)', fontSize: '1rem', fontWeight: 600, textShadow: 'var(--glow-purple)' }}>Ascension {Math.floor(stats.level / 10)}</span>
+                    <div style={{ textAlign: 'center', background: 'rgba(5, 7, 10, 0.7)', padding: '1.5rem 2rem', borderRadius: 'var(--radius-lg)', backdropFilter: 'blur(12px)', border: '1px solid var(--border-glass-bright)', width: '320px' }}>
+                        <h2 style={{ fontSize: '1.6rem', fontWeight: 800, marginBottom: '1.25rem', textShadow: '0 0 15px rgba(255,255,255,0.3)', letterSpacing: '-0.02em' }}>
+                            Level {stats.level} <span style={{ color: 'var(--accent-purple)', fontSize: '0.9rem', fontWeight: 600, textShadow: 'var(--glow-purple)', verticalAlign: 'middle', marginLeft: '0.5rem' }}>Ascension {Math.floor(stats.level / 10)}</span>
                         </h2>
 
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.8rem', alignItems: 'center' }}>
-                            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
-                                <Zap size={14} color="var(--accent-amber)" /> {Math.floor(stats.exp / 10)} Energy Resonance
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.2rem' }}>
+                            {/* Resonance Meter */}
+                            <div style={{ width: '100%' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', marginBottom: '0.4rem', color: 'var(--accent-cyan)', fontWeight: 700 }}>
+                                    <span>RESONANCE</span>
+                                    <span>{stats.resonance}%</span>
+                                </div>
+                                <div style={{ height: '6px', background: 'rgba(255,255,255,0.05)', borderRadius: '3px', overflow: 'hidden' }}>
+                                    <motion.div
+                                        initial={{ width: 0 }}
+                                        animate={{ width: `${stats.resonance}%` }}
+                                        style={{ height: '100%', background: 'var(--accent-cyan)', boxShadow: 'var(--glow-cyan)' }}
+                                    />
+                                </div>
                             </div>
 
-                            {/* Dynamic Waveform Meter */}
-                            <div style={{ display: 'flex', gap: '4px', alignItems: 'flex-end', height: '20px', justifyContent: 'center' }}>
-                                {[...Array(16)].map((_, i) => (
+                            {/* Creativity Meter */}
+                            <div style={{ width: '100%' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', marginBottom: '0.4rem', color: 'var(--accent-amber)', fontWeight: 700 }}>
+                                    <span>CREATIVITY</span>
+                                    <span>{stats.creativity}%</span>
+                                </div>
+                                <div style={{ height: '6px', background: 'rgba(255,255,255,0.05)', borderRadius: '3px', overflow: 'hidden' }}>
                                     <motion.div
-                                        key={i}
-                                        animate={{ height: ['20%', `${40 + Math.random() * 60}%`, '20%'] }}
-                                        transition={{ duration: 0.4 + Math.random() * 0.4, repeat: Infinity, ease: 'easeInOut', delay: i * 0.05 }}
-                                        style={{
-                                            width: '4px',
-                                            backgroundColor: i < ((stats.exp % 1000) / 1000) * 16 ? 'var(--accent-cyan)' : 'var(--border-glass)',
-                                            borderRadius: '2px',
-                                            boxShadow: i < ((stats.exp % 1000) / 1000) * 16 ? 'var(--glow-cyan)' : 'none'
-                                        }}
+                                        initial={{ width: 0 }}
+                                        animate={{ width: `${stats.creativity}%` }}
+                                        style={{ height: '100%', background: 'var(--accent-amber)', boxShadow: 'var(--glow-amber)' }}
                                     />
-                                ))}
+                                </div>
+                            </div>
+
+                            {/* Fatigue Meter (Inverse color logic: red is high) */}
+                            <div style={{ width: '100%' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', marginBottom: '0.4rem', color: stats.fatigue > 70 ? 'var(--accent-rose)' : 'var(--text-muted)', fontWeight: 700 }}>
+                                    <span>NEURAL FATIGUE</span>
+                                    <span>{stats.fatigue}%</span>
+                                </div>
+                                <div style={{ height: '6px', background: 'rgba(255,255,255,0.05)', borderRadius: '3px', overflow: 'hidden' }}>
+                                    <motion.div
+                                        initial={{ width: 0 }}
+                                        animate={{ width: `${stats.fatigue}%` }}
+                                        style={{ height: '100%', background: stats.fatigue > 70 ? 'var(--accent-rose)' : 'var(--text-secondary)', boxShadow: stats.fatigue > 70 ? 'var(--glow-rose)' : 'none' }}
+                                    />
+                                </div>
+                            </div>
+
+                            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', color: 'var(--text-secondary)', fontSize: '0.8rem', justifyContent: 'center', marginTop: '0.5rem' }}>
+                                <Zap size={12} color="var(--accent-amber)" /> {Math.floor(stats.exp / 10)} Tech Experience
                             </div>
                         </div>
                     </div>

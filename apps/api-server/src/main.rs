@@ -75,12 +75,14 @@ async fn main() {
         .route("/api/synergy/test/failure", axum::routing::post(routes::karma::trigger_failure_demo))
         .route("/api/synergy/test/security", axum::routing::post(routes::karma::trigger_security_demo))
         .route("/api/synergy/test/federation", axum::routing::post(routes::karma::trigger_federation_demo))
-        .route("/api/synergy/rules", get(routes::karma::get_immune_rules_handler))
+        .route("/api/synergy/rules", get(routes::karma::get_immune_rules_handler).post(routes::karma::add_immune_rule_handler))
+        .route("/api/synergy/rules/:id", axum::routing::delete(routes::karma::delete_immune_rule_handler))
         // Agent Routes
         .route("/api/agent/chat", axum::routing::post(routes::agent::trigger_agent_chat))
         .route("/api/agent/chat/stream", axum::routing::post(stream::trigger_agent_chat_stream))
         .route("/api/agent/feedback", axum::routing::post(routes::agent::handle_karma_feedback))
         .route("/api/system/vitality", get(stream::trigger_system_vitality_stream))
+        .route("/api/system/evolution", get(routes::karma::get_evolution_history_handler))
         // Biome & Expression Skeletons
         .route("/api/biome/status", get(routes::biome::biome_status))
         .route("/api/biome/list", get(routes::biome::list_messages))

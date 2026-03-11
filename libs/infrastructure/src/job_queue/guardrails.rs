@@ -16,6 +16,7 @@ use super::try_get_optional_string;
 #[async_trait]
 pub trait GuardrailOps {
     async fn do_store_immune_rule(&self, rule: &ImmuneRule) -> Result<(), AiomeError>;
+    async fn do_delete_immune_rule(&self, rule_id: &str) -> Result<(), AiomeError>;
     async fn do_fetch_active_immune_rules(&self) -> Result<Vec<ImmuneRule>, AiomeError>;
     async fn do_get_immune_rules(&self) -> Result<Vec<ImmuneRule>, AiomeError>;
     async fn do_record_arena_match(&self, match_data: &ArenaMatch) -> Result<(), AiomeError>;
@@ -42,6 +43,15 @@ impl GuardrailOps for SqliteJobQueue {
             .execute(&self.pool)
             .await
             .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to store immune rule: {}", e) })?;
+        Ok(())
+    }
+
+    async fn do_delete_immune_rule(&self, rule_id: &str) -> Result<(), AiomeError> {
+        sqlx::query("DELETE FROM immune_rules WHERE id = ?")
+            .bind(rule_id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to delete immune rule: {}", e) })?;
         Ok(())
     }
 

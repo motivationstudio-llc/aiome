@@ -242,6 +242,7 @@ pub async fn trigger_system_vitality_stream(
         let mut last_evolution_count = 0;
         let mut last_level = 0;
         let mut last_is_thinking = false;
+        let mut last_stats: Option<infrastructure::shared::watchtower::AgentStats> = None;
 
         // Initialize state
         if let Ok(stats) = state.job_queue.get_agent_stats().await {
@@ -249,6 +250,7 @@ pub async fn trigger_system_vitality_stream(
             last_karma_count = state.job_queue.fetch_all_karma(100).await.unwrap_or_default().len();
             last_evolution_count = state.job_queue.fetch_evolution_history(100).await.unwrap_or_default().len();
             last_is_thinking = state.job_queue.get_pending_job_count().await.unwrap_or(0) > 0;
+            last_stats = Some(stats);
         }
 
         loop {
@@ -266,6 +268,22 @@ pub async fn trigger_system_vitality_stream(
             }
 
             if let Ok(stats) = state.job_queue.get_agent_stats().await {
+                // 0. Continuous Stats Update
+                let stats_changed = if let Some(ref last) = last_stats {
+                    last.level != stats.level || 
+                    last.exp != stats.exp || 
+                    last.resonance != stats.resonance || 
+                    last.creativity != stats.creativity || 
+                    last.fatigue != stats.fatigue
+                } else {
+                    true
+                };
+
+                if stats_changed {
+                    yield Ok(Event::default().event("agent_stats").data(serde_json::to_string(&stats).unwrap_or_default()));
+                    last_stats = Some(stats.clone());
+                }
+
                 // 1. Level Up Check
                 if stats.level > last_level {
                     yield Ok(Event::default().event("level_up").data(serde_json::to_string(&stats).unwrap_or_default()));

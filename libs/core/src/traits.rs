@@ -287,6 +287,7 @@ pub trait JobQueue: Send + Sync {
 
     // --- Phase 12-C: Immune & Arena ---
     async fn store_immune_rule(&self, rule: &crate::contracts::ImmuneRule) -> Result<(), AiomeError>;
+    async fn delete_immune_rule(&self, rule_id: &str) -> Result<(), AiomeError>;
     async fn fetch_active_immune_rules(&self) -> Result<Vec<crate::contracts::ImmuneRule>, AiomeError>;
     async fn record_arena_match(&self, match_data: &crate::contracts::ArenaMatch) -> Result<(), AiomeError>;
 

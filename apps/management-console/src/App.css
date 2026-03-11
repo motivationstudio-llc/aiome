@@ -200,12 +200,33 @@ body {
   50% {
     transform: scale(1.1);
     opacity: 1;
+    box-shadow: 0 0 20px var(--accent-emerald);
   }
 
   100% {
     transform: scale(0.95);
     opacity: 0.6;
   }
+}
+
+@keyframes neural-flow {
+  0% {
+    background-position: 0% 50%;
+  }
+
+  50% {
+    background-position: 100% 50%;
+  }
+
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+.ani-neural {
+  background: linear-gradient(-45deg, rgba(0, 242, 255, 0.05), rgba(188, 140, 255, 0.05), rgba(255, 77, 148, 0.05));
+  background-size: 400% 400%;
+  animation: neural-flow 15s ease infinite;
 }
 
 /* Cards & Layout */
@@ -316,4 +337,28 @@ body {
 .primary-button:hover {
   filter: brightness(1.1);
   box-shadow: 0 0 20px rgba(0, 242, 255, 0.3);
+}
+
+.glass-panel {
+  background: var(--bg-glass-heavy);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border: 1px solid var(--border-glass);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+}
+
+.neural-input {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  padding: 0.75rem 1rem;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.neural-input:focus {
+  border-color: var(--accent-cyan);
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: 0 0 15px rgba(0, 242, 255, 0.1);
+  outline: none;
 }

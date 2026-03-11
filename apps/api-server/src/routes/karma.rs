@@ -1,7 +1,7 @@
 use axum::{
-    response::Json,
-    response::IntoResponse,
-    extract::State,
+    response::{Json, IntoResponse},
+    extract::{State, Path},
+    http::StatusCode,
 };
 use tracing::{info, warn};
 use crate::AppState;
@@ -146,4 +146,39 @@ pub async fn get_immune_rules_handler(
 ) -> Json<Vec<aiome_core::contracts::ImmuneRule>> {
     let rules = state.job_queue.get_immune_rules().await.unwrap_or_default();
     Json(rules)
+}
+
+pub async fn add_immune_rule_handler(
+    State(state): State<AppState>,
+    Json(mut rule): Json<aiome_core::contracts::ImmuneRule>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    // Phase 20 MVP: Generate ID and timestamp if empty
+    if rule.id.is_empty() {
+        rule.id = uuid::Uuid::new_v4().to_string();
+    }
+    if rule.created_at.is_empty() {
+        rule.created_at = chrono::Utc::now().to_rfc3339();
+    }
+
+    state.job_queue.store_immune_rule(&rule).await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": e.to_string()}))))?;
+    
+    Ok(Json(serde_json::json!({"status": "success", "id": rule.id})))
+}
+
+pub async fn delete_immune_rule_handler(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    state.job_queue.delete_immune_rule(&id).await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": e.to_string()}))))?;
+    
+    Ok(Json(serde_json::json!({"status": "success"})))
+}
+
+pub async fn get_evolution_history_handler(
+    State(state): State<AppState>,
+) -> Json<Vec<serde_json::Value>> {
+    let history = state.job_queue.fetch_evolution_history(50).await.unwrap_or_default();
+    Json(history)
 }

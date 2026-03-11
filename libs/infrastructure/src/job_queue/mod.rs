@@ -279,6 +279,10 @@ impl JobQueue for SqliteJobQueue {
         self.do_store_immune_rule(rule).await
     }
 
+    async fn delete_immune_rule(&self, rule_id: &str) -> Result<(), AiomeError> {
+        self.do_delete_immune_rule(rule_id).await
+    }
+
     async fn fetch_active_immune_rules(&self) -> Result<Vec<ImmuneRule>, AiomeError> {
         self.do_fetch_active_immune_rules().await
     }

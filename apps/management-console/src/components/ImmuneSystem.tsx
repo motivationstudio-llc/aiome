@@ -8,31 +8,74 @@ import { getAuthHeaders } from "../lib/auth";
 
 const ImmuneSystem: React.FC = () => {
     const [rules, setRules] = useState<ImmuneRule[]>([]);
+    const [isAdding, setIsAdding] = useState(false);
+    const [newRule, setNewRule] = useState({ pattern: '', severity: 50, action: 'BLOCK' });
+
+    const fetchRules = async () => {
+        try {
+            const res = await fetch(`${API_BASE}/api/synergy/rules`, {
+                headers: getAuthHeaders()
+            });
+            if (res.ok) {
+                const data: ImmuneRule[] = await res.json();
+
+                // Map backend severity (0-100) to UI risk
+                const mapped = data.map(r => ({
+                    ...r,
+                    risk: r.severity > 80 ? "CRITICAL" : r.severity > 50 ? "HIGH" : "MEDIUM",
+                    active: true // Backend doesn't have active field, assume true
+                }));
+                setRules(mapped);
+            }
+        } catch (e) {
+            console.error("Failed to fetch immune rules", e);
+        }
+    };
 
     useEffect(() => {
-        const fetchRules = async () => {
-            try {
-                const res = await fetch(`${API_BASE}/api/synergy/rules`, {
-                    headers: getAuthHeaders()
-                });
-                if (res.ok) {
-                    const data: ImmuneRule[] = await res.json();
-
-                    // Map backend severity (0-100) to UI risk
-                    const mapped = data.map(r => ({
-                        ...r,
-                        risk: r.severity > 80 ? "CRITICAL" : r.severity > 50 ? "HIGH" : "MEDIUM",
-                        active: true // Backend doesn't have active field, assume true
-                    }));
-                    setRules(mapped);
-                }
-            } catch (e) {
-                console.error("Failed to fetch immune rules", e);
-            }
-        };
-
         fetchRules();
     }, []);
+
+    const handleAddRule = async () => {
+        try {
+            const res = await fetch(`${API_BASE}/api/synergy/rules`, {
+                method: 'POST',
+                headers: {
+                    ...getAuthHeaders(),
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    id: '',
+                    pattern: newRule.pattern,
+                    severity: newRule.severity,
+                    action: newRule.action,
+                    created_at: '',
+                })
+            });
+            if (res.ok) {
+                setIsAdding(false);
+                setNewRule({ pattern: '', severity: 50, action: 'BLOCK' });
+                fetchRules();
+            }
+        } catch (e) {
+            console.error("Failed to add rule", e);
+        }
+    };
+
+    const handleDeleteRule = async (id: string) => {
+        if (!confirm("Are you sure you want to delete this immune rule?")) return;
+        try {
+            const res = await fetch(`${API_BASE}/api/synergy/rules/${id}`, {
+                method: 'DELETE',
+                headers: getAuthHeaders()
+            });
+            if (res.ok) {
+                fetchRules();
+            }
+        } catch (e) {
+            console.error("Failed to delete rule", e);
+        }
+    };
 
     return (
         <div className="main-panel ani-fade">
@@ -41,12 +84,71 @@ const ImmuneSystem: React.FC = () => {
                     <Shield size={20} color="var(--accent-rose)" />
                     <h3>Sentinel Immune System</h3>
                 </div>
-                <div className="status-badge">
-                    <CheckCircle size={14} /> ACTIVE PROTECTIONS: {rules.length}
+                <div style={{ display: 'flex', gap: '1rem' }}>
+                    <button
+                        onClick={() => setIsAdding(!isAdding)}
+                        className="nav-item"
+                        style={{ margin: 0, padding: '0 1rem', background: isAdding ? 'var(--accent-rose)' : 'var(--accent-cyan)', color: '#000', fontWeight: 700 }}
+                    >
+                        {isAdding ? 'CANCEL' : 'FORGE NEW RULE'}
+                    </button>
+                    <div className="status-badge">
+                        <CheckCircle size={14} /> ACTIVE PROTECTIONS: {rules.length}
+                    </div>
                 </div>
             </div>
 
             <div style={{ padding: '2rem' }}>
+                <AnimatePresence>
+                    {isAdding && (
+                        <motion.div
+                            initial={{ height: 0, opacity: 0 }}
+                            animate={{ height: 'auto', opacity: 1 }}
+                            exit={{ height: 0, opacity: 0 }}
+                            style={{ overflow: 'hidden', marginBottom: '2rem' }}
+                        >
+                            <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--accent-cyan)', borderRadius: 'var(--radius-lg)', padding: '1.5rem', display: 'flex', flexWrap: 'wrap', gap: '1rem', alignItems: 'flex-end' }}>
+                                <div style={{ flex: 2 }}>
+                                    <label style={{ fontSize: '0.7rem', color: 'var(--accent-cyan)', display: 'block', marginBottom: '0.5rem' }}>PATTERN (REGEX OR TEXT)</label>
+                                    <input
+                                        value={newRule.pattern}
+                                        onChange={e => setNewRule({ ...newRule, pattern: e.target.value })}
+                                        placeholder="e.g. /etc/passwd"
+                                        style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border-glass)', borderRadius: 'var(--radius-md)', padding: '0.75rem', color: '#fff', width: '100%', outline: 'none' }}
+                                    />
+                                </div>
+                                <div style={{ flex: 1 }}>
+                                    <label style={{ fontSize: '0.7rem', color: 'var(--accent-cyan)', display: 'block', marginBottom: '0.5rem' }}>SEVERITY (0-100)</label>
+                                    <input
+                                        type="number"
+                                        value={newRule.severity}
+                                        onChange={e => setNewRule({ ...newRule, severity: parseInt(e.target.value) })}
+                                        style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border-glass)', borderRadius: 'var(--radius-md)', padding: '0.75rem', color: '#fff', width: '100%', outline: 'none' }}
+                                    />
+                                </div>
+                                <div style={{ flex: 1 }}>
+                                    <label style={{ fontSize: '0.7rem', color: 'var(--accent-cyan)', display: 'block', marginBottom: '0.5rem' }}>ACTION</label>
+                                    <select
+                                        value={newRule.action}
+                                        onChange={e => setNewRule({ ...newRule, action: e.target.value })}
+                                        style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border-glass)', borderRadius: 'var(--radius-md)', padding: '0.75rem', color: '#fff', width: '100%', outline: 'none' }}
+                                    >
+                                        <option value="BLOCK">BLOCK</option>
+                                        <option value="QUARANTINE">QUARANTINE</option>
+                                        <option value="WARN">WARN</option>
+                                    </select>
+                                </div>
+                                <button
+                                    onClick={handleAddRule}
+                                    style={{ background: 'var(--accent-cyan)', color: '#000', border: 'none', borderRadius: 'var(--radius-md)', padding: '0.75rem 1.5rem', fontWeight: 700, cursor: 'pointer' }}
+                                >
+                                    ACTIVATE RULE
+                                </button>
+                            </div>
+                        </motion.div>
+                    )}
+                </AnimatePresence>
+
                 <div style={{ display: 'flex', gap: '1rem', marginBottom: '2rem' }}>
                     <div style={{
                         flex: 1,
@@ -131,27 +233,20 @@ const ImmuneSystem: React.FC = () => {
                                 </div>
 
                                 <div style={{ display: 'flex', gap: '0.5rem' }}>
-                                    <button style={{
-                                        background: 'rgba(255,255,255,0.05)',
-                                        border: '1px solid var(--border-glass)',
-                                        color: 'var(--text-muted)',
-                                        padding: '0.5rem 1rem',
-                                        borderRadius: '8px',
-                                        fontSize: '0.8rem',
-                                        cursor: 'pointer'
-                                    }}>
-                                        DEACTIVATE
-                                    </button>
-                                    <button style={{
-                                        background: 'rgba(0, 242, 255, 0.1)',
-                                        border: '1px solid rgba(0, 242, 255, 0.2)',
-                                        color: 'var(--accent-cyan)',
-                                        padding: '0.5rem 1rem',
-                                        borderRadius: '8px',
-                                        fontSize: '0.8rem',
-                                        cursor: 'pointer'
-                                    }}>
-                                        VIEW TRACE
+                                    <button
+                                        onClick={() => handleDeleteRule(rule.id)}
+                                        style={{
+                                            background: 'rgba(255, 77, 148, 0.1)',
+                                            border: '1px solid rgba(255, 77, 148, 0.2)',
+                                            color: 'var(--accent-rose)',
+                                            padding: '0.5rem 1rem',
+                                            borderRadius: '8px',
+                                            fontSize: '0.8rem',
+                                            cursor: 'pointer',
+                                            fontWeight: 600
+                                        }}
+                                    >
+                                        DELETE
                                     </button>
                                 </div>
                             </motion.div>

@@ -12,14 +12,14 @@ import {
   Dna,
   Terminal
 } from "lucide-react";
-import OnboardingModal from "./components/OnboardingModal";
-import SystemBirth from "./components/SystemBirth";
-import BiotopeView from "./components/BiotopeView";
-import Timeline from "./components/Timeline";
-import ImmuneSystem from "./components/ImmuneSystem";
-import AgentConsole from "./components/AgentConsole";
-import SkillVault from "./components/SkillVault";
-import GraphView from "./components/GraphView";
+const OnboardingModal = React.lazy(() => import("./components/OnboardingModal"));
+const SystemBirth = React.lazy(() => import("./components/SystemBirth"));
+const BiotopeView = React.lazy(() => import("./components/BiotopeView"));
+const Timeline = React.lazy(() => import("./components/Timeline"));
+const ImmuneSystem = React.lazy(() => import("./components/ImmuneSystem"));
+const AgentConsole = React.lazy(() => import("./components/AgentConsole"));
+const SkillVault = React.lazy(() => import("./components/SkillVault"));
+const GraphView = React.lazy(() => import("./components/GraphView"));
 import DioramaView from "./components/diorama/DioramaView";
 import { useAvatarState } from "./hooks/useAvatarState";
 import { useDisplayMode } from "./hooks/useDisplayMode";
@@ -100,6 +100,11 @@ function App() {
       case 'inspiration': {
         const d = data as any;
         addEvent('Inspiration', d.description || "Creative spark detected.", 'var(--accent-rose)', <BrainCircuit size={16} />);
+        break;
+      }
+      case 'agent_stats': {
+        const d = data as AgentStats;
+        setStats(d);
         break;
       }
       default:
@@ -257,20 +262,23 @@ function App() {
         </header>
 
         <AnimatePresence mode="wait">
-          <motion.div
-            key={activeTab}
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            transition={{ duration: 0.2 }}
-          >
-            {activeTab === "dashboard" && <BiotopeView stats={stats} isConnected={isConnected} recentEvents={recentEvents} />}
-            {activeTab === "karma" && <Timeline />}
-            {activeTab === "graph" && <GraphView />}
-            {activeTab === "immune" && <ImmuneSystem />}
-            {activeTab === "agent" && <AgentConsole />}
-            {activeTab === "vault" && <SkillVault />}
-          </motion.div>
+          {/* Use Suspense for lazy loaded components */}
+          <React.Suspense fallback={<div style={{ height: '70vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><div className="ani-pulse" style={{ color: 'var(--accent-cyan)', fontWeight: 700 }}>NEURAL SYNC...</div></div>}>
+            <motion.div
+              key={activeTab}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              transition={{ duration: 0.2 }}
+            >
+              {activeTab === "dashboard" && <BiotopeView stats={stats} isConnected={isConnected} recentEvents={recentEvents} />}
+              {activeTab === "karma" && <Timeline />}
+              {activeTab === "graph" && <GraphView />}
+              {activeTab === "immune" && <ImmuneSystem />}
+              {activeTab === "agent" && <AgentConsole />}
+              {activeTab === "vault" && <SkillVault />}
+            </motion.div>
+          </React.Suspense>
         </AnimatePresence>
       </main>
 
