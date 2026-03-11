@@ -3,6 +3,9 @@ import React from 'react';
 export interface AgentStats {
     level: number;
     exp: number;
+    resonance: number;
+    creativity: number;
+    fatigue: number;
 }
 
 export interface VitalityUIEvent {

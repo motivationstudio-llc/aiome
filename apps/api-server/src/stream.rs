@@ -39,7 +39,7 @@ pub async fn trigger_agent_chat_stream(
     }
 
     let ollama_host = std::env::var("OLLAMA_HOST").unwrap_or_else(|_| "http://127.0.0.1:11434".to_string());
-    let ollama_model = std::env::var("OLLAMA_MODEL").unwrap_or_else(|_| "qwen2.5:0.5b".to_string());
+    let ollama_model = std::env::var("OLLAMA_MODEL").unwrap_or_else(|_| "qwen3.5:9b".to_string());
     let provider = Arc::new(aiome_core::llm_provider::OllamaProvider::new(ollama_host, ollama_model));
 
     let stream = async_stream::stream! {
@@ -88,6 +88,13 @@ pub async fn trigger_agent_chat_stream(
 
         // Notify client about relevant karma being used (Sprint 4-A)
         yield Ok::<Event, Infallible>(Event::default().event("karma").data(&karma_str));
+        
+        // Also send structured data for feedback mechanisms
+        let karma_json = serde_json::json!({
+            "is_ood": karma_result.is_ood,
+            "entries": karma_result.entries
+        });
+        yield Ok::<Event, Infallible>(Event::default().event("karma_data").data(karma_json.to_string()));
 
         let history_len = payload.history.len();
         let start_idx = if history_len > 10 { history_len - 10 } else { 0 };

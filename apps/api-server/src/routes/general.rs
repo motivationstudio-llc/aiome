@@ -63,6 +63,9 @@ pub async fn get_health_status(
     if let Ok(stats) = state.job_queue.get_agent_stats().await {
         status.level = stats.level;
         status.exp = stats.exp;
+        status.resonance = stats.resonance;
+        status.creativity = stats.creativity;
+        status.fatigue = stats.fatigue;
     }
     
     Json(status)

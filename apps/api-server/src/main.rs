@@ -75,6 +75,7 @@ async fn main() {
         .route("/api/synergy/test/failure", axum::routing::post(routes::karma::trigger_failure_demo))
         .route("/api/synergy/test/security", axum::routing::post(routes::karma::trigger_security_demo))
         .route("/api/synergy/test/federation", axum::routing::post(routes::karma::trigger_federation_demo))
+        .route("/api/synergy/rules", get(routes::karma::get_immune_rules_handler))
         // Agent Routes
         .route("/api/agent/chat", axum::routing::post(routes::agent::trigger_agent_chat))
         .route("/api/agent/chat/stream", axum::routing::post(stream::trigger_agent_chat_stream))
@@ -96,7 +97,7 @@ async fn main() {
                     (StatusCode::INTERNAL_SERVER_ERROR, format!("Unhandled internal error: {}", err))
                 }))
                 .buffer(1024)
-                .rate_limit(50, std::time::Duration::from_secs(60))
+                .rate_limit(200, std::time::Duration::from_secs(60))
                 .into_inner()
         )
         .with_state(AppState {
@@ -120,7 +121,10 @@ async fn main() {
                     "http://localhost:5173".parse().unwrap(),
                 ])
                 .allow_methods([axum::http::Method::GET, axum::http::Method::POST])
-                .allow_headers([axum::http::header::CONTENT_TYPE])
+                .allow_headers([
+                    axum::http::header::CONTENT_TYPE,
+                    axum::http::header::AUTHORIZATION,
+                ])
         });
 
     let port: u16 = std::env::var("PORT").unwrap_or_else(|_| "3015".to_string()).parse().expect("Invalid PORT");
@@ -501,6 +505,9 @@ pub struct ResourceStatus {
     pub memory_used: u64,
     pub level: i32,
     pub exp: i32,
+    pub resonance: i32,
+    pub creativity: i32,
+    pub fatigue: i32,
 }
 
 pub struct HealthMonitor;
@@ -512,6 +519,9 @@ impl HealthMonitor {
             memory_used: 1024,
             level: 1,
             exp: 0,
+            resonance: 50,
+            creativity: 30,
+            fatigue: 10,
         }
     }
 }

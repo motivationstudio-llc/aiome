@@ -52,6 +52,11 @@ impl SecurityPolicy {
                 "task_processor".to_string(),
                 "trend_sonar".to_string(),
                 "aiome_log".to_string(),
+                "fs_reader".to_string(),
+                "fs_writer".to_string(),
+                "terminal_exec".to_string(),
+                "skill_tester".to_string(),
+                "mcp_bridge".to_string(),
             ],
         }
     }
@@ -116,6 +121,11 @@ mod tests {
         assert!(policy.validate_tool("test_skill").is_ok());
         assert!(policy.validate_tool("task_processor").is_ok());
         assert!(policy.validate_tool("aiome_log").is_ok());
+        assert!(policy.validate_tool("fs_reader").is_ok());
+        assert!(policy.validate_tool("fs_writer").is_ok());
+        assert!(policy.validate_tool("terminal_exec").is_ok());
+        assert!(policy.validate_tool("skill_tester").is_ok());
+        assert!(policy.validate_tool("mcp_bridge").is_ok());
     }
 
     #[test]

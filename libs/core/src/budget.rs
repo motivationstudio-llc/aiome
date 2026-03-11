@@ -29,15 +29,25 @@ impl JobBudget {
     /// 費用を計上する。上限を超えた場合は Error を返す。
     pub fn charge(&self, cost_usd: f64) -> Result<(), BudgetExhaustedError> {
         let cost_micro = (cost_usd * 1_000_000.0) as u64;
-        let prev = self.current_cost_microusds.fetch_add(cost_micro, Ordering::SeqCst);
         
-        if prev + cost_micro > self.max_cost_microusds {
-            Err(BudgetExhaustedError {
-                limit: self.max_cost_microusds as f64 / 1_000_000.0,
-                actual: (prev + cost_micro) as f64 / 1_000_000.0,
-            })
-        } else {
-            Ok(())
+        let mut current = self.current_cost_microusds.load(Ordering::SeqCst);
+        loop {
+            if current + cost_micro > self.max_cost_microusds {
+                return Err(BudgetExhaustedError {
+                    limit: self.max_cost_microusds as f64 / 1_000_000.0,
+                    actual: (current + cost_micro) as f64 / 1_000_000.0,
+                });
+            }
+            
+            match self.current_cost_microusds.compare_exchange_weak(
+                current,
+                current + cost_micro,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            ) {
+                Ok(_) => return Ok(()),
+                Err(updated) => current = updated,
+            }
         }
     }
 

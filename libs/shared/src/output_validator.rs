@@ -65,7 +65,7 @@ pub fn validate_json_output<T: DeserializeOwned>(
 /// 1. ```json ... ``` で囲まれた JSON
 /// 2. { ... } で始まる生の JSON
 /// 3. [ ... ] で始まる配列 JSON
-fn extract_json_block(raw: &str) -> String {
+pub fn extract_json_block(raw: &str) -> String {
     // Pattern 1: ```json ... ```
     if let Some(start) = raw.find("```json") {
         let content_start = start + 7;

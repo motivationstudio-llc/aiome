@@ -93,7 +93,11 @@ impl LlmProvider for OllamaProvider {
         let payload = serde_json::json!({
             "model": self.model,
             "messages": messages,
-            "stream": false
+            "stream": false,
+            "options": {
+                "num_predict": 512,
+                "temperature": 0.7
+            }
         });
 
         let resp = self.client.post(&url)
@@ -131,7 +135,11 @@ impl LlmProvider for OllamaProvider {
         let payload = serde_json::json!({
             "model": self.model,
             "messages": messages,
-            "stream": true
+            "stream": true,
+            "options": {
+                "num_predict": 512,
+                "temperature": 0.7
+            }
         });
 
         let mut resp = self.client.post(&url)

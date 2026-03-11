@@ -119,8 +119,12 @@ impl ConceptManager {
     }
 }
 
+use shared::output_validator;
+
 pub fn extract_json(text: &str) -> Result<String, AiomeError> {
-    let start = text.find('{').ok_or(AiomeError::Infrastructure { reason: "No JSON found".into() })?;
-    let end = text.rfind('}').ok_or(AiomeError::Infrastructure { reason: "No JSON found".into() })? + 1;
-    Ok(text[start..end].to_string())
+    let block = output_validator::extract_json_block(text);
+    if block.trim().is_empty() || (!block.contains('{') && !block.contains('[')) {
+        return Err(AiomeError::Infrastructure { reason: "No JSON block detected in LLM output".into() });
+    }
+    Ok(block)
 }

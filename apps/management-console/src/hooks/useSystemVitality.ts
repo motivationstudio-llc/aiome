@@ -24,41 +24,57 @@ export const useSystemVitality = () => {
     }, []);
 
     useEffect(() => {
-        const eventSource = new EventSource(`${API_BASE}/api/system/vitality`);
+        let eventSource: EventSource | null = null;
+        let retryCount = 0;
+        let timeoutId: any = null;
 
-        eventSource.onmessage = () => {
-            // Handle generic message if needed
-        };
+        const connect = () => {
+            if (timeoutId) clearTimeout(timeoutId);
+            if (eventSource) eventSource.close();
 
-        const eventNames: VitalityEvent['type'][] = [
-            'level_up', 'karma_update', 'inspiration',
-            'job_started', 'job_completed',
-            'tts_started', 'tts_completed',
-            'skill_loaded', 'skill_ready',
-            'immune_alert', 'skill_execution'
-        ];
+            eventSource = new EventSource(`${API_BASE}/api/system/vitality`);
 
-        const bindEvent = (name: VitalityEvent['type']) => {
-            eventSource.addEventListener(name, (e: MessageEvent) => {
-                try {
-                    const data = e.data ? JSON.parse(e.data) : null;
-                    addEvent(name, data);
-                } catch (err) {
-                    console.error(`Error parsing SSE event ${name}:`, err);
-                }
+            const eventNames: VitalityEvent['type'][] = [
+                'level_up', 'karma_update', 'inspiration',
+                'job_started', 'job_completed',
+                'tts_started', 'tts_completed',
+                'skill_loaded', 'skill_ready',
+                'immune_alert', 'skill_execution'
+            ];
+
+            eventNames.forEach(name => {
+                eventSource!.addEventListener(name, (e: MessageEvent) => {
+                    try {
+                        const data = e.data ? JSON.parse(e.data) : null;
+                        addEvent(name, data);
+                    } catch (err) {
+                        console.error(`Error parsing SSE event ${name}:`, err);
+                    }
+                });
             });
+
+            eventSource.onopen = () => {
+                console.log("✨ [SSE] Connection established");
+                retryCount = 0;
+            };
+
+            eventSource.onerror = (err) => {
+                console.error("⚠️ [SSE] Connection Error, retrying...", err);
+                eventSource?.close();
+
+                const delay = Math.min(1000 * Math.pow(2, retryCount), 30000);
+                retryCount++;
+
+                timeoutId = setTimeout(connect, delay);
+            };
         };
 
-        eventNames.forEach(name => {
-            bindEvent(name);
-        });
+        connect();
 
-        eventSource.onerror = (err) => {
-            console.error("SSE Connection Error:", err);
-            eventSource.close();
+        return () => {
+            if (eventSource) eventSource.close();
+            if (timeoutId) clearTimeout(timeoutId);
         };
-
-        return () => eventSource.close();
     }, [addEvent]);
 
     return { events, lastEvent };

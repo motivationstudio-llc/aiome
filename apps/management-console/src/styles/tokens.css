@@ -56,4 +56,18 @@
     --radius-md: 12px;
     --radius-lg: 20px;
     --radius-xl: 28px;
+
+    /* ========================================
+     * Layout Dimensions (Single Source of Truth)
+     * ========================================
+     * DioramaView (avatar overlay) はこれらの変数を参照して
+     * メインコンテンツ領域に対して正確に中央揃えされる。
+     * レイアウトを変更する場合はここだけ修正すればよい。
+     */
+    --layout-sidebar-width: 280px;
+    --layout-main-padding: var(--space-xl);
+    /* 3rem */
+    --layout-panel-gap: var(--space-md);
+    /* 1.5rem */
+    --layout-right-panel-width: 320px;
 }

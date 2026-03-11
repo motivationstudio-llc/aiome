@@ -19,7 +19,7 @@ WORKDIR /app
 COPY . .
 
 # Build target
-ARG BIN_NAME=command-center
+ARG BIN_NAME=api-server
 RUN cargo build --release --bin ${BIN_NAME}
 
 # --- Runtime Stage ---

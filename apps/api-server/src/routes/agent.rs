@@ -149,7 +149,7 @@ pub async fn trigger_agent_chat(
     }
 
     let ollama_host = std::env::var("OLLAMA_HOST").unwrap_or_else(|_| "http://127.0.0.1:11434".to_string());
-    let ollama_model = std::env::var("OLLAMA_MODEL").unwrap_or_else(|_| "qwen2.5:0.5b".to_string());
+    let ollama_model = std::env::var("OLLAMA_MODEL").unwrap_or_else(|_| "qwen3.5:9b".to_string());
     let provider = Arc::new(aiome_core::llm_provider::OllamaProvider::new(ollama_host, ollama_model));
 
     let immune_system = infrastructure::immune_system::AdaptiveImmuneSystem::new(provider.clone());

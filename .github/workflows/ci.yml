@@ -67,7 +67,7 @@ jobs:
           python-version: '3.x'
           
       - name: Generate Wiki
-        run: python3 scripts/generate_wiki.py
+        run: python3 scripts/generate_docs.py
         
       - name: Check for changes
         id: git-check

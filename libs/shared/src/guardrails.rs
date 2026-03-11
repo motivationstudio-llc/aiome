@@ -36,7 +36,7 @@ pub fn validate_input(input: &str) -> ValidationResult {
     if matches!(result, ValidationResult::Blocked(_)) {
         let enforce = std::env::var("ENFORCE_GUARDRAIL")
             .map(|v| v.to_lowercase() == "true")
-            .unwrap_or(false); // デフォルトは false (Devフレンドリー)
+            .unwrap_or(true); // デフォルトは true (Security First)
 
         if !enforce {
             tracing::warn!("⚠️  Guardrail Security Warning (DevMode): {:?}", result);

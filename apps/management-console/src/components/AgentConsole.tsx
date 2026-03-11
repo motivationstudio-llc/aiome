@@ -13,6 +13,7 @@ const AgentConsole: React.FC = () => {
     const chatEndRef = useRef<HTMLDivElement>(null);
     const [status, setStatus] = useState<string>("IDLE");
     const [relevantKarma, setRelevantKarma] = useState<string | null>(null);
+    const [relevantKarmaData, setRelevantKarmaData] = useState<{ is_ood: boolean, entries: { id: string, lesson: string }[] } | null>(null);
 
     const scrollToBottom = () => {
         chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -31,6 +32,7 @@ const AgentConsole: React.FC = () => {
         setStreamingText("");
         setStatus("THINKING");
         setRelevantKarma(null);
+        setRelevantKarmaData(null);
 
         try {
             const response = await fetch(`${API_BASE}/api/agent/chat/stream`, {
@@ -80,6 +82,12 @@ const AgentConsole: React.FC = () => {
                             setStatus("IDLE");
                         } else if (currentEvent === 'karma') {
                             setRelevantKarma(data);
+                        } else if (currentEvent === 'karma_data') {
+                            try {
+                                setRelevantKarmaData(JSON.parse(data));
+                            } catch (e) {
+                                console.error("Failed to parse karma_data", e);
+                            }
                         }
                     }
                 }
@@ -98,11 +106,10 @@ const AgentConsole: React.FC = () => {
     };
 
     const handleFeedback = async (_index: number, type: 'positive' | 'negative') => {
-        if (!relevantKarma) return;
+        if (!relevantKarmaData || !relevantKarmaData.entries || relevantKarmaData.entries.length === 0) return;
 
-        // Extract the first lesson from the karma string (simplified)
-        const lessonMatch = relevantKarma.match(/- (.*)/);
-        const lesson = lessonMatch ? lessonMatch[1] : relevantKarma;
+        // Apply feedback to the primary mapped Karma
+        const primaryKarmaId = relevantKarmaData.entries[0].id;
 
         try {
             await fetch(`${API_BASE}/api/agent/feedback`, {
@@ -112,7 +119,7 @@ const AgentConsole: React.FC = () => {
                     ...getAuthHeaders()
                 },
                 body: JSON.stringify({
-                    lesson: lesson,
+                    karma_id: primaryKarmaId,
                     is_positive: type === 'positive'
                 })
             });
@@ -219,7 +226,7 @@ const AgentConsole: React.FC = () => {
                             {m.content}
                         </div>
 
-                        {m.role === 'assistant' && !m.isError && i === history.length - 1 && relevantKarma && (
+                        {m.role === 'assistant' && !m.isError && i === history.length - 1 && (relevantKarmaData?.entries?.length ?? 0) > 0 && (
                             <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.2rem', opacity: 0.6 }}>
                                 <button
                                     onClick={() => handleFeedback(i, 'positive')}

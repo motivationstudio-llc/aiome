@@ -140,3 +140,10 @@ pub async fn synergy_graph_handler(
 
     Json(GraphData { nodes, edges })
 }
+
+pub async fn get_immune_rules_handler(
+    State(state): State<AppState>,
+) -> Json<Vec<aiome_core::contracts::ImmuneRule>> {
+    let rules = state.job_queue.get_immune_rules().await.unwrap_or_default();
+    Json(rules)
+}

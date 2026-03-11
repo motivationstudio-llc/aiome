@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Activity,
@@ -7,7 +7,10 @@ import {
   GitMerge,
   MessageSquare,
   BrainCircuit,
-  Package
+  Package,
+  Sparkles,
+  Dna,
+  Terminal
 } from "lucide-react";
 import OnboardingModal from "./components/OnboardingModal";
 import SystemBirth from "./components/SystemBirth";
@@ -21,17 +24,17 @@ import DioramaView from "./components/diorama/DioramaView";
 import { useAvatarState } from "./hooks/useAvatarState";
 import { useDisplayMode } from "./hooks/useDisplayMode";
 import { API_BASE } from "./config";
-import { AgentStats } from "./types";
+import { AgentStats, VitalityUIEvent } from "./types";
 import { useSystemVitality } from "./hooks/useSystemVitality";
 import { getAuthHeaders } from "./lib/auth";
-import React, { useMemo } from "react";
 
 function App() {
   const [activeTab, setActiveTab] = useState("dashboard");
-  const [stats, setStats] = useState<AgentStats>({ level: 1, exp: 0 });
+  const [stats, setStats] = useState<AgentStats>({ level: 1, exp: 0, resonance: 0, creativity: 0, fatigue: 0 });
   const [isConnected, setIsConnected] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [showBirth, setShowBirth] = useState(false);
+  const [recentEvents, setRecentEvents] = useState<VitalityUIEvent[]>([]);
 
   const { lastEvent } = useSystemVitality();
 
@@ -62,18 +65,52 @@ function App() {
     return () => clearInterval(timer);
   }, []);
 
-  // Update stats from SSE
+  // Global event processor & stats updater
   useEffect(() => {
-    if (lastEvent?.type === 'level_up') {
-      const data = lastEvent.data as AgentStats;
-      setStats(prev => ({ ...prev, level: data.level, exp: data.exp }));
+    if (!lastEvent) return;
+    const { type, data } = lastEvent;
+
+    const addEvent = (title: string, desc: string, color: string, icon: React.ReactNode) => {
+      const id = Date.now();
+      setRecentEvents((prev: VitalityUIEvent[]) => [{ id, title, desc, color, icon }, ...prev].slice(0, 5));
+    };
+
+    switch (type) {
+      case 'level_up': {
+        const d = data as AgentStats;
+        setStats(prev => ({ ...prev, level: d.level, exp: d.exp }));
+        addEvent('Level Up!', `System ascended to level ${d.level}.`, 'var(--accent-cyan)', <Sparkles size={16} />);
+        break;
+      }
+      case 'karma_update': {
+        const d = data as any;
+        addEvent('New Karma', d.lesson || "Moral evolution detected.", 'var(--accent-purple)', <Dna size={16} />);
+        break;
+      }
+      case 'immune_alert': {
+        const d = data as any;
+        addEvent('Security Alert', d.description || "Anomaly detected.", 'var(--accent-rose)', <Shield size={16} />);
+        break;
+      }
+      case 'skill_execution': {
+        const d = data as any;
+        addEvent('Skill Active', d.description || "Neural pattern engaged.", 'var(--accent-amber)', <Terminal size={16} />);
+        break;
+      }
+      case 'inspiration': {
+        const d = data as any;
+        addEvent('Inspiration', d.description || "Creative spark detected.", 'var(--accent-rose)', <BrainCircuit size={16} />);
+        break;
+      }
+      default:
+        break;
     }
   }, [lastEvent]);
 
   return (
     <div className="app-container">
       {/* Digital Diorama — Resident Avatar */}
-      <DioramaView status={avatarState} />
+      <DioramaView status={avatarState} mode={mode} activeTab={activeTab} />
 
       {/* Ambient Background Particles */}
       <div style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 0, overflow: 'hidden' }}>
@@ -227,7 +264,7 @@ function App() {
             exit={{ opacity: 0, y: -10 }}
             transition={{ duration: 0.2 }}
           >
-            {activeTab === "dashboard" && <BiotopeView stats={stats} isConnected={isConnected} />}
+            {activeTab === "dashboard" && <BiotopeView stats={stats} isConnected={isConnected} recentEvents={recentEvents} />}
             {activeTab === "karma" && <Timeline />}
             {activeTab === "graph" && <GraphView />}
             {activeTab === "immune" && <ImmuneSystem />}
