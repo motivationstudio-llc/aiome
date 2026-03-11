@@ -3,10 +3,11 @@ import { useAvatarCharacter } from '../hooks/AvatarContext';
 import { useDisplayMode } from '../hooks/useDisplayMode';
 import {
     Monitor, Lock, Database,
-    MessageSquare, Globe, Shield, Check, X, Loader2, Cpu
+    MessageSquare, Globe, Shield, Check, X, Loader2, Cpu, Plus
 } from 'lucide-react';
 import { API_BASE } from '../config';
-import { getAuthHeaders } from '../lib/auth';
+import { getAuthHeaders, setAuthToken } from '../lib/auth';
+import { useTokenHealth } from '../hooks/useTokenHealth';
 
 interface SettingEntry {
     key: string;
@@ -51,7 +52,13 @@ const SettingsPage: React.FC = () => {
                 body: JSON.stringify({ key, value, category })
             });
             if (res.ok) {
-                setSettings(prev => prev.map(s => s.key === key ? { ...s, value, updated_at: new Date().toISOString() } : s));
+                setSettings(prev => {
+                    if (prev.some(s => s.key === key)) {
+                        return prev.map(s => s.key === key ? { ...s, value, updated_at: new Date().toISOString() } : s);
+                    } else {
+                        return [...prev, { key, value, category, is_secret: false, updated_at: new Date().toISOString() }];
+                    }
+                });
             }
         } catch (error) {
             console.error("Failed to update setting", error);
@@ -152,29 +159,101 @@ const SettingsPage: React.FC = () => {
                     </div>
 
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-                        <SettingInput
-                            label="Ollama API Host"
-                            value={getSetting('ollama_host')}
-                            placeholder="http://localhost:11434"
-                            onBlur={(v) => update_setting_handler(v, 'ollama_host', 'llm')}
-                            saving={saving === 'ollama_host'}
-                        />
-                        <SettingInput
-                            label="Ollama Model"
-                            value={getSetting('ollama_model')}
-                            placeholder="qwen2.5-coder:7b"
-                            onBlur={(v) => update_setting_handler(v, 'ollama_model', 'llm')}
-                            saving={saving === 'ollama_model'}
-                        />
+                        <div>
+                            <label style={labelStyle}>LLM Provider</label>
+                            <select
+                                value={getSetting('llm_provider') || 'ollama'}
+                                onChange={(e) => update_setting_handler(e.target.value, 'llm_provider', 'llm')}
+                                style={selectStyle}
+                            >
+                                <option value="ollama">Ollama (Local)</option>
+                                <option value="lmstudio">LM Studio (Local)</option>
+                                <option value="gemini">Google Gemini (Cloud)</option>
+                                <option value="openai">OpenAI (Cloud)</option>
+                                <option value="claude">Anthropic Claude (Cloud)</option>
+                            </select>
+                        </div>
+
+                        {(getSetting('llm_provider') === 'ollama' || !getSetting('llm_provider')) && (
+                            <>
+                                <SettingInput
+                                    label="Ollama API Host"
+                                    value={getSetting('ollama_host')}
+                                    placeholder="http://localhost:11434"
+                                    onBlur={(v) => update_setting_handler(v, 'ollama_host', 'llm')}
+                                    saving={saving === 'ollama_host'}
+                                />
+                                <OllamaModelSelector
+                                    value={getSetting('ollama_model')}
+                                    onSelect={(v) => update_setting_handler(v, 'ollama_model', 'llm')}
+                                    saving={saving === 'ollama_model'}
+                                />
+                            </>
+                        )}
+
+                        {getSetting('llm_provider') === 'lmstudio' && (
+                            <>
+                                <SettingInput
+                                    label="LM Studio Host"
+                                    value={getSetting('lm_studio_host')}
+                                    placeholder="http://localhost:1234"
+                                    onBlur={(v) => update_setting_handler(v, 'lm_studio_host', 'llm')}
+                                    saving={saving === 'lm_studio_host'}
+                                />
+                                <SettingInput
+                                    label="Model Name"
+                                    value={getSetting('llm_model')}
+                                    placeholder="loaded model in LM Studio"
+                                    onBlur={(v) => update_setting_handler(v, 'llm_model', 'llm')}
+                                    saving={saving === 'llm_model'}
+                                />
+                            </>
+                        )}
+
+                        {getSetting('llm_provider') && getSetting('llm_provider') !== 'ollama' && getSetting('llm_provider') !== 'lmstudio' && (
+                            <>
+                                <div>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.6rem' }}>
+                                        <label style={{ ...labelStyle, marginBottom: 0 }}>API Key</label>
+                                        {saving === 'llm_api_key' && <Loader2 size={12} className="ani-spin" color="var(--accent-cyan)" />}
+                                    </div>
+                                    <input
+                                        type="password"
+                                        defaultValue={getSetting('llm_api_key')}
+                                        placeholder="Enter your API key"
+                                        onBlur={(e) => update_setting_handler(e.target.value, 'llm_api_key', 'llm')}
+                                        style={inputStyle}
+                                    />
+                                    <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: '0.4rem', fontStyle: 'italic' }}>
+                                        Masked for security. Priority: .env &gt; Database.
+                                    </div>
+                                </div>
+                                <SettingInput
+                                    label="Model Name"
+                                    value={getSetting('llm_model')}
+                                    placeholder={getSetting('llm_provider') === 'gemini' ? 'gemini-2.0-flash' : getSetting('llm_provider') === 'openai' ? 'gpt-4o' : 'claude-3-5-sonnet-20240620'}
+                                    onBlur={(v) => update_setting_handler(v, 'llm_model', 'llm')}
+                                    saving={saving === 'llm_model'}
+                                />
+                            </>
+                        )}
 
                         <div style={{ marginTop: '0.5rem' }}>
                             <button
-                                onClick={() => testConnection('ollama', getSetting('ollama_host') || 'http://localhost:11434', getSetting('ollama_model') || 'qwen2.5-coder:7b')}
+                                onClick={() => {
+                                    const provider = getSetting('llm_provider') || 'ollama';
+                                    if (provider === 'ollama') {
+                                        testConnection('ollama', getSetting('ollama_host') || 'http://localhost:11434', getSetting('ollama_model') || 'qwen2.5-coder:7b');
+                                    } else {
+                                        // TODO: Cloud connection test in API server if needed
+                                        alert("Cloud provider connection testing is not yet fully implemented in the bridge. Settings saved.");
+                                    }
+                                }}
                                 style={testBtnStyle}
                                 disabled={testResults['ollama']?.loading}
                             >
                                 {testResults['ollama']?.loading ? <Loader2 className="ani-spin" size={14} /> : <Cpu size={14} />}
-                                Test Ollama Connection
+                                Test {(getSetting('llm_provider') || 'ollama').toUpperCase()} Connection
                             </button>
                             {testResults['ollama'] && (
                                 <div style={testResultStyle(testResults['ollama'].success)}>
@@ -239,6 +318,14 @@ const SettingsPage: React.FC = () => {
 
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
                         <VaultProtectionItem label="API Server Secret" />
+                        <SecretUpdater />
+
+                        {/* Allowed Origins (Dynamic CORS) */}
+                        <OriginsManager
+                            origins={getSetting('allowed_origins')}
+                            onSave={(val: string) => update_setting_handler(val, 'allowed_origins', 'cors')}
+                            saving={saving === 'allowed_origins'}
+                        />
 
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <div style={{ fontSize: '0.9rem' }}>Enforce Guardrails</div>
@@ -301,6 +388,136 @@ const VaultProtectionItem: React.FC<{ label: string }> = ({ label }) => (
         </div>
     </div>
 );
+
+const OriginsManager: React.FC<{ origins: string, onSave: (val: string) => void, saving?: boolean }> = ({ origins, onSave, saving }) => {
+    const [items, setItems] = useState<string[]>([]);
+    const [draft, setDraft] = useState('');
+    const [error, setError] = useState('');
+
+    useEffect(() => {
+        setItems(origins ? origins.split(',').map(s => s.trim()).filter(Boolean) : []);
+    }, [origins]);
+
+    const isValidOrigin = (v: string) => /^https?:\/\/[^\s,]+$/.test(v);
+
+    const addOrigin = () => {
+        const val = draft.trim();
+        if (!val) return;
+        if (!isValidOrigin(val)) { setError('Invalid URL format (must start with http:// or https://)'); return; }
+        if (items.includes(val)) { setError('Origin already exists'); return; }
+        const next = [...items, val];
+        setItems(next);
+        setDraft('');
+        setError('');
+        onSave(next.join(','));
+    };
+
+    const removeOrigin = (idx: number) => {
+        const next = items.filter((_, i) => i !== idx);
+        setItems(next);
+        onSave(next.join(','));
+    };
+
+    return (
+        <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.6rem' }}>
+                <label style={{ ...labelStyle, marginBottom: 0 }}>Allowed Origins (CORS)</label>
+                {saving && <Loader2 size={12} className="ani-spin" color="var(--accent-cyan)" />}
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', marginBottom: '0.6rem' }}>
+                {items.map((item, i) => (
+                    <div key={i} style={{
+                        display: 'flex', alignItems: 'center', gap: '0.4rem',
+                        background: 'rgba(0,242,255,0.08)', border: '1px solid rgba(0,242,255,0.2)',
+                        borderRadius: '6px', padding: '0.3rem 0.6rem', fontSize: '0.75rem',
+                        color: 'var(--accent-cyan)'
+                    }}>
+                        <span>{item}</span>
+                        <X size={12} style={{ cursor: 'pointer', opacity: 0.6 }} onClick={() => removeOrigin(i)} />
+                    </div>
+                ))}
+            </div>
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <input
+                    type="text" value={draft} placeholder="https://example.com"
+                    onChange={(e) => { setDraft(e.target.value); setError(''); }}
+                    onKeyDown={(e) => e.key === 'Enter' && addOrigin()}
+                    style={{ ...inputStyle, flex: 1 }}
+                />
+                <button onClick={addOrigin} style={{ ...testBtnStyle, padding: '0.5rem 0.8rem' }}>
+                    <Plus size={14} /> Add
+                </button>
+            </div>
+            {error && <div style={{ fontSize: '0.7rem', color: 'var(--accent-rose)', marginTop: '0.4rem' }}>{error}</div>}
+            <div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: '0.4rem', fontStyle: 'italic' }}>
+                ⚠️ Server restart required after changes.
+            </div>
+        </div>
+    );
+};
+
+const SecretUpdater: React.FC = () => {
+    const [newSecret, setNewSecret] = useState('');
+    const [result, setResult] = useState<{ success: boolean, message: string } | null>(null);
+    const [testing, setTesting] = useState(false);
+    const { isExpired, dismiss } = useTokenHealth();
+
+    const handleUpdate = async () => {
+        if (!newSecret.trim()) return;
+        setTesting(true);
+        setAuthToken(newSecret.trim());
+        try {
+            const res = await fetch(`${API_BASE}/api/health`, {
+                headers: { 'Authorization': `Bearer ${newSecret.trim()}` },
+            });
+            if (res.ok) {
+                setResult({ success: true, message: 'Connection verified! Token saved.' });
+                setNewSecret('');
+                dismiss();
+            } else {
+                setResult({ success: false, message: `Authentication failed (${res.status})` });
+            }
+        } catch {
+            setResult({ success: false, message: 'Connection failed' });
+        } finally {
+            setTesting(false);
+        }
+    };
+
+    return (
+        <div>
+            {isExpired && (
+                <div style={{
+                    background: 'rgba(255,77,148,0.08)', border: '1px solid rgba(255,77,148,0.3)',
+                    borderRadius: '8px', padding: '0.8rem', marginBottom: '0.8rem',
+                    fontSize: '0.8rem', color: 'var(--accent-rose)',
+                    display: 'flex', alignItems: 'center', gap: '0.5rem'
+                }}>
+                    <Shield size={16} /> Token expired or changed on server. Please update below.
+                </div>
+            )}
+            <label style={labelStyle}>Update API Secret</label>
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <input
+                    type="password" value={newSecret} placeholder="Enter new API secret"
+                    onChange={(e) => { setNewSecret(e.target.value); setResult(null); }}
+                    onKeyDown={(e) => e.key === 'Enter' && handleUpdate()}
+                    style={{ ...inputStyle, flex: 1 }}
+                />
+                <button onClick={handleUpdate} disabled={testing} style={{ ...testBtnStyle, padding: '0.5rem 0.8rem' }}>
+                    {testing ? <Loader2 size={14} className="ani-spin" /> : <Check size={14} />}
+                    Verify
+                </button>
+            </div>
+            {result && (
+                <div style={testResultStyle(result.success)}>
+                    {result.success ? <Check size={12} /> : <X size={12} />}
+                    {result.message}
+                </div>
+            )}
+        </div>
+    );
+};
 
 const SettingInput: React.FC<{ label: string, value: string, placeholder?: string, onBlur: (v: string) => void, saving?: boolean }> = ({ label, value, placeholder, onBlur, saving }) => {
     const [local, setLocal] = useState(value);
@@ -442,5 +659,63 @@ const toggleCircleStyle = (active: boolean): React.CSSProperties => ({
     left: active ? '21px' : '3px',
     transition: 'all 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55)'
 });
+
+const OllamaModelSelector: React.FC<{ value: string, onSelect: (v: string) => void, saving?: boolean }> = ({ value, onSelect, saving }) => {
+    const [models, setModels] = useState<string[]>([]);
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState('');
+
+    useEffect(() => {
+        fetchModels();
+    }, []);
+
+    const fetchModels = async () => {
+        setLoading(true);
+        setError('');
+        try {
+            const res = await fetch(`${API_BASE}/api/v1/ollama/models`, { headers: getAuthHeaders() });
+            if (res.ok) {
+                const data = await res.json();
+                if (data.models && Array.isArray(data.models)) {
+                    setModels(data.models.map((m: any) => m.name));
+                }
+            } else {
+                setError('Failed to fetch models');
+            }
+        } catch {
+            setError('Connection error');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    return (
+        <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.6rem' }}>
+                <label style={{ ...labelStyle, marginBottom: 0 }}>Ollama Model</label>
+                {saving && <Loader2 size={12} className="ani-spin" color="var(--accent-cyan)" />}
+            </div>
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <select
+                    value={value}
+                    onChange={(e) => onSelect(e.target.value)}
+                    style={{ ...inputStyle, flex: 1, padding: '0.67rem', outline: 'none' }}
+                >
+                    <option value="">(Enter manually or select...)</option>
+                    {models.map(m => (
+                        <option key={m} value={m}>{m}</option>
+                    ))}
+                    {!models.includes(value) && value && (
+                        <option value={value}>{value} (Current)</option>
+                    )}
+                </select>
+                <button onClick={fetchModels} disabled={loading} title="Refresh Models" style={{ ...testBtnStyle, padding: '0.5rem 0.8rem' }}>
+                    {loading ? <Loader2 size={14} className="ani-spin" /> : 'Refresh'}
+                </button>
+            </div>
+            {error && <div style={{ fontSize: '0.7rem', color: 'var(--accent-rose)', marginTop: '0.4rem' }}>{error}</div>}
+        </div>
+    );
+};
 
 export default SettingsPage;

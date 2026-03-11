@@ -279,6 +279,10 @@ pub async fn trigger_system_vitality_stream(
         loop {
             tokio::select! {
                 _ = interval.tick() => {
+                    // Connection quality: send server timestamp for RTT calculation
+                    let now = chrono::Utc::now().to_rfc3339();
+                    yield Ok(Event::default().event("ping").data(now));
+
                     // 4. Thinking Check
                     if let Ok(pending_count) = state.job_queue.get_pending_job_count().await {
                         let is_thinking = pending_count > 0;

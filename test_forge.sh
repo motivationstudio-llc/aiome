@@ -1,7 +1,7 @@
 #!/bin/bash
 export SKILL_FORGE_ENABLED=true
 export OLLAMA_HOST=http://127.0.0.1:11434
-export OLLAMA_MODEL=qwen2.5:0.5b
+export OLLAMA_MODEL=qwen3.5:9b
 export API_SERVER_SECRET=dev_secret
 
 # Start Samsara Hub

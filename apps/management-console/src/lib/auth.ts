@@ -39,3 +39,19 @@ export const getAuthHeaders = () => {
         'Authorization': `Bearer ${getAuthToken()}`,
     };
 };
+
+/**
+ * トークンを LocalStorage に保存し、タイムスタンプを更新します。
+ */
+export const setAuthToken = (token: string): void => {
+    localStorage.setItem('aiome_secret', token);
+    localStorage.setItem('aiome_secret_updated_at', Date.now().toString());
+};
+
+/**
+ * トークンを LocalStorage から削除します。
+ */
+export const clearAuthToken = (): void => {
+    localStorage.removeItem('aiome_secret');
+    localStorage.removeItem('aiome_secret_updated_at');
+};

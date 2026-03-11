@@ -54,7 +54,7 @@ impl BiomeMessage {
         use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce, aead::{Aead, KeyInit}};
         
         let cipher = ChaCha20Poly1305::new(Key::from_slice(key));
-        let nonce = Nonce::from_slice(b"biome-proto-v1"); // MVP fixed nonce - in production should be random/lamport BASED
+        let nonce = Nonce::from_slice(b"biome-proto1"); // 12 bytes nonce for MVP
         
         let ciphertext = cipher.encrypt(nonce, self.content.as_bytes())
             .map_err(|e| format!("Encryption failed: {:?}", e))?;
@@ -74,7 +74,7 @@ impl BiomeMessage {
         use base64::Engine;
 
         let cipher = ChaCha20Poly1305::new(Key::from_slice(key));
-        let nonce = Nonce::from_slice(b"biome-proto-v1");
+        let nonce = Nonce::from_slice(b"biome-proto1"); // 12 bytes
         
         let ciphertext = base64::engine::general_purpose::STANDARD.decode(&self.content)?;
         let plaintext = cipher.decrypt(nonce, ciphertext.as_slice())
@@ -82,5 +82,43 @@ impl BiomeMessage {
         
         self.content = String::from_utf8(plaintext)?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_biome_message_encryption_decryption() {
+        let mut msg = BiomeMessage {
+            sender_pubkey: "sender".to_string(),
+            recipient_pubkey: "recipient".to_string(),
+            topic_id: "topic1".to_string(),
+            content: "Hello from Biome Protocol!".to_string(),
+            karma_root_cid: "cid123".to_string(),
+            signature: "sig123".to_string(),
+            lamport_clock: 1,
+            timestamp: "2026-03-12T05:00:00Z".to_string(),
+            encryption: "none".to_string(),
+        };
+
+        let key: [u8; 32] = [42; 32]; // dummy key
+
+        // Test encryption
+        msg.encrypt(&key).expect("Encryption should succeed");
+        assert_eq!(msg.encryption, "chacha20-poly1305");
+        assert_ne!(msg.content, "Hello from Biome Protocol!");
+
+        // Test decryption
+        msg.decrypt(&key).expect("Decryption should succeed");
+        assert_eq!(msg.content, "Hello from Biome Protocol!");
+
+        // Test decryption bypass for "none" encryption
+        let mut unencrypted_msg = msg.clone();
+        unencrypted_msg.encryption = "none".to_string();
+        unencrypted_msg.content = "Plain text".to_string();
+        unencrypted_msg.decrypt(&key).expect("Bypass should succeed");
+        assert_eq!(unencrypted_msg.content, "Plain text");
     }
 }

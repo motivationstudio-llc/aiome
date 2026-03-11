@@ -81,9 +81,9 @@ impl ArtifactStore for SqliteArtifactStore {
             artifact_files.push(file_meta);
         }
 
-        let file_manifest_json = serde_json::to_string(&artifact_files).unwrap();
-        let tags_json = serde_json::to_string(&req.tags).unwrap();
-        let karma_refs_json = serde_json::to_string(&req.karma_refs).unwrap();
+        let file_manifest_json = serde_json::to_string(&artifact_files).expect("Failed to serialize artifact files");
+        let tags_json = serde_json::to_string(&req.tags).expect("Failed to serialize tags");
+        let karma_refs_json = serde_json::to_string(&req.karma_refs).expect("Failed to serialize karma refs");
         
         // SEC-6: Enforce payload size limits (max 500KB total for metadata)
         if file_manifest_json.len() + tags_json.len() + karma_refs_json.len() > 500 * 1024 {
@@ -108,7 +108,7 @@ impl ArtifactStore for SqliteArtifactStore {
         )
         .bind(&id)
         .bind(&req.title)
-        .bind(serde_json::to_string(&req.category).unwrap().replace("\"", ""))
+        .bind(serde_json::to_string(&req.category).expect("Failed to serialize category").replace("\"", ""))
         .bind(&tags_json)
         .bind(&req.created_by)
         .bind(relative_dir.to_str().unwrap_or_default())
@@ -151,7 +151,7 @@ impl ArtifactStore for SqliteArtifactStore {
 
         let mut query = sqlx::query(&sql);
         if let Some(ref cat) = category {
-            query = query.bind(serde_json::to_string(cat).unwrap().replace("\"", ""));
+            query = query.bind(serde_json::to_string(cat).expect("Failed to serialize category").replace("\"", ""));
         }
 
         let rows = query.fetch_all(&self.pool).await
@@ -305,7 +305,7 @@ impl ArtifactStore for SqliteArtifactStore {
         for r in rows {
             let emb_bytes: Vec<u8> = r.get("embedding");
             let emb_vec: Vec<f64> = emb_bytes.chunks_exact(4)
-                .map(|c| f32::from_le_bytes(c.try_into().unwrap()) as f64)
+                .map(|c| f32::from_le_bytes(c.try_into().expect("Invalid byte slice length")) as f64)
                 .collect();
             
             // Re-using cosine_similarity from job_queue (it's in the same crate, so let's check accessibility)

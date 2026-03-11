@@ -447,3 +447,46 @@ pub enum SamsaraEvent {
         new_level: i32,
     },
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_samsara_event_serialization() {
+        let event = SamsaraEvent::LevelUp {
+            old_level: 1,
+            new_level: 2,
+        };
+
+        let json = serde_json::to_string(&event).expect("Failed to serialize SamsaraEvent");
+        assert!(json.contains("LevelUp"));
+
+        let deserialized: SamsaraEvent = serde_json::from_str(&json).expect("Failed to deserialize");
+        match deserialized {
+            SamsaraEvent::LevelUp { old_level, new_level } => {
+                assert_eq!(old_level, 1);
+                assert_eq!(new_level, 2);
+            }
+        }
+    }
+
+    #[test]
+    fn test_hub_message_serialization() {
+        let msg = HubMessage::Ping {
+            client_time: "2026-03-12T05:00:00Z".to_string(),
+        };
+
+        let json = serde_json::to_string(&msg).expect("Failed to serialize HubMessage");
+        assert!(json.contains("\"type\":\"Ping\""));
+        assert!(json.contains("client_time"));
+
+        let deserialized: HubMessage = serde_json::from_str(&json).expect("Failed to deserialize");
+        match deserialized {
+            HubMessage::Ping { client_time } => {
+                assert_eq!(client_time, "2026-03-12T05:00:00Z");
+            }
+            _ => panic!("Expected Ping message"),
+        }
+    }
+}

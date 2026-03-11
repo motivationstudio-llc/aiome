@@ -2,6 +2,7 @@ use axum::{
     async_trait,
     extract::FromRequestParts,
     http::{header::AUTHORIZATION, request::Parts, StatusCode},
+    response::{IntoResponse, Response},
 };
 use subtle::ConstantTimeEq;
 use tracing::warn;
@@ -13,7 +14,7 @@ impl<S> FromRequestParts<S> for Authenticated
 where
     S: Send + Sync,
 {
-    type Rejection = (StatusCode, &'static str);
+    type Rejection = Response;
 
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
         let auth_header = parts
@@ -41,7 +42,16 @@ where
         if is_valid {
             Ok(Authenticated)
         } else {
-            Err((StatusCode::UNAUTHORIZED, "Unauthorized"))
+            // Token Rotation: distinguish "has Bearer but wrong secret" from "no token"
+            let has_bearer = auth_header.starts_with("Bearer ");
+            let mut resp = (StatusCode::UNAUTHORIZED, "Unauthorized").into_response();
+            if has_bearer {
+                resp.headers_mut().insert(
+                    "X-Token-Expired",
+                    "true".parse().expect("Failed to parse boolean header string"),
+                );
+            }
+            Err(resp)
         }
     }
 }

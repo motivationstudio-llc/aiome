@@ -144,6 +144,7 @@ pub struct Job {
 /// SQLite等を用いた非同期ジョブ管理とKarmaの抽出・記録を行う。
 /// The Immortal Schema に準拠。
 #[async_trait]
+#[allow(clippy::too_many_arguments)]
 pub trait JobQueue: Send + Sync {
     /// 新規ジョブをキューに追加 (Pending)
     async fn enqueue(&self, category: &str, topic: &str, style: &str, karma_directives: Option<&str>) -> Result<String, AiomeError>;

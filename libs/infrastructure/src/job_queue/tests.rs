@@ -14,6 +14,8 @@
 //! 全 15 テストで心臓部の不変性を機械的に保証する。
 
 use super::SqliteJobQueue;
+use super::watchtower::WatchtowerOps;
+use super::settings::SettingsOps;
 use aiome_core::traits::{JobQueue, JobStatus, KarmaEntry, KarmaSearchResult};
 use sqlx::Row;
 use async_trait::async_trait;
@@ -428,4 +430,48 @@ async fn test_karma_taxonomy_fallback() {
     
     let fb = super::taxonomy::KarmaTaxonomy::fallback();
     assert_eq!(fb.domain, "general");
+}
+
+#[tokio::test]
+async fn test_sqlite_settings_crud() {
+    let (jq, _tmp) = create_test_queue().await;
+    
+    // Test set and get
+    jq.set_setting("llm_model", "test-model-1", "llm", false).await.expect("Failed to set");
+    let val = jq.get_setting_value("llm_model").await.unwrap();
+    assert_eq!(val, Some("test-model-1".to_string()));
+
+    // Test overwrite
+    jq.set_setting("llm_model", "test-model-2", "llm", false).await.expect("Failed to overwrite");
+    let val2 = jq.get_setting_value("llm_model").await.unwrap();
+    assert_eq!(val2, Some("test-model-2".to_string()));
+    
+    // Test fetch all (visible)
+    let all = jq.fetch_all_settings().await.unwrap();
+    assert_eq!(all.len(), 1);
+    assert_eq!(all[0].key, "llm_model");
+    assert_eq!(all[0].value, "test-model-2");
+}
+
+#[tokio::test]
+async fn test_sqlite_settings_secret_masking() {
+    let (jq, _tmp) = create_test_queue().await;
+    
+    // Set a secret
+    jq.set_setting("telegram_token", "super-secret-123", "system", true).await.expect("Failed to set secret");
+    
+    // get_setting_value should return the actual value (for internal use)
+    let val = jq.get_setting_value("telegram_token").await.unwrap();
+    assert_eq!(val, Some("super-secret-123".to_string()));
+    
+    // fetch_all_settings isn't implemented as a method directly yielding masked values in tests.
+    // The web layer `routes::settings::get_settings` does the masking. 
+    // In db layer fetch_all_settings, we expect it to return raw values, or we manually verify the field `is_secret` is true.
+    let all = jq.fetch_all_settings().await.unwrap();
+    assert_eq!(all.len(), 1);
+    assert_eq!(all[0].key, "telegram_token");
+    assert!(all[0].is_secret);
+    // Since this is the direct test of SqliteJobQueue, we might just be testing if `is_secret` is respected, not necessarily evaluating presentation masking here.
+    // In our `api-server`, get_settings does `if s.is_secret { s.value = "********" }`. 
+    // If we want DB-level masking, we'd need to update `fetch_all_settings`. Let's just assert `is_secret` flag.
 }

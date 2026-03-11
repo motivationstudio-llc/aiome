@@ -20,6 +20,11 @@ use aiome_core::traits::{AgentAct, TrendItem, TrendSource};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use regex::Regex;
+use std::sync::LazyLock;
+
+static URL_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"https?://\S+").expect("Invalid regex"));
+static HTML_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<[^>]+>").expect("Invalid regex"));
+static WS_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s+").expect("Invalid regex"));
 
 /// Responses from External Web Search API
 #[derive(Deserialize, Debug)]
@@ -60,12 +65,10 @@ impl ExternalTrendSonar {
         let mut text = snippet.to_string();
         
         // Strip URLs
-        let url_re = Regex::new(r"https?://\S+").unwrap();
-        text = url_re.replace_all(&text, "").to_string();
+        text = URL_RE.replace_all(&text, "").to_string();
         
         // Strip HTML Tags
-        let html_re = Regex::new(r"<[^>]+>").unwrap();
-        text = html_re.replace_all(&text, "").to_string();
+        text = HTML_RE.replace_all(&text, "").to_string();
         
         // Clean up HTML Entities (basic ones)
         text = text.replace("&quot;", "\"")
@@ -75,8 +78,7 @@ impl ExternalTrendSonar {
                    .replace("&#39;", "'");
                    
         // Collapse whitespace
-        let ws_re = Regex::new(r"\s+").unwrap();
-        text = ws_re.replace_all(&text, " ").to_string();
+        text = WS_RE.replace_all(&text, " ").to_string();
         
         text.trim().to_string()
     }

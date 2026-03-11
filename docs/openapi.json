@@ -1,0 +1,83 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Aiome Management Console API",
+    "description": "Core API for the Autonomous AI Operating System",
+    "license": {
+      "name": "ELv2",
+      "identifier": "ELv2"
+    },
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/api/v1/logs": {
+      "get": {
+        "tags": [
+          "crate::routes::general"
+        ],
+        "operationId": "get_logs",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum number of logs to return",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Fetch application logs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LogEntryResponse"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "LogEntryResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "level",
+          "target",
+          "message"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "level": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

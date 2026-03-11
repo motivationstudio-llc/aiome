@@ -35,7 +35,7 @@ function App() {
   const [showBirth, setShowBirth] = useState(false);
   const [recentEvents, setRecentEvents] = useState<VitalityUIEvent[]>([]);
 
-  const { lastEvent, connectionStatus, toggleConnection } = useSystemVitality();
+  const { lastEvent, connectionStatus, toggleConnection, lastPingMs } = useSystemVitality();
 
   const isConnected = connectionStatus === 'connected';
 
@@ -112,7 +112,7 @@ function App() {
 
     switch (connectionStatus) {
       case "connected":
-        text = "Samsara Hub Connected";
+        text = lastPingMs !== null ? `Connected ${lastPingMs}ms` : "Samsara Hub Connected";
         // Default classes are fine
         break;
       case "connecting":

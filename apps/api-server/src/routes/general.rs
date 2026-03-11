@@ -70,3 +70,46 @@ pub async fn get_health_status(
     
     Json(status)
 }
+
+#[derive(serde::Serialize, sqlx::FromRow, utoipa::ToSchema)]
+pub struct LogEntryResponse {
+    pub id: i64,
+    pub timestamp: Option<String>,
+    pub level: String,
+    pub target: String,
+    pub message: String,
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/logs",
+    params(
+        ("limit" = Option<i64>, Query, description = "Maximum number of logs to return")
+    ),
+    responses(
+        (status = 200, description = "Fetch application logs", body = Vec<LogEntryResponse>)
+    )
+)]
+pub async fn get_logs(
+    State(state): State<AppState>,
+    _auth: crate::auth::Authenticated,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>
+) -> impl IntoResponse {
+    let limit = params.get("limit").and_then(|s| s.parse::<i64>().ok()).unwrap_or(100);
+    
+    let pool = state.job_queue.get_pool();
+    let rows = sqlx::query_as::<_, LogEntryResponse>("SELECT id, timestamp, level, target, message FROM app_logs ORDER BY id DESC LIMIT ?")
+        .bind(limit)
+        .fetch_all(pool)
+        .await;
+
+    match rows {
+        Ok(logs) => {
+            (StatusCode::OK, Json(logs)).into_response()
+        }
+        Err(e) => {
+            (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to fetch logs: {}", e)).into_response()
+        }
+    }
+}
+

@@ -193,7 +193,7 @@ impl WasmSkillManager {
             return Err(format!("Skill {} not found", skill_name).into());
         }
         let wasm_bytes = {
-            let cache = self.wasm_cache.read().unwrap();
+            let cache = self.wasm_cache.read().unwrap_or_else(|e| e.into_inner());
             if let Some(data) = cache.get(skill_name) {
                 Some(data.clone())
             } else {
@@ -205,7 +205,7 @@ impl WasmSkillManager {
             Some(data) => data,
             None => {
                 let data = std::fs::read(&wasm_path).map_err(|e| format!("Failed to read WASM {}: {}", skill_name, e))?;
-                let mut cache = self.wasm_cache.write().unwrap();
+                let mut cache = self.wasm_cache.write().unwrap_or_else(|e| e.into_inner());
                 cache.insert(skill_name.to_string(), data.clone());
                 data
             }
@@ -267,7 +267,7 @@ impl WasmSkillManager {
                 [ValType::I64],
                 UserData::new(()),
                 move |plugin, inputs, outputs, _user_data| {
-                    let cmd_ptr = inputs[0].i64().unwrap() as u64;
+                    let cmd_ptr = inputs.get(0).and_then(|v| v.i64()).ok_or_else(|| extism::Error::msg("Missing input parameter"))? as u64;
                     let handle = plugin.memory_handle(cmd_ptr).ok_or_else(|| extism::Error::msg("Invalid memory handle"))?;
                     let cmd_str: String = plugin.memory_str(handle).map_err(|e: extism::Error| e)?.to_string();
                     let guard = BastionGuard::new(host_exec_permissions.clone());
@@ -296,7 +296,7 @@ impl WasmSkillManager {
                 [ValType::I64],
                 UserData::new(()),
                 move |plugin, inputs, outputs, _user_data| {
-                    let json_ptr = inputs[0].i64().unwrap() as u64;
+                    let json_ptr = inputs.get(0).and_then(|v| v.i64()).ok_or_else(|| extism::Error::msg("Missing input parameter"))? as u64;
                     let handle = plugin.memory_handle(json_ptr).ok_or_else(|| extism::Error::msg("Invalid memory handle for host_write"))?;
                     let req_str = plugin.memory_str(handle).map_err(|e: extism::Error| e)?;
                     
@@ -317,7 +317,14 @@ impl WasmSkillManager {
                             if !parent_dir.exists() { let _ = std::fs::create_dir_all(parent_dir); }
                             match std::fs::canonicalize(parent_dir) {
                                 Ok(canon_parent) => {
-                                    let final_path = canon_parent.join(full_path.file_name().unwrap());
+                                    let Some(file_name) = full_path.file_name() else {
+                                        let res_json = serde_json::json!({ "success": false, "path": "", "error": "Invalid filename" }).to_string();
+                                        let mem = plugin.memory_alloc(res_json.len() as u64)?;
+                                        plugin.memory_bytes_mut(mem)?.copy_from_slice(res_json.as_bytes());
+                                        outputs[0] = Val::I64(mem.offset() as i64);
+                                        return Ok(());
+                                    };
+                                    let final_path = canon_parent.join(file_name);
                                     if !final_path.to_string_lossy().starts_with(allowed_root_for_write.to_string_lossy().as_ref()) {
                                         serde_json::json!({ "success": false, "path": "", "error": "Security Violation: Path traversal blocked." }).to_string()
                                     } else {
@@ -353,7 +360,8 @@ impl WasmSkillManager {
                         format!("WASM execution error: {}", e)
                     }
                 })
-        }).await.unwrap()?;
+        }).await.map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { format!("Task execution failed/panicked: {}", e).into() });
+        let result = result?.map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { e.into() })?;
 
         info!("✅ [WasmSkillManager] Skill execution successful: {}", skill_name);
         Ok(result)
@@ -442,7 +450,7 @@ impl WasmSkillManager {
                     false
                 }
             }
-        }).await.unwrap();
+        }).await.map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { format!("Task execution failed/panicked: {}", e).into() })?;
 
         Ok(dry_run_success)
     }

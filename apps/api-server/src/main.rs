@@ -7,6 +7,7 @@ use axum::{
     http::StatusCode,
     response::IntoResponse,
 };
+use utoipa::OpenApi;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -26,6 +27,7 @@ use base64::Engine;
 
 mod routes;
 mod api;
+mod logging;
 mod stream;
 mod skill_handler;
 mod mcp;
@@ -53,8 +55,6 @@ pub struct AppState {
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt::init();
-
     let static_path = "apps/api-server/static";
     let docs_path = "../../docs";
 
@@ -66,37 +66,108 @@ async fn main() {
         std::fs::create_dir_all("workspace").expect("Failed to create workspace");
     }
 
+    use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+    let pool = sqlx::sqlite::SqlitePoolOptions::new()
+        .connect(&db_url.replace("sqlite://", "sqlite:"))
+        .await
+        .expect("Failed to connect to SQLite for logging");
+    let logger_layer = logging::DbLoggerLayer::new(pool);
+
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::fmt::layer())
+        .with(logger_layer)
+        .with(tracing_subscriber::filter::LevelFilter::INFO)
+        .init();
+
     let job_queue = infrastructure::job_queue::SqliteJobQueue::new(&db_url).await.expect("Failed to init DB");
     let job_queue = Arc::new(job_queue);
 
     // Dynamic Provider that reads from DB settings
     #[derive(Debug)]
-    struct DynamicOllamaProvider {
+    struct DynamicLlmProvider {
         jq: Arc<infrastructure::job_queue::SqliteJobQueue>,
+        client: reqwest::Client,
         fallback_host: String,
         fallback_model: String,
     }
 
     #[async_trait]
-    impl aiome_core::llm_provider::LlmProvider for DynamicOllamaProvider {
+    impl aiome_core::llm_provider::LlmProvider for DynamicLlmProvider {
         async fn complete(&self, prompt: &str, system: Option<&str>) -> Result<String, aiome_core::error::AiomeError> {
-            let host = self.jq.get_setting_value("ollama_host").await.ok().flatten().unwrap_or_else(|| self.fallback_host.clone());
-            let model = self.jq.get_setting_value("ollama_model").await.ok().flatten().unwrap_or_else(|| self.fallback_model.clone());
-            aiome_core::llm_provider::OllamaProvider::new(host, model).complete(prompt, system).await
+            let provider_type = self.jq.get_setting_value("llm_provider").await.ok().flatten().unwrap_or_else(|| "ollama".to_string());
+            let model_setting = self.jq.get_setting_value("llm_model").await.ok().flatten();
+            let model = if let Some(m) = model_setting {
+                m
+            } else if let Ok(Some(m)) = self.jq.get_setting_value("ollama_model").await {
+                m
+            } else {
+                self.fallback_model.clone()
+            };
+
+            match provider_type.as_str() {
+                "gemini" => {
+                    let api_key = if let Ok(key) = std::env::var("GEMINI_API_KEY") {
+                        key
+                    } else {
+                        self.jq.get_setting_value("llm_api_key").await.ok().flatten().unwrap_or_default()
+                    };
+                    aiome_core::llm_provider::GeminiProvider::new(self.client.clone(), api_key, model).complete(prompt, system).await
+                },
+                "openai" => {
+                    let api_key = if let Ok(key) = std::env::var("OPENAI_API_KEY") {
+                        key
+                    } else {
+                        self.jq.get_setting_value("llm_api_key").await.ok().flatten().unwrap_or_default()
+                    };
+                    aiome_core::llm_provider::OpenAiProvider::new(self.client.clone(), api_key, model).complete(prompt, system).await
+                },
+                "claude" => {
+                    let api_key = if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {
+                        key
+                    } else {
+                        self.jq.get_setting_value("llm_api_key").await.ok().flatten().unwrap_or_default()
+                    };
+                    aiome_core::llm_provider::ClaudeProvider::new(self.client.clone(), api_key, model).complete(prompt, system).await
+                },
+                "lmstudio" => {
+                    let host = self.jq.get_setting_value("lm_studio_host").await.ok().flatten()
+                        .unwrap_or_else(|| "http://127.0.0.1:1234".to_string());
+                    aiome_core::llm_provider::LmStudioProvider::new(self.client.clone(), host, model).complete(prompt, system).await
+                },
+                _ => {
+                    let host = self.jq.get_setting_value("ollama_host").await.ok().flatten().unwrap_or_else(|| self.fallback_host.clone());
+                    aiome_core::llm_provider::OllamaProvider::new(host, model).complete(prompt, system).await
+                }
+            }
         }
         async fn stream_complete(&self, prompt: &str, system: Option<&str>) -> Result<std::pin::Pin<Box<dyn tokio_stream::Stream<Item = Result<String, aiome_core::error::AiomeError>> + Send>>, aiome_core::error::AiomeError> {
-            let host = self.jq.get_setting_value("ollama_host").await.ok().flatten().unwrap_or_else(|| self.fallback_host.clone());
-            let model = self.jq.get_setting_value("ollama_model").await.ok().flatten().unwrap_or_else(|| self.fallback_model.clone());
-            aiome_core::llm_provider::OllamaProvider::new(host, model).stream_complete(prompt, system).await
+            // Simplified stream fallback for clouds if needed, for MVP we focus on Ollama streaming.
+            // Cloud providers currently only implement complete() in this version.
+            let provider_type = self.jq.get_setting_value("llm_provider").await.ok().flatten().unwrap_or_else(|| "ollama".to_string());
+            if provider_type == "ollama" {
+                let host = self.jq.get_setting_value("ollama_host").await.ok().flatten().unwrap_or_else(|| self.fallback_host.clone());
+                let model = self.jq.get_setting_value("ollama_model").await.ok().flatten().unwrap_or_else(|| self.fallback_model.clone());
+                return aiome_core::llm_provider::OllamaProvider::new(host, model).stream_complete(prompt, system).await;
+            }
+            // For cloud, wrap complete() into a single-item stream
+            let text = self.complete(prompt, system).await?;
+            let s = async_stream::stream! { yield Ok(text); };
+            Ok(Box::pin(s))
         }
-        fn name(&self) -> &str { "DynamicOllama" }
+        fn name(&self) -> &str { "DynamicLlm" }
     }
 
     let fallback_model = std::env::var("OLLAMA_MODEL").unwrap_or_else(|_| "qwen3.5:9b".to_string());
     let fallback_host = std::env::var("OLLAMA_HOST").unwrap_or_else(|_| "http://127.0.0.1:11434".to_string());
     
-    let provider = Arc::new(DynamicOllamaProvider {
+    let shared_client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+        .unwrap_or_default();
+
+    let provider = Arc::new(DynamicLlmProvider {
         jq: job_queue.clone(),
+        client: shared_client.clone(),
         fallback_host,
         fallback_model,
     });
@@ -121,93 +192,56 @@ async fn main() {
 
     skill_forge.ensure_forge_workspace().expect("Failed to initialize skill_forge workspace");
 
-    let app = Router::new()
-        // --- Protected Routes (Require Authentication) ---
-        .route("/api/wiki", get(routes::general::list_wiki_files))
-        .route("/api/wiki/:filename", get(routes::general::get_wiki_content))
-        .route("/api/clouddoc/page", get(routes::general::get_mock_clouddoc_page))
-        .route("/api/synergy/karma", get(routes::karma::get_karma_stream))
-        .route("/api/synergy/graph", get(routes::karma::synergy_graph_handler))
-        .route("/api/synergy/test/failure", axum::routing::post(routes::karma::trigger_failure_demo))
-        .route("/api/synergy/test/security", axum::routing::post(routes::karma::trigger_security_demo))
-        .route("/api/synergy/test/federation", axum::routing::post(routes::karma::trigger_federation_demo))
-        .route("/api/synergy/rules", get(routes::karma::get_immune_rules_handler).post(routes::karma::add_immune_rule_handler).put(routes::karma::add_immune_rule_handler))
-        .route("/api/synergy/rules/:id", axum::routing::delete(routes::karma::delete_immune_rule_handler))
-        .route("/api/artifacts", get(routes::artifacts::list_artifacts_handler))
-        .route("/api/artifacts/:id", get(routes::artifacts::get_artifact_handler).delete(routes::artifacts::delete_artifact_handler))
-        .route("/api/artifacts/:id/edges", get(routes::artifacts::get_artifact_edges_handler))
-        .route("/api/artifacts/:id/files/:filename", get(routes::artifacts::download_artifact_file_handler))
-        .route("/api/agent/chat", axum::routing::post(routes::agent::trigger_agent_chat))
-        .route("/api/agent/chat/stream", axum::routing::post(stream::trigger_agent_chat_stream))
-        .route("/api/agent/feedback", axum::routing::post(routes::agent::handle_karma_feedback))
-        .route("/api/system/evolution", get(routes::karma::get_evolution_history_handler))
-        .route("/api/v1/settings", get(routes::settings::get_settings).put(routes::settings::update_setting))
-        .route("/api/v1/settings/test", axum::routing::post(routes::settings::test_connection))
-        .route("/api/biome/status", get(routes::biome::biome_status))
-        .route("/api/biome/list", get(routes::biome::list_messages))
-        .route("/api/biome/send", axum::routing::post(routes::biome::send_message))
-        .route("/api/expression/status", get(routes::expression::expression_status))
-        .route("/api/skills", get(routes::skill::list_skills))
-        .route("/api/skills/import", axum::routing::post(routes::skill::import_skill))
-        .route("/api/skills/mcp/spawn", axum::routing::post(routes::skill::spawn_mcp_server))
-        .nest("/api/v1/mcp", mcp::router())
-        .route_layer(axum::middleware::from_extractor::<auth::Authenticated>())
+    let origins_str = std::env::var("ALLOWED_ORIGINS").unwrap_or_else(|_| 
+        "http://127.0.0.1:3015,http://127.0.0.1:3016,http://localhost:1420,http://localhost:5173,http://localhost:3016".to_string()
+    );
+    let mut all_origins: Vec<String> = origins_str
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
 
-        // --- Public Routes (Internal Monitoring / SSE / WS) ---
-        .route("/api/health", get(routes::general::get_health_status))
-        .route("/api/system/vitality", get(stream::trigger_system_vitality_stream))
-        .route("/api/v1/watchtower/ws", get(routes::watchtower::ws_handler))
+    // Merge DB-stored origins (requires server restart to take effect)
+    if let Ok(Some(db_origins)) = job_queue.get_setting_value("allowed_origins").await {
+        for origin in db_origins.split(',') {
+            let trimmed = origin.trim().to_string();
+            if !trimmed.is_empty() && !all_origins.contains(&trimmed) {
+                info!("🌐 [CORS] Adding DB-managed origin: {}", trimmed);
+                all_origins.push(trimmed);
+            }
+        }
+    }
 
-        .with_state(AppState {
-            health_monitor,
-            job_queue: job_queue.clone(),
-            wasm_skill_manager,
-            skill_forge,
-            docs_path: docs_path.to_string(),
-            llm_semaphore: llm_semaphore.clone(),
-            forge_semaphore: forge_semaphore.clone(),
-            mcp_sessions: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
-            mcp_manager: Arc::new(mcp::client::McpProcessManager::new()),
-            artifact_store: artifact_store.clone(),
-            event_sender: event_sender.clone(),
-            context_engine: Arc::new(infrastructure::context_engine::ContextEngine::new(
-                provider.clone(),
-                job_queue.clone(),
-                llm_semaphore.clone()
-            )),
-            provider: provider.clone(),
-        })
-        .fallback_service(ServeDir::new(static_path).append_index_html_on_directories(true))
-        // --- Layer 3: Security Headers (Defense in Depth) ---
-        .layer(SetResponseHeaderLayer::if_not_present(X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff")))
-        .layer(SetResponseHeaderLayer::if_not_present(X_FRAME_OPTIONS, HeaderValue::from_static("DENY")))
-        .layer(SetResponseHeaderLayer::if_not_present(STRICT_TRANSPORT_SECURITY, HeaderValue::from_static("max-age=31536000; includeSubDomains")))
-        .layer(SetResponseHeaderLayer::if_not_present(CONTENT_SECURITY_POLICY, HeaderValue::from_static("default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ws: wss:;")))
-        // --- Layer 2: Dynamic CORS (Whitelisting) ---
-        .layer({
-            let origins_str = std::env::var("ALLOWED_ORIGINS").unwrap_or_else(|_| 
-                "http://127.0.0.1:3015,http://127.0.0.1:3016,http://localhost:1420,http://localhost:5173,http://localhost:3016".to_string()
-            );
-            let allowed_origins: Vec<HeaderValue> = origins_str
-                .split(',')
-                .filter_map(|s| s.trim().parse::<HeaderValue>().ok())
-                .collect();
-            
-            CorsLayer::new()
-                .allow_origin(AllowOrigin::list(allowed_origins))
-                .allow_methods([axum::http::Method::GET, axum::http::Method::POST, axum::http::Method::PUT, axum::http::Method::DELETE])
-                .allow_headers([axum::http::header::CONTENT_TYPE, axum::http::header::AUTHORIZATION])
-        })
-        // --- Layer 1: Global Rate Limiting & DoS Protection ---
-        .layer(
-            tower::ServiceBuilder::new()
-                .layer(axum::error_handling::HandleErrorLayer::new(|err: tower::BoxError| async move {
-                    (StatusCode::INTERNAL_SERVER_ERROR, format!("Security Layer Error: {}", err))
-                }))
-                .buffer(1024)
-                .rate_limit(50, std::time::Duration::from_secs(1)) // Spike protection
-                .into_inner()
-        );
+    let allowed_origins: Vec<HeaderValue> = all_origins
+        .iter()
+        .filter_map(|s| s.parse::<HeaderValue>().ok())
+        .collect();
+    info!("🌐 [CORS] Active origins: {:?}", all_origins);
+    
+    let cors_layer = CorsLayer::new()
+        .allow_origin(AllowOrigin::list(allowed_origins))
+        .allow_methods([axum::http::Method::GET, axum::http::Method::POST, axum::http::Method::PUT, axum::http::Method::DELETE])
+        .allow_headers([axum::http::header::CONTENT_TYPE, axum::http::header::AUTHORIZATION]);
+
+    let app = build_app(AppState {
+        health_monitor,
+        job_queue: job_queue.clone(),
+        wasm_skill_manager,
+        skill_forge,
+        docs_path: docs_path.to_string(),
+        llm_semaphore: llm_semaphore.clone(),
+        forge_semaphore: forge_semaphore.clone(),
+        mcp_sessions: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+        mcp_manager: Arc::new(mcp::client::McpProcessManager::new()),
+        artifact_store: artifact_store.clone(),
+        event_sender: event_sender.clone(),
+        context_engine: Arc::new(infrastructure::context_engine::ContextEngine::new(
+            provider.clone(),
+            job_queue.clone(),
+            llm_semaphore.clone()
+        )),
+        provider: provider.clone(),
+    }, cors_layer, static_path);
 
     // Initial Security Check
     let secret_key = std::env::var("API_SERVER_SECRET").unwrap_or_default();
@@ -227,18 +261,10 @@ async fn main() {
         let token = token_bg;
         let token_ws = token.clone();
         // Initialize LLM for background tasks
-        let ollama_host = std::env::var("OLLAMA_HOST").unwrap_or_else(|_| "http://127.0.0.1:11434".to_string());
-        let ollama_model = std::env::var("OLLAMA_MODEL").unwrap_or_else(|_| "qwen2.5:0.5b".to_string());
-        let provider = Arc::new(aiome_core::llm_provider::OllamaProvider::new(ollama_host, ollama_model));
         let immune_system = infrastructure::immune_system::AdaptiveImmuneSystem::new(provider.clone());
 
         // Heartbeat Wakeup Setup (Phase 1)
-        let wakeup_model = std::env::var("WAKEUP_MODEL")
-            .unwrap_or_else(|_| std::env::var("OLLAMA_MODEL").unwrap_or_else(|_| "qwen3.5:9b".to_string()));
-        let wakeup_provider = Arc::new(aiome_core::llm_provider::OllamaProvider::new(
-            std::env::var("OLLAMA_HOST").unwrap_or_else(|_| "http://127.0.0.1:11434".to_string()),
-            wakeup_model
-        ));
+        let wakeup_provider = provider.clone();
         let llm_semaphore = llm_semaphore.clone();
         let event_sender = event_sender.clone();
         let heartbeat_service = infrastructure::heartbeat_wakeup::HeartbeatWakeupService::new(
@@ -260,6 +286,7 @@ async fn main() {
         let hub_ws_url = std::env::var("SAMSARA_HUB_WS").unwrap_or_else(|_| "ws://127.0.0.1:3016/api/v1/federation/ws".to_string());
         let hub_secret = std::env::var("FEDERATION_SECRET").unwrap_or_else(|_| "dev_secret".to_string());
         let jq_ws = jq_clone.clone();
+        let provider_ws = provider.clone();
 
         tokio::spawn(async move {
             let token = token_ws;
@@ -269,11 +296,7 @@ async fn main() {
 
             let self_node_id = jq_ws.get_node_id().await.unwrap_or_default();
             info!("⚙️ [FederationWorker] Starting with Node ID: {}", self_node_id);
-            
-            let ollama_host = std::env::var("OLLAMA_HOST").unwrap_or_else(|_| "http://127.0.0.1:11434".to_string());
-            let ollama_model = std::env::var("OLLAMA_MODEL").unwrap_or_else(|_| "qwen2.5:0.5b".to_string());
-            let provider = Arc::new(aiome_core::llm_provider::OllamaProvider::new(ollama_host, ollama_model));
-            let immune_system = infrastructure::immune_system::AdaptiveImmuneSystem::new(provider);
+            let immune_system = infrastructure::immune_system::AdaptiveImmuneSystem::new(provider_ws);
 
             loop {
                 if token.is_cancelled() {
@@ -284,7 +307,7 @@ async fn main() {
                 let mut request = hub_ws_url.clone().into_client_request().expect("Invalid WS URL");
                 request.headers_mut().insert(
                     "Authorization",
-                    format!("Bearer {}", hub_secret).parse().unwrap()
+                    format!("Bearer {}", hub_secret).parse().expect("Failed to parse static Authorization header")
                 );
 
                 match tokio_tungstenite::connect_async(request).await {
@@ -399,12 +422,8 @@ async fn main() {
             match jq_clone.sync_samsara_level().await {
                 Ok(Some(aiome_core::contracts::SamsaraEvent::LevelUp { old_level, new_level })) => {
                     info!("🌟 [Evolution] Level Up Detected: {} -> {}", old_level, new_level);
-                    let ollama_host = std::env::var("OLLAMA_HOST").unwrap_or_else(|_| "http://127.0.0.1:11434".to_string());
-                    let ollama_model = std::env::var("OLLAMA_MODEL").unwrap_or_else(|_| "qwen2.5:0.5b".to_string());
-                    let provider = Arc::new(aiome_core::llm_provider::OllamaProvider::new(ollama_host, ollama_model));
-                    
                     let mutator = infrastructure::soul_mutator::SoulMutator::new(provider.clone(), std::path::PathBuf::from("workspace"))
-                        .with_prosecutor(provider); // Self-prosecution for MVP
+                        .with_prosecutor(provider.clone()); // Self-prosecution for MVP
                     
                     if let Err(e) = mutator.evolve_tactics(jq_clone.as_ref(), old_level, new_level).await {
                         warn!("⚠️ [Evolution] Behavioral Shift failed: {:?}", e);
@@ -418,9 +437,6 @@ async fn main() {
             let pending_jobs = jq_clone.get_pending_job_count().await.unwrap_or(0);
             if pending_jobs == 0 {
                 let dream_state = infrastructure::dream_state::DreamState::new();
-                let ollama_host = std::env::var("OLLAMA_HOST").unwrap_or_else(|_| "http://127.0.0.1:11434".to_string());
-                let ollama_model = std::env::var("OLLAMA_MODEL").unwrap_or_else(|_| "qwen2.5:0.5b".to_string());
-                let _provider = Arc::new(aiome_core::llm_provider::OllamaProvider::new(ollama_host.clone(), ollama_model.clone()));
                 let search_api_key = std::env::var("SEARCH_API_KEY").unwrap_or_else(|_| "dev_key".to_string());
                 let trend_sonar = infrastructure::trend_sonar::ExternalTrendSonar::new(search_api_key);
                 
@@ -684,3 +700,68 @@ impl HealthMonitor {
     }
 }
 
+pub fn build_app(state: AppState, cors_layer: CorsLayer, static_path: &str) -> Router {
+    Router::new()
+        // --- Protected Routes (Require Authentication) ---
+        .route("/api/wiki", get(routes::general::list_wiki_files))
+        .route("/api/wiki/:filename", get(routes::general::get_wiki_content))
+        .route("/api/clouddoc/page", get(routes::general::get_mock_clouddoc_page))
+        .route("/api/synergy/karma", get(routes::karma::get_karma_stream))
+        .route("/api/synergy/graph", get(routes::karma::synergy_graph_handler))
+        .route("/api/synergy/test/failure", axum::routing::post(routes::karma::trigger_failure_demo))
+        .route("/api/synergy/test/security", axum::routing::post(routes::karma::trigger_security_demo))
+        .route("/api/synergy/test/federation", axum::routing::post(routes::karma::trigger_federation_demo))
+        .route("/api/synergy/rules", get(routes::karma::get_immune_rules_handler).post(routes::karma::add_immune_rule_handler).put(routes::karma::add_immune_rule_handler))
+        .route("/api/synergy/rules/:id", axum::routing::delete(routes::karma::delete_immune_rule_handler))
+        .route("/api/artifacts", get(routes::artifacts::list_artifacts_handler))
+        .route("/api/artifacts/:id", get(routes::artifacts::get_artifact_handler).delete(routes::artifacts::delete_artifact_handler))
+        .route("/api/artifacts/:id/edges", get(routes::artifacts::get_artifact_edges_handler))
+        .route("/api/artifacts/:id/files/:filename", get(routes::artifacts::download_artifact_file_handler))
+        .route("/api/agent/chat", axum::routing::post(routes::agent::trigger_agent_chat))
+        .route("/api/agent/chat/stream", axum::routing::post(stream::trigger_agent_chat_stream))
+        .route("/api/agent/feedback", axum::routing::post(routes::agent::handle_karma_feedback))
+        .route("/api/system/evolution", get(routes::karma::get_evolution_history_handler))
+        .route("/api/v1/settings", get(routes::settings::get_settings).put(routes::settings::update_setting))
+        .route("/api/v1/settings/test", axum::routing::post(routes::settings::test_connection))
+        .route("/api/v1/ollama/models", get(routes::settings::get_ollama_models))
+        .route("/api/v1/logs", get(routes::general::get_logs))
+        .route("/api/biome/status", get(routes::biome::biome_status))
+        .route("/api/biome/list", get(routes::biome::list_messages))
+        .route("/api/biome/send", axum::routing::post(routes::biome::send_message))
+        .route("/api/expression/status", get(routes::expression::expression_status))
+        .route("/api/skills", get(routes::skill::list_skills))
+        .route("/api/skills/import", axum::routing::post(routes::skill::import_skill))
+        .route("/api/skills/mcp/spawn", axum::routing::post(routes::skill::spawn_mcp_server))
+        .nest("/api/v1/mcp", mcp::router())
+        .route_layer(axum::middleware::from_extractor::<auth::Authenticated>())
+
+        // --- Public Routes (Internal Monitoring / SSE / WS) ---
+        .route("/api/health", get(routes::general::get_health_status))
+        .merge(utoipa_swagger_ui::SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", api::ApiDoc::openapi()))
+        .route("/api/system/vitality", get(stream::trigger_system_vitality_stream))
+        .route("/api/v1/watchtower/ws", get(routes::watchtower::ws_handler))
+
+        .with_state(state) // state
+        .fallback_service(ServeDir::new(static_path).append_index_html_on_directories(true))
+        // --- Layer 3: Security Headers (Defense in Depth) ---
+        .layer(SetResponseHeaderLayer::if_not_present(X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff")))
+        .layer(SetResponseHeaderLayer::if_not_present(X_FRAME_OPTIONS, HeaderValue::from_static("DENY")))
+        .layer(SetResponseHeaderLayer::if_not_present(STRICT_TRANSPORT_SECURITY, HeaderValue::from_static("max-age=31536000; includeSubDomains")))
+        .layer(SetResponseHeaderLayer::if_not_present(CONTENT_SECURITY_POLICY, HeaderValue::from_static("default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ws: wss:;")))
+        // --- Layer 2: Dynamic CORS (Whitelisting) ---
+        // Sources: 1) ALLOWED_ORIGINS env var (defaults)  2) DB system_settings (dynamic)
+        .layer(cors_layer)
+        // --- Layer 1: Global Rate Limiting & DoS Protection ---
+        .layer(
+            tower::ServiceBuilder::new()
+                .layer(axum::error_handling::HandleErrorLayer::new(|err: tower::BoxError| async move {
+                    (StatusCode::INTERNAL_SERVER_ERROR, format!("Security Layer Error: {}", err))
+                }))
+                .buffer(1024)
+                .rate_limit(50, std::time::Duration::from_secs(1)) // Spike protection
+                .into_inner()
+        )
+}
+
+#[cfg(test)]
+mod api_integration_tests;

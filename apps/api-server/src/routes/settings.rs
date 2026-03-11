@@ -62,9 +62,11 @@ pub async fn update_setting(
     // 1. Key whitelist check
     let allowed_keys = [
         "ollama_host", "ollama_model", 
+        "llm_provider", "llm_api_key", "llm_model", "lm_studio_host",
         "discord_chat_channel_id", "discord_command_channel_id", "discord_log_channel_id",
         "telegram_chat_id", "watchtower_enabled", 
-        "enforce_guardrail", "log_level", "node_id", "samsara_hub_url"
+        "enforce_guardrail", "log_level", "node_id", "samsara_hub_url",
+        "allowed_origins"
     ];
 
     if !allowed_keys.contains(&payload.key.as_str()) {
@@ -73,7 +75,7 @@ pub async fn update_setting(
     }
 
     // 2. Category validation
-    let allowed_categories = ["llm", "channel", "system", "security"];
+    let allowed_categories = ["llm", "channel", "system", "security", "cors"];
     if !allowed_categories.contains(&payload.category.as_str()) {
         return (StatusCode::BAD_REQUEST, "Invalid category").into_response();
     }
@@ -85,7 +87,7 @@ pub async fn update_setting(
 
     // 4. Server-side is_secret determination
     let secrets = [
-        "ollama_host", "discord_token", "telegram_token", "api_server_secret"
+        "ollama_host", "discord_token", "telegram_token", "api_server_secret", "llm_api_key"
     ];
     let is_secret = secrets.contains(&payload.key.as_str());
 
@@ -170,7 +172,7 @@ async fn test_ollama(host: &str, model: Option<&str>) -> Json<TestConnectionResp
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(5))
         .build()
-        .unwrap();
+        .expect("Failed to build reqwest client");
 
     let url = if host.ends_with('/') {
         format!("{}api/tags", host)
@@ -225,5 +227,33 @@ async fn test_ollama(host: &str, model: Option<&str>) -> Json<TestConnectionResp
             success: false,
             message: format!("Failed to connect to Ollama: {}", e),
         }),
+    }
+}
+
+pub async fn get_ollama_models(
+    State(state): State<AppState>,
+    _auth: Authenticated,
+) -> impl IntoResponse {
+    let host = state.job_queue.get_setting_value("ollama_host")
+        .await.ok().flatten().unwrap_or_else(|| {
+            std::env::var("OLLAMA_HOST").unwrap_or_else(|_| "http://127.0.0.1:11434".to_string())
+        });
+    let url = format!("{}/api/tags", host.trim_end_matches('/'));
+    
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .unwrap_or_default();
+
+    match client.get(&url).send().await {
+        Ok(res) if res.status().is_success() => {
+            if let Ok(json) = res.json::<serde_json::Value>().await {
+                Json(json).into_response()
+            } else {
+                (StatusCode::INTERNAL_SERVER_ERROR, "Failed to parse Ollama response").into_response()
+            }
+        }
+        Ok(res) => (StatusCode::BAD_GATEWAY, format!("Ollama returned error: {}", res.status())).into_response(),
+        Err(e) => (StatusCode::SERVICE_UNAVAILABLE, format!("Ollama connection failed: {}", e)).into_response(),
     }
 }

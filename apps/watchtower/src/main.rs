@@ -89,7 +89,7 @@ async fn main() -> anyhow::Result<()> {
                         cmd = command_rx.recv() => {
                             if let Some(command) = cmd {
                                 if let Ok(json) = serde_json::to_string(&command) {
-                                    if let Err(e) = ws_stream.send(Message::Text(json.into())).await {
+                                    if let Err(e) = ws_stream.send(Message::Text(json)).await {
                                         error!("❌ Failed to send command to Core: {:?}", e);
                                         break;
                                     }

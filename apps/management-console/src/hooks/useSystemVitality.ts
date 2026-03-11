@@ -20,6 +20,7 @@ export const useSystemVitality = () => {
     const [events, setEvents] = useState<VitalityEvent[]>([]);
     const [lastEvent, setLastEvent] = useState<VitalityEvent | null>(null);
     const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('connecting');
+    const [lastPingMs, setLastPingMs] = useState<number | null>(null);
     // We keep track of whether the user intentionally paused the connection
     const [isPaused, setIsPaused] = useState(false);
     // Add a counter to force useEffect to re-run and reconnect immediately 
@@ -102,6 +103,14 @@ export const useSystemVitality = () => {
                             } catch (err) {
                                 console.error(`Error parsing SSE event ${msg.event}:`, err);
                             }
+                        } else if (msg.event === 'ping') {
+                            // RTT calculation: compare server timestamp with client time
+                            try {
+                                const serverTime = new Date(msg.data).getTime();
+                                const clientTime = Date.now();
+                                const rtt = Math.abs(clientTime - serverTime);
+                                setLastPingMs(rtt);
+                            } catch { /* ignore parse errors */ }
                         }
                     },
                     onclose: () => {
@@ -141,5 +150,5 @@ export const useSystemVitality = () => {
         };
     }, [addEvent, isPaused, retryTrigger]);
 
-    return { events, lastEvent, connectionStatus, toggleConnection };
+    return { events, lastEvent, connectionStatus, toggleConnection, lastPingMs };
 };

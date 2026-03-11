@@ -187,7 +187,7 @@ impl LlmProvider for OllamaProvider {
     }
 }
 
-/// Abyss Vault (Key Proxy) 経由の Gemini プロバイダー
+/// Abyss Vault (Key Proxy) 経由の Gemini プロバイダー (DEPRECATED: Direct GeminiProvider推奨)
 #[derive(Debug, Clone)]
 pub struct AbyssVaultProvider {
     proxy_url: String,
@@ -259,23 +259,20 @@ impl LlmProvider for AbyssVaultProvider {
                 if let Ok(text) = String::from_utf8(chunk.to_vec()) {
                     buffer.push_str(&text);
                     
-                    // SSE format: data: {...}\n\n
                     while let Some(data_idx) = buffer.find("data: ") {
                         let remainder = &buffer[data_idx + 6..];
                         if let Some(end_idx) = remainder.find("\n\n") {
                             let json_str = remainder[..end_idx].to_string();
-                            // Update buffer to after this event
                             let total_len = data_idx + 6 + end_idx + 2;
                             buffer = buffer[total_len..].to_string();
 
                             if let Ok(json) = serde_json::from_str::<serde_json::Value>(&json_str) {
-                                // Extract text from Gemini format
                                 if let Some(text_chunk) = json["candidates"][0]["content"]["parts"][0]["text"].as_str() {
                                     yield Ok(text_chunk.to_string());
                                 }
                             }
                         } else {
-                            break; // Wait for more data
+                            break;
                         }
                     }
                 }
@@ -287,5 +284,264 @@ impl LlmProvider for AbyssVaultProvider {
 
     fn name(&self) -> &str {
         "AbyssVault(Gemini)"
+    }
+}
+
+// --- Cloud Provider Implementations ---
+
+/// Google Gemini Provider
+#[derive(Debug, Clone)]
+pub struct GeminiProvider {
+    client: reqwest::Client,
+    api_key: String,
+    model: String,
+}
+
+impl GeminiProvider {
+    pub fn new(client: reqwest::Client, api_key: String, model: String) -> Self {
+        Self { client, api_key, model }
+    }
+}
+
+#[async_trait]
+impl LlmProvider for GeminiProvider {
+    async fn complete(&self, prompt: &str, system: Option<&str>) -> Result<String, AiomeError> {
+        let url = format!(
+            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
+            self.model, self.api_key
+        );
+
+        let payload = serde_json::json!({
+            "contents": [{
+                "parts": [{ "text": prompt }]
+            }],
+            "system_instruction": system.map(|s| {
+                serde_json::json!({ "parts": [{ "text": s }] })
+            })
+        });
+
+        let resp = self.client.post(&url)
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Gemini request failed: {}", e) })?;
+
+        if !resp.status().is_success() {
+            let err_text = resp.text().await.unwrap_or_default();
+            return Err(AiomeError::Infrastructure { reason: format!("Gemini error {}: {}", url, err_text) });
+        }
+
+        let body: serde_json::Value = resp.json().await
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Gemini parse failed: {}", e) })?;
+
+        Ok(body["candidates"][0]["content"]["parts"][0]["text"].as_str().unwrap_or("").to_string())
+    }
+
+    fn name(&self) -> &str { "Gemini" }
+}
+
+/// OpenAI Chat Completions Provider
+#[derive(Debug, Clone)]
+pub struct OpenAiProvider {
+    client: reqwest::Client,
+    api_key: String,
+    model: String,
+}
+
+impl OpenAiProvider {
+    pub fn new(client: reqwest::Client, api_key: String, model: String) -> Self {
+        Self { client, api_key, model }
+    }
+}
+
+#[async_trait]
+impl LlmProvider for OpenAiProvider {
+    async fn complete(&self, prompt: &str, system: Option<&str>) -> Result<String, AiomeError> {
+        let url = "https://api.openai.com/v1/chat/completions";
+        let mut messages = Vec::new();
+
+        if let Some(sys) = system {
+            messages.push(serde_json::json!({ "role": "system", "content": sys }));
+        }
+        messages.push(serde_json::json!({ "role": "user", "content": prompt }));
+
+        let payload = serde_json::json!({
+            "model": self.model,
+            "messages": messages,
+            "temperature": 0.7
+        });
+
+        let resp = self.client.post(url)
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("OpenAI request failed: {}", e) })?;
+
+        if !resp.status().is_success() {
+            let err_text = resp.text().await.unwrap_or_default();
+            return Err(AiomeError::Infrastructure { reason: format!("OpenAI error: {}", err_text) });
+        }
+
+        let body: serde_json::Value = resp.json().await
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("OpenAI parse failed: {}", e) })?;
+
+        Ok(body["choices"][0]["message"]["content"].as_str().unwrap_or("").to_string())
+    }
+
+    fn name(&self) -> &str { "OpenAI" }
+}
+
+/// Anthropic Claude Provider (Messages API)
+#[derive(Debug, Clone)]
+pub struct ClaudeProvider {
+    client: reqwest::Client,
+    api_key: String,
+    model: String,
+}
+
+impl ClaudeProvider {
+    pub fn new(client: reqwest::Client, api_key: String, model: String) -> Self {
+        Self { client, api_key, model }
+    }
+}
+
+#[async_trait]
+impl LlmProvider for ClaudeProvider {
+    async fn complete(&self, prompt: &str, system: Option<&str>) -> Result<String, AiomeError> {
+        let url = "https://api.anthropic.com/v1/messages";
+
+        let payload = serde_json::json!({
+            "model": self.model,
+            "max_tokens": 4096,
+            "system": system,
+            "messages": [
+                { "role": "user", "content": prompt }
+            ]
+        });
+
+        let resp = self.client.post(url)
+            .header("x-api-key", &self.api_key)
+            .header("anthropic-version", "2023-06-01")
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Claude request failed: {}", e) })?;
+
+        if !resp.status().is_success() {
+            let err_text = resp.text().await.unwrap_or_default();
+            return Err(AiomeError::Infrastructure { reason: format!("Claude error: {}", err_text) });
+        }
+
+        let body: serde_json::Value = resp.json().await
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Claude parse failed: {}", e) })?;
+
+        Ok(body["content"][0]["text"].as_str().unwrap_or("").to_string())
+    }
+
+    fn name(&self) -> &str { "Claude" }
+}
+
+/// LM Studio Provider (OpenAI-compatible local server)
+#[derive(Debug, Clone)]
+pub struct LmStudioProvider {
+    client: reqwest::Client,
+    host: String,
+    model: String,
+}
+
+impl LmStudioProvider {
+    pub fn new(client: reqwest::Client, host: String, model: String) -> Self {
+        Self { client, host, model }
+    }
+}
+
+#[async_trait]
+impl LlmProvider for LmStudioProvider {
+    async fn complete(&self, prompt: &str, system: Option<&str>) -> Result<String, AiomeError> {
+        let url = format!("{}/v1/chat/completions", self.host.trim_end_matches('/'));
+        let mut messages = Vec::new();
+
+        if let Some(sys) = system {
+            messages.push(serde_json::json!({ "role": "system", "content": sys }));
+        }
+        messages.push(serde_json::json!({ "role": "user", "content": prompt }));
+
+        let payload = serde_json::json!({
+            "model": self.model,
+            "messages": messages,
+            "temperature": 0.7
+        });
+
+        let resp = self.client.post(&url)
+            .header("Authorization", "Bearer lm-studio")
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("LM Studio request failed: {}", e) })?;
+
+        if !resp.status().is_success() {
+            let err_text = resp.text().await.unwrap_or_default();
+            return Err(AiomeError::Infrastructure { reason: format!("LM Studio error: {}", err_text) });
+        }
+
+        let body: serde_json::Value = resp.json().await
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("LM Studio parse failed: {}", e) })?;
+
+        Ok(body["choices"][0]["message"]["content"].as_str().unwrap_or("").to_string())
+    }
+
+    fn name(&self) -> &str { "LMStudio" }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[test]
+    fn test_provider_initialization_and_names() {
+        let client = reqwest::Client::new();
+        
+        let ollama = OllamaProvider::new("http://localhost:11434".to_string(), "llama3".to_string());
+        assert_eq!(ollama.name(), "Ollama");
+        
+        let gemini = GeminiProvider::new(client.clone(), "key".to_string(), "gemini".to_string());
+        assert_eq!(gemini.name(), "Gemini");
+
+        let openai = OpenAiProvider::new(client.clone(), "key".to_string(), "gpt-4".to_string());
+        assert_eq!(openai.name(), "OpenAI");
+
+        let claude = ClaudeProvider::new(client.clone(), "key".to_string(), "claude".to_string());
+        assert_eq!(claude.name(), "Claude");
+        
+        let lmstudio = LmStudioProvider::new(client.clone(), "http://localhost:1234".to_string(), "local".to_string());
+        assert_eq!(lmstudio.name(), "LMStudio");
+    }
+
+    #[tokio::test]
+    async fn test_lmstudio_complete_success() {
+        let mock_server = MockServer::start().await;
+        let mock_response = serde_json::json!({
+            "choices": [{
+                "message": {
+                    "content": "Hello from mock LM Studio"
+                }
+            }]
+        });
+
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(mock_response))
+            .mount(&mock_server)
+            .await;
+
+        let client = reqwest::Client::new();
+        let provider = LmStudioProvider::new(client, mock_server.uri(), "test-model".to_string());
+        
+        let result = provider.complete("Say hello", Some("System prompt")).await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "Hello from mock LM Studio");
     }
 }

@@ -31,7 +31,7 @@ use tower::{ServiceBuilder, limit::RateLimitLayer, buffer::BufferLayer};
 use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
-struct HubState {
+pub struct HubState {
     pool: SqlitePool,
     secret: secrecy::SecretString,
     tx: broadcast::Sender<HubMessage>,
@@ -103,7 +103,7 @@ async fn main() -> anyhow::Result<()> {
     tokio::spawn(approval_worker(pool, token.clone()));
 
     // Secure CORS Policy: Restrict to specific trusted origins
-    let cors = CorsLayer::new()
+    let _cors = CorsLayer::new()
         .allow_origin([
             "http://localhost:3000".parse().unwrap(),
             "http://127.0.0.1:3000".parse().unwrap(),
@@ -129,27 +129,7 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-    let app = Router::new()
-        .route("/api/v1/federation/sync", post(sync_handler))
-        .route("/api/v1/federation/push", post(push_handler))
-        .route("/api/v1/federation/ws", get(ws_handler))
-        .route("/api/v1/health", get(health_handler))
-        // Biome Routes (Phase 20)
-        .route("/api/v1/biome/relay", post(biome_relay_handler))
-        .route("/api/v1/biome/ws", get(biome_ws_handler))
-        // CRDT Timeline Relay
-        .route("/api/v1/relay/timeline/sync", post(timeline_sync_handler))
-        .layer(cors)
-        .layer(DefaultBodyLimit::max(5 * 1024 * 1024)) // 5MB limit
-        .layer(
-            ServiceBuilder::new()
-                .layer(HandleErrorLayer::new(|err| async move {
-                    (StatusCode::INTERNAL_SERVER_ERROR, format!("Unhandled internal error: {}", err))
-                }))
-                .layer(BufferLayer::new(2048))
-                .layer(RateLimitLayer::new(600, Duration::from_secs(60))) // High frequency for Biome
-        )
-        .with_state(state);
+    let app = build_app(state);
 
     let addr = format!("127.0.0.1:{}", port); 
     info!("🏔️ Samsara Hub (The Validator) listening on {}", addr);
@@ -908,5 +888,40 @@ async fn timeline_sync_handler(
     }))).into_response()
 }
 
+pub fn build_app(state: Arc<HubState>) -> Router {
+    let cors = CorsLayer::new()
+        .allow_origin([
+            "http://localhost:3000".parse().unwrap(),
+            "http://127.0.0.1:3000".parse().unwrap(),
+            "http://localhost:3015".parse().unwrap(), // Management Console
+            "http://localhost:3016".parse().unwrap(),
+        ]) 
+        .allow_methods([axum::http::Method::GET, axum::http::Method::POST])
+        .allow_headers([axum::http::header::CONTENT_TYPE, axum::http::header::AUTHORIZATION]);
 
+    Router::new()
+        .route("/api/v1/federation/sync", post(sync_handler))
+        .route("/api/v1/federation/push", post(push_handler))
+        .route("/api/v1/federation/ws", get(ws_handler))
+        .route("/api/v1/health", get(health_handler))
+        // Biome Routes (Phase 20)
+        .route("/api/v1/biome/relay", post(biome_relay_handler))
+        .route("/api/v1/biome/ws", get(biome_ws_handler))
+        // CRDT Timeline Relay
+        .route("/api/v1/relay/timeline/sync", post(timeline_sync_handler))
+        .layer(cors)
+        .layer(DefaultBodyLimit::max(5 * 1024 * 1024)) // 5MB limit
+        .layer(
+            ServiceBuilder::new()
+                .layer(HandleErrorLayer::new(|err| async move {
+                    (StatusCode::INTERNAL_SERVER_ERROR, format!("Unhandled internal error: {}", err))
+                }))
+                .layer(BufferLayer::new(2048))
+                .layer(RateLimitLayer::new(600, Duration::from_secs(60))) // High frequency for Biome
+        )
+        .with_state(state)
+}
+
+#[cfg(test)]
+mod hub_ws_tests;
 

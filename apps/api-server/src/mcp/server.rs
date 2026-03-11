@@ -125,7 +125,7 @@ async fn handle_mcp_request(req: JsonRpcRequest, state: &AppState) -> JsonRpcRes
             JsonRpcResponse {
                 jsonrpc: "2.0".into(),
                 id,
-                result: Some(serde_json::to_value(ListToolsResult { tools }).unwrap()),
+                result: Some(serde_json::to_value(ListToolsResult { tools }).unwrap_or_default()),
                 error: None,
             }
         }
@@ -157,7 +157,7 @@ async fn handle_mcp_request(req: JsonRpcRequest, state: &AppState) -> JsonRpcRes
                 result: Some(serde_json::to_value(CallToolResult {
                     content: vec![McpContent::Text { text: result }],
                     is_error: false,
-                }).unwrap()),
+                }).unwrap_or_default()),
                 error: None,
             }
         }

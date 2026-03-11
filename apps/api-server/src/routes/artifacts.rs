@@ -79,7 +79,9 @@ pub async fn download_artifact_file_handler(
                 .header(header::CONTENT_TYPE, mime_type)
                 .header(header::CONTENT_DISPOSITION, format!("inline; filename=\"{}\"", filename))
                 .body(axum::body::Body::from(content))
-                .unwrap()
+                .unwrap_or_else(|e| {
+                    (StatusCode::INTERNAL_SERVER_ERROR, format!("Response build error: {}", e)).into_response()
+                })
                 .into_response()
         },
         Err(aiome_core::error::AiomeError::ArtifactNotFound { .. }) => {
