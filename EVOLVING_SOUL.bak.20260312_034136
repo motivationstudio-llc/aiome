@@ -1,7 +1,0 @@
-json
-{
-  "code": "error",
-  "message": "Failed to generate new EVOLVING_SOUL.md file.",
-  "details": "An error occurred while trying to update the `EVOLVING_SOUL.md` file. Please ensure that the current content matches the new version and try again.",
-  "status": "failure"
-}
