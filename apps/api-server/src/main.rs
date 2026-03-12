@@ -50,11 +50,15 @@ pub struct AppState {
     pub artifact_store: Arc<dyn aiome_core::traits::ArtifactStore>,
     pub event_sender: tokio::sync::broadcast::Sender<shared::watchtower::CoreEvent>,
     pub context_engine: Arc<infrastructure::context_engine::ContextEngine>,
+    pub soul_mutator: Arc<infrastructure::soul_mutator::SoulMutator>,
     pub provider: Arc<dyn aiome_core::llm_provider::LlmProvider + Send + Sync>,
+    pub autonomous_running: Arc<std::sync::atomic::AtomicBool>,
+    pub autonomous_config: Arc<tokio::sync::RwLock<Option<aiome_core::biome::AutonomousConfig>>>,
 }
 
 #[tokio::main]
 async fn main() {
+    dotenvy::dotenv().ok();
     let static_path = "apps/api-server/static";
     let docs_path = "../../docs";
 
@@ -172,6 +176,75 @@ async fn main() {
         fallback_model,
     });
 
+    // === Background LLM Provider (for autonomous tasks) ===
+    // Uses a SEPARATE provider (default: Gemini Cloud) to avoid competing with Ollama
+    #[derive(Debug)]
+    struct BackgroundLlmProvider {
+        jq: Arc<infrastructure::job_queue::SqliteJobQueue>,
+        client: reqwest::Client,
+    }
+
+    #[async_trait]
+    impl aiome_core::llm_provider::LlmProvider for BackgroundLlmProvider {
+        async fn complete(&self, prompt: &str, system: Option<&str>) -> Result<String, aiome_core::error::AiomeError> {
+            // Priority: DB setting > env var > fallback "ollama" (Pattern B: background uses local LLM)
+            let provider_type = self.jq.get_setting_value("bg_llm_provider").await.ok().flatten()
+                .or_else(|| std::env::var("BG_LLM_PROVIDER").ok())
+                .unwrap_or_else(|| "ollama".to_string());
+
+            let model = self.jq.get_setting_value("bg_llm_model").await.ok().flatten()
+                .or_else(|| std::env::var("BG_LLM_MODEL").ok())
+                .unwrap_or_else(|| "qwen3.5:9b".to_string());
+
+            let api_key = self.jq.get_setting_value("bg_llm_api_key").await.ok().flatten()
+                .or_else(|| std::env::var("GEMINI_API_KEY").ok())
+                .or_else(|| std::env::var("OPENAI_API_KEY").ok())
+                .or_else(|| std::env::var("ANTHROPIC_API_KEY").ok())
+                .unwrap_or_default();
+
+            match provider_type.as_str() {
+                "gemini" => {
+                    aiome_core::llm_provider::GeminiProvider::new(self.client.clone(), api_key, model).complete(prompt, system).await
+                },
+                "openai" => {
+                    aiome_core::llm_provider::OpenAiProvider::new(self.client.clone(), api_key, model).complete(prompt, system).await
+                },
+                "claude" => {
+                    aiome_core::llm_provider::ClaudeProvider::new(self.client.clone(), api_key, model).complete(prompt, system).await
+                },
+                "lmstudio" => {
+                    let host = self.jq.get_setting_value("lm_studio_host").await.ok().flatten()
+                        .unwrap_or_else(|| "http://127.0.0.1:1234".to_string());
+                    aiome_core::llm_provider::LmStudioProvider::new(self.client.clone(), host, model).complete(prompt, system).await
+                },
+                _ => {
+                    // Fallback to Ollama (not recommended for background)
+                    let host = self.jq.get_setting_value("ollama_host").await.ok().flatten()
+                        .unwrap_or_else(|| "http://127.0.0.1:11434".to_string());
+                    aiome_core::llm_provider::OllamaProvider::new(host, model).complete(prompt, system).await
+                }
+            }
+        }
+
+        async fn stream_complete(&self, prompt: &str, system: Option<&str>) -> Result<std::pin::Pin<Box<dyn tokio_stream::Stream<Item = Result<String, aiome_core::error::AiomeError>> + Send>>, aiome_core::error::AiomeError> {
+            // Background tasks don't need streaming. Wrap complete() into a single-item stream.
+            let text = self.complete(prompt, system).await?;
+            let s = async_stream::stream! { yield Ok(text); };
+            Ok(Box::pin(s))
+        }
+
+        fn name(&self) -> &str { "BackgroundLlm" }
+    }
+
+    let bg_provider: Arc<dyn aiome_core::llm_provider::LlmProvider> = Arc::new(BackgroundLlmProvider {
+        jq: job_queue.clone(),
+        client: shared_client.clone(),
+    });
+    info!("🧠 [LLM] Front-end: DynamicLlm (DB-configured), Background: {} ({})",
+        std::env::var("BG_LLM_PROVIDER").unwrap_or_else(|_| "ollama".to_string()),
+        std::env::var("BG_LLM_MODEL").unwrap_or_else(|_| "qwen3.5:9b".to_string())
+    );
+
     let mut artifact_store = infrastructure::artifact_store::SqliteArtifactStore::new(
         job_queue.get_pool().clone(),
         std::path::PathBuf::from("workspace/artifacts"),
@@ -186,14 +259,14 @@ async fn main() {
     let wasm_skill_manager = Arc::new(infrastructure::skills::WasmSkillManager::new("workspace/skills", "workspace").expect("Skills directory not found"));
     let skill_forge = Arc::new(infrastructure::skills::forge::SkillForge::new("workspace/forge", "workspace/skills/custom"));
     
-    let llm_semaphore = Arc::new(tokio::sync::Semaphore::new(3));
+    let llm_semaphore = Arc::new(tokio::sync::Semaphore::new(1)); // Ollama handles 1 request at a time
     let forge_semaphore = Arc::new(tokio::sync::Semaphore::new(1));
     let event_sender = tokio::sync::broadcast::channel::<shared::watchtower::CoreEvent>(100).0;
 
     skill_forge.ensure_forge_workspace().expect("Failed to initialize skill_forge workspace");
 
     let origins_str = std::env::var("ALLOWED_ORIGINS").unwrap_or_else(|_| 
-        "http://127.0.0.1:3015,http://127.0.0.1:3016,http://localhost:1420,http://localhost:5173,http://localhost:3016".to_string()
+        "http://127.0.0.1:3015,http://127.0.0.1:3016,http://localhost:1420,http://localhost:1421,http://localhost:5173,http://localhost:3016".to_string()
     );
     let mut all_origins: Vec<String> = origins_str
         .split(',')
@@ -218,6 +291,7 @@ async fn main() {
         .collect();
     info!("🌐 [CORS] Active origins: {:?}", all_origins);
     
+    info!("🌐 [CORS] Effective Allowed Origins: {:?}", all_origins);
     let cors_layer = CorsLayer::new()
         .allow_origin(AllowOrigin::list(allowed_origins))
         .allow_methods([axum::http::Method::GET, axum::http::Method::POST, axum::http::Method::PUT, axum::http::Method::DELETE])
@@ -240,7 +314,10 @@ async fn main() {
             job_queue.clone(),
             llm_semaphore.clone()
         )),
+        soul_mutator: Arc::new(infrastructure::soul_mutator::SoulMutator::new(provider.clone(), std::path::PathBuf::from("workspace"))),
         provider: provider.clone(),
+        autonomous_running: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        autonomous_config: Arc::new(tokio::sync::RwLock::new(None)),
     }, cors_layer, static_path);
 
     // Initial Security Check
@@ -251,7 +328,7 @@ async fn main() {
     }
 
     let port: u16 = std::env::var("PORT").unwrap_or_else(|_| "3015".to_string()).parse().expect("Invalid PORT");
-    let addr = SocketAddr::from(([127, 0, 0, 1], port));
+    let addr = SocketAddr::from(([0, 0, 0, 0], port));
     info!("🌌 Aiome Management Console listening on {}", addr);
 
     let token = CancellationToken::new();
@@ -260,11 +337,11 @@ async fn main() {
     tokio::spawn(async move {
         let token = token_bg;
         let token_ws = token.clone();
-        // Initialize LLM for background tasks
-        let immune_system = infrastructure::immune_system::AdaptiveImmuneSystem::new(provider.clone());
+        // Initialize LLM for background tasks (using bg_provider to avoid Ollama competition)
+        let immune_system = infrastructure::immune_system::AdaptiveImmuneSystem::new(bg_provider.clone());
 
         // Heartbeat Wakeup Setup (Phase 1)
-        let wakeup_provider = provider.clone();
+        let wakeup_provider = bg_provider.clone();
         let llm_semaphore = llm_semaphore.clone();
         let event_sender = event_sender.clone();
         let heartbeat_service = infrastructure::heartbeat_wakeup::HeartbeatWakeupService::new(
@@ -446,21 +523,55 @@ async fn main() {
             }
 
             // 🛡️ 1. Auto-Healing: Analyze threats and generate new immune rules
-            info!("⚙️ [BackgroundWorker] Starting autonomous threat analysis (Auto-Healing)...");
-            match immune_system.analyze_threats(jq_clone.as_ref()).await {
-                Ok(n) if n > 0 => info!("🛡️ [BackgroundWorker] {} new immune rules generated.", n),
-                Ok(_) => info!("🛡️ [BackgroundWorker] No new threats identified."),
-                Err(e) => warn!("⚠️ [BackgroundWorker] Threat analysis failed: {:?}", e),
+            // Use try_acquire + short timeout to avoid blocking front-end requests
+            if let Ok(_bg_permit) = llm_semaphore.try_acquire() {
+                info!("⚙️ [BackgroundWorker] Starting autonomous threat analysis (Auto-Healing)...");
+                match tokio::time::timeout(tokio::time::Duration::from_secs(30), immune_system.analyze_threats(jq_clone.as_ref())).await {
+                    Ok(Ok(n)) if n > 0 => info!("🛡️ [BackgroundWorker] {} new immune rules generated.", n),
+                    Ok(Ok(_)) => info!("🛡️ [BackgroundWorker] No new threats identified."),
+                    Ok(Err(e)) => warn!("⚠️ [BackgroundWorker] Threat analysis failed: {:?}", e),
+                    Err(_) => warn!("⏭️ [BackgroundWorker] Threat analysis timed out (30s), skipping."),
+                }
+            } else {
+                info!("⏭️ [BackgroundWorker] LLM busy, skipping threat analysis.");
             }
 
             // 🧬 1.5 Soul Mutation: Attempt autonomous evolution
-            info!("⚙️ [BackgroundWorker] Checking for Soul Mutation (Autonomous Evolution)...");
-            let mutator = infrastructure::soul_mutator::SoulMutator::new(provider.clone(), std::path::PathBuf::from("workspace"))
-                .with_prosecutor(provider.clone());
-            match mutator.transmute(jq_clone.as_ref()).await {
-                Ok(true) => info!("🧬 [BackgroundWorker] Soul mutated successfully."),
-                Ok(false) => info!("🧬 [BackgroundWorker] No soul mutation triggered."),
-                Err(e) => warn!("⚠️ [BackgroundWorker] Soul mutation failed: {:?}", e),
+            let mutator = infrastructure::soul_mutator::SoulMutator::new(bg_provider.clone(), std::path::PathBuf::from("workspace"))
+                .with_prosecutor(bg_provider.clone());
+            if let Ok(_bg_permit) = llm_semaphore.try_acquire() {
+                info!("⚙️ [BackgroundWorker] Checking for Soul Mutation (Autonomous Evolution)...");
+                match tokio::time::timeout(tokio::time::Duration::from_secs(30), mutator.transmute(jq_clone.as_ref())).await {
+                    Ok(Ok(true)) => info!("🧬 [BackgroundWorker] Soul mutated successfully."),
+                    Ok(Ok(false)) => info!("🧬 [BackgroundWorker] No soul mutation triggered."),
+                    Ok(Err(e)) => warn!("⚠️ [BackgroundWorker] Soul mutation failed: {:?}", e),
+                    Err(_) => warn!("⏭️ [BackgroundWorker] Soul mutation timed out (30s), skipping."),
+                }
+            } else {
+                info!("⏭️ [BackgroundWorker] LLM busy, skipping soul mutation.");
+            }
+
+            // 🎭 1.7 Autonomous Expression (Phase 4): Self-Expression based on Karma
+            if wakeup_counter % 5 == 0 {
+                if let Ok(true) = jq_clone.get_auto_expression_enabled().await {
+                    if let Ok(_bg_permit) = llm_semaphore.try_acquire() {
+                        info!("⚙️ [BackgroundWorker] Auto-Expression is enabled. Generating...");
+                        let karma = jq_clone.fetch_all_karma(5).await.unwrap_or_default();
+                        if !karma.is_empty() {
+                            let soul_prompt = mutator.get_active_prompt().await.unwrap_or_default();
+                            match tokio::time::timeout(tokio::time::Duration::from_secs(30), aiome_core::expression::engine::ExpressionEngine::generate(&karma, &soul_prompt, bg_provider.as_ref())).await {
+                                Ok(Ok(expr)) => {
+                                    let _ = jq_clone.store_expression(&expr).await;
+                                    info!("🎭 [BackgroundWorker] Autonomous Expression generated: {}", expr.emotion);
+                                },
+                                Ok(Err(e)) => warn!("⚠️ [BackgroundWorker] Expression generation failed: {:?}", e),
+                                Err(_) => warn!("⏭️ [BackgroundWorker] Expression generation timed out (30s), skipping."),
+                            }
+                        }
+                    } else {
+                        info!("⏭️ [BackgroundWorker] LLM busy, skipping auto-expression.");
+                    }
+                }
             }
 
             // 🌐 2. Swarm Sync: Push local data and Sync remote data via REST API
@@ -624,9 +735,9 @@ async fn main() {
                 }
             }
 
-            // Sleep for 1 minute before next maintenance cycle
+            // Sleep for 5 minutes before next maintenance cycle (Pattern B: longer interval for Ollama background)
             tokio::select! {
-                _ = tokio::time::sleep(tokio::time::Duration::from_secs(60)) => {},
+                _ = tokio::time::sleep(tokio::time::Duration::from_secs(300)) => {},
                 _ = token.cancelled() => {
                     info!("🛑 [BackgroundWorker] Cancellation received. Exiting.");
                     break;
@@ -728,7 +839,13 @@ pub fn build_app(state: AppState, cors_layer: CorsLayer, static_path: &str) -> R
         .route("/api/biome/status", get(routes::biome::biome_status))
         .route("/api/biome/list", get(routes::biome::list_messages))
         .route("/api/biome/send", axum::routing::post(routes::biome::send_message))
+        .route("/api/biome/autonomous/start", axum::routing::post(routes::biome::autonomous_start))
+        .route("/api/biome/autonomous/stop", axum::routing::post(routes::biome::autonomous_stop))
+        .route("/api/biome/autonomous/status", get(routes::biome::autonomous_status))
         .route("/api/expression/status", get(routes::expression::expression_status))
+        .route("/api/expression/generate", axum::routing::post(routes::expression::generate_expression))
+        .route("/api/expression/list", get(routes::expression::list_expressions))
+        .route("/api/expression/auto", axum::routing::post(routes::expression::toggle_auto_expression))
         .route("/api/skills", get(routes::skill::list_skills))
         .route("/api/skills/import", axum::routing::post(routes::skill::import_skill))
         .route("/api/skills/mcp/spawn", axum::routing::post(routes::skill::spawn_mcp_server))

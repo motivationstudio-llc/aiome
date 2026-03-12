@@ -396,6 +396,20 @@ impl DbInitializer for SqliteJobQueue {
         .await
         .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to create system_settings table: {}", e) })?;
 
+        // v4: Expression Engine (Autonomous Expression)
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS expressions (
+                id TEXT PRIMARY KEY,
+                content TEXT NOT NULL,
+                emotion TEXT NOT NULL,
+                karma_refs TEXT DEFAULT '[]',
+                created_at TEXT DEFAULT (datetime('now'))
+            );"
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to create expressions table: {}", e) })?;
+
         info!("✅ [SqliteJobQueue] Database and migrations initialized successfully.");
         Ok(())
     }

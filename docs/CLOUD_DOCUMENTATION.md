@@ -5,7 +5,7 @@ Welcome to the Aiome project documentation. This wiki is automatically generated
 
 - **[Lex AI Constitution](./ARCHITECTURE_LAW.md)**: AI 都市建築基準法。アクターの境界、契約、統治を規定。
 - **Apps**: 
-    - `aiome-daemon`: Main execution daemon. Orchestrates jobs, agent personality, and skill execution.
+    - `api-server`: Main management hub. Orchestrates agent chat, skill execution, and security monitoring.
     - `watchtower`: Monitoring and gateway actor.
     - `samsara-hub`: Central validator for federation network.
 - **Libs**: 

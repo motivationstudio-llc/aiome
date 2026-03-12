@@ -19,3 +19,4 @@ pub mod contracts;
 pub mod budget;
 pub mod llm_provider;
 pub mod biome;
+pub mod expression;

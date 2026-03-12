@@ -4,17 +4,27 @@ use axum::{
     http::StatusCode,
 };
 use crate::AppState;
-use aiome_core::biome::BiomeMessage;
+use aiome_core::biome::{BiomeMessage, BiomeDialogue, DialogueStatus, AutonomousBiomeEngine, AutonomousConfig};
 use aiome_core::biome::dialogue::DialogueManager;
 use aiome_core::traits::JobQueue;
-use tracing::{info, warn};
+use tracing::{info, warn, error};
 use sqlx::Row;
+use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 #[derive(serde::Deserialize)]
 pub struct SendBiomeRequest {
     pub recipient_pubkey: String,
     pub topic_id: String,
     pub content: String,
+}
+
+#[derive(serde::Deserialize)]
+pub struct StartAutonomousRequest {
+    pub topic_id: String,
+    pub peer_pubkey: String,
+    pub interval_secs: Option<u64>,
+    pub max_rounds: Option<u32>,
 }
 
 pub async fn biome_status(
@@ -31,9 +41,64 @@ pub async fn biome_status(
     }))
 }
 
+pub async fn autonomous_start(
+    State(state): State<AppState>,
+    Json(req): Json<StartAutonomousRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    if state.autonomous_running.load(Ordering::SeqCst) {
+        return Err((StatusCode::CONFLICT, Json(serde_json::json!({"error": "Autonomous dialogue is already running"}))));
+    }
+
+    let config = AutonomousConfig {
+        topic_id: req.topic_id,
+        peer_pubkey: req.peer_pubkey,
+        interval_secs: req.interval_secs.unwrap_or(30),
+        max_rounds: req.max_rounds.unwrap_or(10),
+    };
+
+    state.autonomous_running.store(true, Ordering::SeqCst);
+    let mut config_write = state.autonomous_config.write().await;
+    *config_write = Some(config.clone());
+    drop(config_write);
+
+    let queue = state.job_queue.clone();
+    let llm = state.provider.clone();
+    let running = state.autonomous_running.clone();
+    let semaphore = state.llm_semaphore.clone();
+
+    tokio::spawn(async move {
+        AutonomousBiomeEngine::start_loop(config, queue, llm, running, semaphore).await;
+    });
+
+    Ok(Json(serde_json::json!({"status": "started"})))
+}
+
+pub async fn autonomous_stop(
+    State(state): State<AppState>,
+) -> Json<serde_json::Value> {
+    state.autonomous_running.store(false, Ordering::SeqCst);
+    Json(serde_json::json!({"status": "stopping"}))
+}
+
+pub async fn autonomous_status(
+    State(state): State<AppState>,
+) -> Json<serde_json::Value> {
+    let running = state.autonomous_running.load(Ordering::SeqCst);
+    let config = state.autonomous_config.read().await;
+    
+    Json(serde_json::json!({
+        "running": running,
+        "config": *config
+    }))
+}
+
 pub async fn list_messages(
     State(state): State<AppState>,
 ) -> Json<Vec<serde_json::Value>> {
+    let messages = state.job_queue.fetch_biome_messages("default", 100).await.unwrap_or_default();
+    
+    // If "default" is empty, try broadly or filter by topic if needed.
+    // For MVP, if we want ALL messages:
     let rows = sqlx::query("SELECT * FROM biome_messages ORDER BY created_at DESC LIMIT 100")
         .fetch_all(state.job_queue.get_pool()).await.unwrap_or_default();
     
@@ -85,7 +150,7 @@ pub async fn send_message(
         topic_id: req.topic_id,
         content: req.content,
         karma_root_cid: karma_root,
-        signature,
+        signature: signature.clone(),
         lamport_clock: clock,
         timestamp: chrono::Utc::now().to_rfc3339(),
         encryption: "none".to_string(),
@@ -106,12 +171,19 @@ pub async fn send_message(
         Ok(r) if r.status().is_success() => {
             // Store a copy in local history
             let _ = sqlx::query("INSERT INTO biome_messages (sender_pubkey, recipient_pubkey, topic_id, content, karma_root_cid, signature, lamport_clock, encryption) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
-                .bind(&msg.sender_pubkey).bind(&msg.recipient_pubkey).bind(&msg.topic_id).bind(&msg.content).bind(&msg.karma_root_cid).bind(&msg.signature).bind(msg.lamport_clock as i64).bind(&msg.encryption)
+                .bind(&msg.sender_pubkey).bind(&msg.recipient_pubkey).bind(&msg.topic_id).bind(&msg.content).bind(&msg.karma_root_cid).bind(&signature).bind(msg.lamport_clock as i64).bind(&msg.encryption)
                 .execute(state.job_queue.get_pool()).await;
 
             Ok(Json(serde_json::json!({"status": "sent", "topic_id": msg.topic_id})))
         },
-        Ok(r) => Err((StatusCode::BAD_GATEWAY, Json(serde_json::json!({"error": "Hub rejected relay", "code": r.status().as_u16()})))),
-        Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": e.to_string()})))),
+        _ => {
+            // Hub unavailable or failed: Fallback to local
+            warn!("⚠️ [Biome] Hub relay failed. Saving message locally as fallback.");
+            let _ = sqlx::query("INSERT INTO biome_messages (sender_pubkey, recipient_pubkey, topic_id, content, karma_root_cid, signature, lamport_clock, encryption) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+                .bind(&msg.sender_pubkey).bind(&msg.recipient_pubkey).bind(&msg.topic_id).bind(&msg.content).bind(&msg.karma_root_cid).bind(&signature).bind(msg.lamport_clock as i64).bind(&msg.encryption)
+                .execute(state.job_queue.get_pool()).await;
+            
+            Ok(Json(serde_json::json!({"status": "sent_local_only", "topic_id": msg.topic_id})))
+        }
     }
 }

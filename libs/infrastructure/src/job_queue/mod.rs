@@ -38,6 +38,7 @@ mod watchtower;
 mod taxonomy;
 pub mod settings;
 pub mod crdt;
+mod expression;
 
 use migrations::DbInitializer;
 use core_ops::CoreOps;
@@ -50,6 +51,7 @@ use swarm::SwarmOps;
 use watchtower::WatchtowerOps;
 use settings::SettingsOps;
 use crdt::CrdtOps;
+use expression::ExpressionOps;
 
 /// Job Queue that utilizes SQLite in WAL Mode to allow multi-threaded queue operations.
 #[derive(Clone, Debug)]
@@ -89,7 +91,7 @@ impl SqliteJobQueue {
             karma_cache: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
         };
 
-        instance.init_db().await?;
+        DbInitializer::init_db(&instance).await?;
         Ok(instance)
     }
 
@@ -360,14 +362,56 @@ impl JobQueue for SqliteJobQueue {
         let now = chrono::Utc::now();
         let cooldown_until = (now + chrono::Duration::minutes(cooldown_minutes)).to_rfc3339();
         
-        let row = sqlx::query("UPDATE biome_topics SET turn_count = turn_count + 1, cooldown_until = ?, updated_at = datetime('now') WHERE topic_id = ? RETURNING turn_count")
-            .bind(&cooldown_until)
+        let row = sqlx::query("INSERT INTO biome_topics (topic_id, turn_count, cooldown_until, updated_at) VALUES (?, 1, ?, datetime('now')) ON CONFLICT(topic_id) DO UPDATE SET turn_count = turn_count + 1, cooldown_until = excluded.cooldown_until, updated_at = excluded.updated_at RETURNING turn_count")
             .bind(topic_id)
+            .bind(&cooldown_until)
             .fetch_one(&self.pool)
             .await
             .map_err(|e| AiomeError::Infrastructure { reason: e.to_string() })?;
         
         Ok(row.get("turn_count"))
+    }
+
+    async fn fetch_biome_messages(&self, topic_id: &str, limit: i64) -> Result<Vec<serde_json::Value>, AiomeError> {
+        let rows = sqlx::query("SELECT * FROM biome_messages WHERE topic_id = ? ORDER BY created_at DESC LIMIT ?")
+            .bind(topic_id)
+            .bind(limit)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| AiomeError::Infrastructure { reason: e.to_string() })?;
+        
+        let messages = rows.into_iter().map(|row| {
+            serde_json::json!({
+                "id": row.get::<i64, _>("id"),
+                "sender_pubkey": row.get::<String, _>("sender_pubkey"),
+                "recipient_pubkey": row.get::<String, _>("recipient_pubkey"),
+                "topic_id": row.get::<String, _>("topic_id"),
+                "content": row.get::<String, _>("content"),
+                "karma_root_cid": row.get::<String, _>("karma_root_cid"),
+                "signature": row.get::<String, _>("signature"),
+                "lamport_clock": row.get::<i64, _>("lamport_clock"),
+                "encryption": row.get::<String, _>("encryption"),
+                "created_at": row.get::<Option<String>, _>("created_at"),
+            })
+        }).collect();
+
+        Ok(messages)
+    }
+
+    async fn store_biome_message(&self, message: &aiome_core::biome::BiomeMessage) -> Result<(), AiomeError> {
+        sqlx::query("INSERT INTO biome_messages (sender_pubkey, recipient_pubkey, topic_id, content, karma_root_cid, signature, lamport_clock, encryption) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+            .bind(&message.sender_pubkey)
+            .bind(&message.recipient_pubkey)
+            .bind(&message.topic_id)
+            .bind(&message.content)
+            .bind(&message.karma_root_cid)
+            .bind(&message.signature)
+            .bind(message.lamport_clock as i64)
+            .bind(&message.encryption)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| AiomeError::Infrastructure { reason: e.to_string() })?;
+        Ok(())
     }
 
     async fn update_biome_reputation(&self, pubkey: &str, delta: f64) -> Result<f64, AiomeError> {
@@ -379,6 +423,23 @@ impl JobQueue for SqliteJobQueue {
             .map_err(|e| AiomeError::Infrastructure { reason: e.to_string() })?;
         
         Ok(row.get("reputation_score"))
+    }
+
+    // --- Expression Engine (V4) ---
+    async fn store_expression(&self, expression: &aiome_core::expression::Expression) -> Result<(), AiomeError> {
+        <Self as ExpressionOps>::store_expression(self, expression).await
+    }
+
+    async fn fetch_expressions(&self, limit: i64) -> Result<Vec<aiome_core::expression::Expression>, AiomeError> {
+        <Self as ExpressionOps>::fetch_expressions(self, limit).await
+    }
+
+    async fn get_auto_expression_enabled(&self) -> Result<bool, AiomeError> {
+        <Self as ExpressionOps>::get_auto_expression_enabled(self).await
+    }
+
+    async fn set_auto_expression_enabled(&self, enabled: bool) -> Result<(), AiomeError> {
+        <Self as ExpressionOps>::set_auto_expression_enabled(self, enabled).await
     }
 }
 

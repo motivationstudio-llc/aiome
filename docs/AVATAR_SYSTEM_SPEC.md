@@ -50,7 +50,14 @@ Components like `DioramaView.tsx` (using `VrmRenderer`) should use `getAssetPath
 When adding a third character or a new style:
 1.  **Update Types**: Add the new key to `AvatarCharacter` or `AvatarProportion` types in `AvatarContext.tsx`.
 2.  **Update Map**: Register the new assets in the `AVATAR_ASSETS` constant in `AvatarContext.tsx`.
-3.  **UI Exposure**: Add the corresponding selection buttons in `SettingsPage.tsx`.
+3.  **UI Exposure**: Add the corresponding selection buttons in `SettingsPage.tsx` and `OnboardingModal.tsx`.
+
+## 6. Onboarding Integration (v2.0+)
+
+Avatar selection is now part of the **4-step onboarding wizard** (`OnboardingModal.tsx`):
+- Step 3 ("Choose Manifestation") allows users to select gender (♀/♂) and style (Chibi/Taller) during first launch.
+- Selections are persisted via `AvatarCharacterContext` (localStorage).
+- Users can change their avatar anytime from `Settings → Appearance`.
 
 ---
 *Authorized by Antigravity Core Integration Unit.*

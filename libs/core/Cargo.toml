@@ -13,17 +13,19 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 bastion = { package = "bastion-core", git = "https://github.com/for4xex-droid/bastion.git", branch = "main", features = ["fs"] }
 chrono = { workspace = true }
+uuid = { workspace = true, features = ["v4", "serde"] }
+tracing = { workspace = true }
 reqwest = { workspace = true }
 secrecy = { workspace = true }
 contracts = "0.6.7"
 futures = { workspace = true }
 tokio-stream = { workspace = true }
 async-stream = { workspace = true }
+tokio = { workspace = true, features = ["sync", "time", "macros"] }
 base64 = { workspace = true }
 chacha20poly1305 = { workspace = true }
 ed25519-dalek = { workspace = true }
 x25519-dalek = { workspace = true }
 
 [dev-dependencies]
-tokio = { workspace = true }
 wiremock = { workspace = true }

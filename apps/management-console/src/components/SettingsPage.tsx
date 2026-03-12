@@ -6,7 +6,7 @@ import {
     MessageSquare, Globe, Shield, Check, X, Loader2, Cpu, Plus
 } from 'lucide-react';
 import { API_BASE } from '../config';
-import { getAuthHeaders, setAuthToken } from '../lib/auth';
+import { getAuthHeaders, setAuthToken, authenticatedFetch } from '../lib/auth';
 import { useTokenHealth } from '../hooks/useTokenHealth';
 
 interface SettingEntry {
@@ -108,6 +108,26 @@ const SettingsPage: React.FC = () => {
                     </div>
 
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+                        <div>
+                            <label style={labelStyle}>AI Name</label>
+                            <input
+                                type="text"
+                                value={getSetting('ai_name')}
+                                placeholder="Watchtower"
+                                onChange={(e) => updateSetting('ai_name', e.target.value, 'identity')}
+                                style={{
+                                    width: '100%',
+                                    background: 'rgba(255,255,255,0.03)',
+                                    border: '1px solid var(--border-glass)',
+                                    borderRadius: '8px',
+                                    padding: '0.8rem',
+                                    color: '#fff',
+                                    outline: 'none',
+                                    fontSize: '0.9rem'
+                                }}
+                            />
+                        </div>
+
                         <div>
                             <label style={labelStyle}>Avatar Character</label>
                             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
@@ -262,6 +282,58 @@ const SettingsPage: React.FC = () => {
                                 </div>
                             )}
                         </div>
+                    </div>
+                </section>
+
+                {/* 2.5 Background LLM (Autonomous) Section */}
+                <section className="glass-panel" style={{ padding: '2rem', borderRadius: 'var(--radius-lg)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '2rem' }}>
+                        <Cpu size={24} color="var(--accent-fuchsia)" />
+                        <h3 style={{ margin: 0, fontSize: '1.2rem' }}>Background LLM (Autonomous)</h3>
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                        <div>
+                            <label style={labelStyle}>Provider</label>
+                            <select
+                                value={getSetting('bg_llm_provider') || 'gemini'}
+                                onChange={(e) => update_setting_handler(e.target.value, 'bg_llm_provider', 'llm')}
+                                style={selectStyle}
+                            >
+                                <option value="gemini">Google Gemini (Cloud)</option>
+                                <option value="openai">OpenAI (Cloud)</option>
+                                <option value="claude">Anthropic Claude (Cloud)</option>
+                                <option value="lmstudio">LM Studio (Local)</option>
+                                <option value="ollama">Ollama (Not Recommended)</option>
+                            </select>
+                        </div>
+
+                        {(getSetting('bg_llm_provider') === 'gemini' || getSetting('bg_llm_provider') === 'openai' || getSetting('bg_llm_provider') === 'claude') && (
+                            <div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.6rem' }}>
+                                    <label style={{ ...labelStyle, marginBottom: 0 }}>API Key</label>
+                                    {saving === 'bg_llm_api_key' && <Loader2 size={12} className="ani-spin" color="var(--accent-cyan)" />}
+                                </div>
+                                <input
+                                    type="password"
+                                    defaultValue={getSetting('bg_llm_api_key')}
+                                    placeholder="Enter Background API key (or leave empty for .env default)"
+                                    onBlur={(e) => update_setting_handler(e.target.value, 'bg_llm_api_key', 'llm')}
+                                    style={inputStyle}
+                                />
+                                <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: '0.4rem', fontStyle: 'italic' }}>
+                                    If left empty, falls back to the main LLM API Key or .env API keys.
+                                </div>
+                            </div>
+                        )}
+
+                        <SettingInput
+                            label="Model Name"
+                            value={getSetting('bg_llm_model')}
+                            placeholder={getSetting('bg_llm_provider') === 'gemini' ? 'gemini-2.5-flash' : 'Model name'}
+                            onBlur={(v) => update_setting_handler(v, 'bg_llm_model', 'llm')}
+                            saving={saving === 'bg_llm_model'}
+                        />
                     </div>
                 </section>
 
@@ -441,7 +513,7 @@ const OriginsManager: React.FC<{ origins: string, onSave: (val: string) => void,
                 <input
                     type="text" value={draft} placeholder="https://example.com"
                     onChange={(e) => { setDraft(e.target.value); setError(''); }}
-                    onKeyDown={(e) => e.key === 'Enter' && addOrigin()}
+                    onKeyDown={(e) => { if (e.nativeEvent.isComposing) return; if (e.key === 'Enter') addOrigin(); }}
                     style={{ ...inputStyle, flex: 1 }}
                 />
                 <button onClick={addOrigin} style={{ ...testBtnStyle, padding: '0.5rem 0.8rem' }}>
@@ -501,7 +573,7 @@ const SecretUpdater: React.FC = () => {
                 <input
                     type="password" value={newSecret} placeholder="Enter new API secret"
                     onChange={(e) => { setNewSecret(e.target.value); setResult(null); }}
-                    onKeyDown={(e) => e.key === 'Enter' && handleUpdate()}
+                    onKeyDown={(e) => { if (e.nativeEvent.isComposing) return; if (e.key === 'Enter') handleUpdate(); }}
                     style={{ ...inputStyle, flex: 1 }}
                 />
                 <button onClick={handleUpdate} disabled={testing} style={{ ...testBtnStyle, padding: '0.5rem 0.8rem' }}>
@@ -673,17 +745,18 @@ const OllamaModelSelector: React.FC<{ value: string, onSelect: (v: string) => vo
         setLoading(true);
         setError('');
         try {
-            const res = await fetch(`${API_BASE}/api/v1/ollama/models`, { headers: getAuthHeaders() });
+            const res = await authenticatedFetch(`${API_BASE}/api/v1/ollama/models`);
             if (res.ok) {
                 const data = await res.json();
                 if (data.models && Array.isArray(data.models)) {
                     setModels(data.models.map((m: any) => m.name));
                 }
             } else {
-                setError('Failed to fetch models');
+                setError(`Failed to fetch models: ${res.status}`);
             }
-        } catch {
-            setError('Connection error');
+        } catch (err: any) {
+            console.error("Fetch models error:", err);
+            setError(`Connection error: ${err.message || 'Unknown error'}`);
         } finally {
             setLoading(false);
         }

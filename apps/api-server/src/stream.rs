@@ -112,7 +112,8 @@ pub async fn trigger_agent_chat_stream(
             current_history.push(format!("{}{}", prefix, content));
         }
 
-        let system_instructions = build_system_instructions(&state, &karma_str, summary.as_deref());
+        let ai_name = state.job_queue.get_setting_value("ai_name").await.ok().flatten();
+        let system_instructions = build_system_instructions(&state, &karma_str, summary.as_deref(), ai_name);
 
         let mut turn = 0;
         let max_turns = 15;
@@ -129,8 +130,7 @@ pub async fn trigger_agent_chat_stream(
 
             yield Ok(Event::default().event("turn_start").data(turn.to_string()));
 
-            // Phase 13-A: Acquire LLM semaphore
-            let _llm_permit = state.llm_semaphore.acquire().await.ok();
+            // Front-end requests bypass semaphore for immediate Ollama access
 
             if let Ok(Ok(mut llm_stream)) = timeout(Duration::from_secs(300), provider.stream_complete(&full_prompt, None)).await {
                 

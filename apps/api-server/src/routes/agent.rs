@@ -95,7 +95,7 @@ pub fn parse_tool_calls(text: &str) -> Vec<(String, String)> {
     calls
 }
 
-pub fn build_system_instructions(state: &AppState, karma_str: &str, summary: Option<&str>) -> String {
+pub fn build_system_instructions(state: &AppState, karma_str: &str, summary: Option<&str>, ai_name: Option<String>) -> String {
     let skill_list = state.wasm_skill_manager.list_skills_with_metadata()
         .iter()
         .map(|m| {
@@ -113,13 +113,19 @@ pub fn build_system_instructions(state: &AppState, karma_str: &str, summary: Opt
     // Supplemental Context (Lower Priority / Reference Only)
     let user_md = safe_truncate(&read_workspace_file("USER.md"), 20000);
     let agents_md = safe_truncate(&read_workspace_file("AGENTS.md"), 20000);
+
+    let name_prompt = if let Some(name) = ai_name {
+        format!("あなたの名前は「{}」です。\n", name)
+    } else {
+        "".to_string()
+    };
     
     let identity_prefix = if !soul.is_empty() || !evolving_soul.is_empty() {
-        format!("# IDENTITY: あなたはAiomeの守護者(Watchtower)です。🐾\n\
+        format!("# IDENTITY: \n{}{}{}\n\
                 ルール: 簡潔に答え、[CallSkill]以外は自然な文章で話してください。私的な情報は守秘してください。\n\
-                もし以下の参考ファイルと現在のアイデンティティ(SOUL)が矛盾する場合、SOULを優先してください。\n\n")
+                もし以下の参考ファイルと現在のアイデンティティ(SOUL)が矛盾する場合、SOULを優先してください。\n\n", name_prompt, soul, evolving_soul)
     } else {
-        "あなたはAiome、自律型AI OSの高度な知性です。日本語で短く答えてください。\n\n".to_string()
+        format!("{}あなたはAiome、自律型AI OSの高度な知性です。日本語で短く答えてください。\n\n", name_prompt)
     };
 
     let supplemental_context = if !user_md.is_empty() || !agents_md.is_empty() {
@@ -235,7 +241,8 @@ pub async fn trigger_agent_chat(
         current_history.push(format!("{}{}", prefix, content));
     }
 
-    let system_instructions = build_system_instructions(&state, &karma_str, summary.as_deref());
+    let ai_name = state.job_queue.get_setting_value("ai_name").await.ok().flatten();
+    let system_instructions = build_system_instructions(&state, &karma_str, summary.as_deref(), ai_name);
 
     let mut turn = 0;
     let max_turns = 15;

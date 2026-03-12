@@ -10,7 +10,9 @@ import {
   Package,
   Box,
   Settings as SettingsIcon,
-  Zap
+  Zap,
+  Sparkles,
+  Network
 } from "lucide-react";
 const OnboardingModal = React.lazy(() => import("./components/OnboardingModal"));
 const SystemBirth = React.lazy(() => import("./components/SystemBirth"));
@@ -22,6 +24,8 @@ const SkillVault = React.lazy(() => import("./components/SkillVault"));
 const ArtifactVault = React.lazy(() => import("./components/ArtifactVault"));
 const GraphView = React.lazy(() => import("./components/GraphView"));
 const SettingsPage = React.lazy(() => import("./components/SettingsPage"));
+const ExpressionPipeline = React.lazy(() => import("./components/ExpressionPipeline"));
+const BiomeDialogueView = React.lazy(() => import("./components/BiomeDialogueView"));
 import DioramaView from "./components/diorama/DioramaView";
 import { useAvatarState } from "./hooks/useAvatarState";
 import { useDisplayMode } from "./hooks/useDisplayMode";
@@ -219,6 +223,18 @@ function App() {
             active={activeTab === "artifacts"}
             onClick={() => setActiveTab("artifacts")}
           />
+          <NavItem
+            icon={<Sparkles size={20} />}
+            label="Expressions"
+            active={activeTab === "expressions"}
+            onClick={() => setActiveTab("expressions")}
+          />
+          <NavItem
+            icon={<Network size={20} />}
+            label="Biome Lab"
+            active={activeTab === "biome"}
+            onClick={() => setActiveTab("biome")}
+          />
         </nav>
 
         <nav className="nav-group">
@@ -282,6 +298,8 @@ function App() {
             {activeTab === "agent" && "Agent Console"}
             {activeTab === "vault" && "Neural Skill Vault"}
             {activeTab === "artifacts" && "Artifact Vault"}
+            {activeTab === "expressions" && "AI Self-Expression Pipeline"}
+            {activeTab === "biome" && "Biome Collaborative Lab"}
             {activeTab === "settings" && "System Settings"}
           </motion.h2>
 
@@ -307,6 +325,8 @@ function App() {
               {activeTab === "agent" && <AgentConsole />}
               {activeTab === "vault" && <SkillVault />}
               {activeTab === "artifacts" && <ArtifactVault />}
+              {activeTab === "expressions" && <ExpressionPipeline />}
+              {activeTab === "biome" && <BiomeDialogueView />}
               {activeTab === "settings" && <SettingsPage />}
             </motion.div>
           </React.Suspense>

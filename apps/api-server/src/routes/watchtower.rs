@@ -108,7 +108,8 @@ async fn handle_chat_command(state: AppState, payload: AgentChatRequest) -> anyh
     let summary = None; // simplified
     let karma_str = "Watchtower context active.";
 
-    let system_instructions = build_system_instructions(&state, karma_str, summary);
+    let ai_name = state.job_queue.get_setting_value("ai_name").await.ok().flatten();
+    let system_instructions = build_system_instructions(&state, karma_str, summary, ai_name);
     let full_prompt = format!(
         "{}\nUSER: {}\nAI: ", 
         system_instructions, 

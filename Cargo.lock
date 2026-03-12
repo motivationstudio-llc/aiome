@@ -72,6 +72,8 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tokio-stream",
+ "tracing",
+ "uuid",
  "wiremock",
  "x25519-dalek",
 ]
@@ -181,6 +183,7 @@ dependencies = [
  "base64 0.22.1",
  "bastion-core",
  "chrono",
+ "dotenvy",
  "ed25519-dalek",
  "futures",
  "futures-util",

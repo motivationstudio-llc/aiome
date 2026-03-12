@@ -12,13 +12,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Samsara Engine (Evolution)**: AI self-leveling based on cumulative Technical Karma weights (`do_sync_samsara_level`).
 - **Meta-Control Security**: Introduced `ConstitutionalValidator` trait for Heterogeneous Dual-LLM validation. The `SoulMutator` now securely verifies `SOUL.md` mutations using a prosecutor LLM.
 - **Management Console (Dashboard v2)**: Launched a Tauri React-based desktop shell (`apps/management-console`) featuring Quantum Glass UI, live Karma stream, and Synapse Resonance Graph.
+- **LLM Hybrid Architecture (Pattern B)**: Front-end uses Gemini Cloud (`gemini-2.5-flash`), background tasks use Ollama Local (`qwen3.5:9b`).
+- **AI Name Customization**: Users can set a custom AI name during onboarding and change it later via Settings.
+- **Onboarding Wizard v2**: 4-step onboarding (Welcome → Name → Avatar → Security) with avatar selection (gender + style).
+- **Background LLM Settings UI**: Added Background LLM configuration section to Settings page.
+- **IME Input Fix**: Fixed Japanese IME input clearing bug in Agent Console and Settings.
 
 ### Changed
+- Background worker interval increased from 60s to 300s for Ollama stability.
+- System prompt now dynamically injects AI name from DB settings.
+- `build_system_instructions()` prioritizes `SOUL.md` content over hardcoded identity.
 
 ## [0.1.0] - 2026-03-05
 
 ### Added
-- **Full OSS Strategy**: Pivoted from Open-Core to a Full Open Source foundation under the MIT License.
+- **Full OSS Strategy**: Pivoted from Open-Core to a Full Open Source foundation under the Elastic License 2.0 (ELv2).
 - **Aiome Branding**: Applied new visual identity including "Abstract Eye" logo and "Lobster Pilot" mascot.
 - **Bilingual Documentation**: Established bilingual (EN/JP) versions for CLA, Code of Conduct, and Security Policy.
 - **Governance Setup**: Implemented License Grant style CLA to encourage community contributions while protecting commercial rights.
@@ -34,7 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Migrated federation endpoints to versioned API (`/api/v1/`).
-- Enhanced `aiome-daemon` structured logging for observability.
+- Enhanced `api-server` structured logging for observability.
 
 ---
 [0.1.0]: https://github.com/motivationstudio-llc/aiome/releases/tag/v0.1.0

@@ -194,6 +194,18 @@ impl SoulMutator {
         Ok(())
     }
 
+    /// 現在の AI の中心的な人格定義を取得する
+    pub async fn get_active_prompt(&self) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        let filenames = ["EVOLVING_SOUL.md", "../../EVOLVING_SOUL.md", "SOUL.md", "../../SOUL.md"];
+        for f in filenames {
+            let p = std::path::PathBuf::from(f);
+            if p.exists() {
+                return Ok(fs::read_to_string(p).await?);
+            }
+        }
+        Ok("An autonomous AI system.".to_string())
+    }
+
     fn compute_hash(&self, content: &str) -> String {
         use sha2::{Sha256, Digest};
         let mut hasher = Sha256::new();

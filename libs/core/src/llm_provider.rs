@@ -65,7 +65,7 @@ impl OllamaProvider {
             host,
             model,
             client: reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(120))
+                .timeout(std::time::Duration::from_secs(45))
                 .build()
                 .unwrap_or_default(),
         }
@@ -94,6 +94,7 @@ impl LlmProvider for OllamaProvider {
             "model": self.model,
             "messages": messages,
             "stream": false,
+            "think": false,
             "options": {
                 "num_predict": 4096,
                 "temperature": 0.7
@@ -136,13 +137,19 @@ impl LlmProvider for OllamaProvider {
             "model": self.model,
             "messages": messages,
             "stream": true,
+            "think": false,
             "options": {
                 "num_predict": 4096,
                 "temperature": 0.7
             }
         });
 
-        let mut resp = self.client.post(&url)
+        // Use a longer timeout for streaming since data comes in chunks over time
+        let stream_client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(300))
+            .build()
+            .unwrap_or_default();
+        let mut resp = stream_client.post(&url)
             .json(&payload)
             .send()
             .await

@@ -10,7 +10,7 @@ First of all, thank you for considering contributing! It's people like you that 
 
 Aiome follows a **Full Open Source** model:
 Aiomeは**完全オープンソース**モデルを採用しています：
-- **Aiome Core (OSS)**: Under the MIT License. Includes the framework, Karma system, Abyss Vault, and basic Watchtower features. (基本フレームワーク、Karmaシステム、Abyss Vault、および基本的なWatchtower機能を含む完全版)
+- **Aiome Core (OSS)**: Under the Elastic License 2.0 (ELv2). Includes the framework, Karma system, Abyss Vault, and basic Watchtower features. (基本フレームワーク、Karmaシステム、Abyss Vault、および基本的なWatchtower機能を含む完全版)
 - **Ecosystem**: Advanced features (like specialized models, premium WASM skills, or managed Samsara Hub operations) are offered as separate modules or services. (高度な特化型WASMスキルや、Samsara HubのSaaS運用などは、独立したモジュールやサービスとして提供されます)
 
 ---
@@ -29,7 +29,7 @@ The project is built with **Rust**.
 
 ### Prerequisites (前提条件)
 - **Rust**: 1.75+ (Stable)
-- **Ollama**: For local LLM processing (Qwen2.5-Coder recommended).
+- **Ollama**: For local LLM processing (`qwen3.5:9b` recommended for background tasks).
 - **External Integration**: Access to generative engines or media processing tools is optional and dependent on the skills being developed.
 
 ### Building & Testing (ビルドとテスト)
@@ -73,7 +73,7 @@ We follow a strict **Modular Workspace** architecture.
 
 ## ⚖️ License & CLA (ライセンスとCLA)
 
-By contributing, you agree that your contributions will be licensed under the **MIT License** and you agree to the terms of our **[CLA.md](./CLA.md)**.
+By contributing, you agree that your contributions will be licensed under the **Elastic License 2.0 (ELv2)** and you agree to the terms of our **[CLA.md](./CLA.md)**.
 
 ---
 *Happy coding!*

@@ -1,6 +1,6 @@
 # Aiome Operations Manual — 実用運用ガイド
-**Version:** 1.0  
-**Last Updated:** 2026-03-05
+**Version:** 2.0  
+**Last Updated:** 2026-03-13
 
 ---
 
@@ -15,14 +15,22 @@
 | Software | Version | Purpose | Install |
 |----------|---------|---------|---------|
 | Rust | 1.75+ | コア開発 | `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \| sh` |
-| Ollama | Latest | ローカルLLM | `brew install ollama` |
+| Node.js | 18+ | Management Console UI | `brew install node` |
+| Ollama | Latest | バックグラウンドLLM | `brew install ollama` |
 | SQLite | 3.40+ | DB (ビルトイン) | Rust `sqlx` に含まれる |
 
-### 1.3 API Keys (オプション)
+### 1.3 API Keys
 
 | Key | 取得先 | 用途 |
 |-----|--------|------|
-| `ORACLE_API_KEY` | [API Provider] | 高度なプランニング / 評価用 |
+| `GEMINI_API_KEY` | [Google AI Studio](https://aistudio.google.com/) | フロントエンド推論 (Gemini 2.5 Flash) |
+
+### 1.4 LLM構成 (Pattern B: 推奨)
+
+| 用途 | プロバイダー | モデル | コスト |
+|------|-----------|--------|--------|
+| フロントエンド (Agent Console) | Gemini Cloud | `gemini-2.5-flash` | 月≈100円 |
+| バックグラウンド (Soul Mutator等) | Ollama (Local) | `qwen3.5:9b` | 無料 |
 
 ---
 
@@ -34,17 +42,18 @@
 # プロジェクトルートの .env ファイルを編集
 cp .env.example .env
 
-# .env の内容:
-ORACLE_API_KEY=あなたのAPIキー
-EXTERNAL_SERVICE_URL=ws://127.0.0.1:8188/ws
-WORKSPACE_DIR=./workspace
+# .env の主要設定:
+GEMINI_API_KEY=your_gemini_key_here
+BG_LLM_PROVIDER=ollama
+BG_LLM_MODEL=qwen3.5:9b
+API_SERVER_SECRET=your_random_secret_here
 ```
 
 ### 2.2 ビルドと初期検証
 
 ```bash
 # 1. ビルド
-cargo build --release -p aiome-daemon
+cargo build -p api-server
 
 # 2. テスト実行
 cargo test --workspace
@@ -54,10 +63,20 @@ cargo test --workspace
 
 ## 3. Commands (コマンド一覧)
 
-### 3.1 デーモン起動
+### 3.1 API Server 起動
 
 ```bash
-cargo run -p aiome-daemon
+RUST_LOG=info cargo run -p api-server
+# → http://localhost:3015 でManagement Consoleにアクセス
+```
+
+### 3.2 Management Console (フロントエンド) 起動
+
+```bash
+cd apps/management-console
+npm install
+npm run dev
+# → http://localhost:1420 でアクセス
 ```
 
 ---
@@ -67,6 +86,16 @@ cargo run -p aiome-daemon
 ### 4.1 `styles.toml` (演出スタイル定義)
 必要に応じて生成スキルのパラメータを定義します。
 
+### 4.2 `SOUL.md` (AI人格定義)
+AIの性格や話し方を定義するファイルです。オンボーディング時に設定されます。
+
+### 4.3 Settings UI
+`http://localhost:3015` → Settings ページから、以下を変更可能:
+- AI Name（AIの表示名）
+- Avatar（性別・スタイル）
+- LLM Provider（フロントエンド / バックグラウンド）
+- Background LLM（プロバイダー / モデル / APIキー）
+
 ---
 
 ## 5. Database (データベース)
@@ -74,7 +103,8 @@ cargo run -p aiome-daemon
 ### 5.1 スキーマ概要
 - `jobs`: 全ジョブの履歴
 - `karma_logs`: 学習した教訓の蓄積
-- `sns_metrics_history`: 外部評価の時系列データ
+- `system_settings`: LLM設定、AI名などのシステム設定
+- `chat_messages`: Agent Consoleのチャット履歴
 
 ### 5.2 DB ファイルの場所
 SQLite DB は `workspace/aiome.db` に自動作成されます。
@@ -85,7 +115,7 @@ SQLite DB は `workspace/aiome.db` に自動作成されます。
 
 ### 6.1 ログ出力
 ```bash
-RUST_LOG=info cargo run -p aiome-daemon
+RUST_LOG=info cargo run -p api-server
 ```
 
 ---
@@ -94,17 +124,21 @@ RUST_LOG=info cargo run -p aiome-daemon
 
 | Symptom | Cause | Solution |
 |---------|-------|----------|
+| `401 Unauthorized` | 認証トークン不一致 | ブラウザをリロードし再認証、`.env` の `API_SERVER_SECRET` を確認 |
 | `403 Forbidden` | API キーが無効 | `.env` のキーを確認 |
-| Connection Error | 外部エンジンが未起動 | 対象エンジンを起動 |
-| ジョブが `Pending` のまま | キューの詰まり | デーモンを再起動 |
+| Settings画面が開かない | 401エラー | ブラウザタブをリフレッシュして再認証 |
+| Ollamaモデル選択不可 | 認証切れ or Ollama未起動 | `ollama serve` を確認、ブラウザリロード |
+| 日本語入力でテキストが消えない | IMEバグ (修正済み) | 最新版にアップデート |
 
 ---
 
 ## 8. Production Deployment Checklist
-- [ ] `.env` に API キーを設定
+- [ ] `.env` に `GEMINI_API_KEY` を設定
+- [ ] `.env` に `API_SERVER_SECRET` を設定
 - [ ] `SOUL.md` を確認・カスタマイズ
-- [ ] Ollama でモデルをダウンロード
-- [ ] `cargo run -p aiome-daemon` でテスト起動
+- [ ] Ollama でモデルをダウンロード (`ollama pull qwen3.5:9b`)
+- [ ] `cargo run -p api-server` でテスト起動
+- [ ] ブラウザで `http://localhost:3015` にアクセスし動作確認
 
 ---
 *Happy coding!*

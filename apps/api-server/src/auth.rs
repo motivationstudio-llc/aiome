@@ -25,7 +25,6 @@ where
 
         let expected_secret = std::env::var("API_SERVER_SECRET").unwrap_or_else(|_| {
             if cfg!(debug_assertions) {
-                warn!("⚠️ [Auth] Using insecure 'dev_secret' fallback. SET API_SERVER_SECRET FOR PRODUCTION!");
                 "dev_secret".to_string()
             } else {
                 panic!("🚨 [Auth] FATAL: API_SERVER_SECRET must be set in release builds!");
@@ -33,9 +32,12 @@ where
         });
         let expected = format!("Bearer {}", expected_secret);
 
+        tracing::debug!("🔐 [Auth] auth_header len={}, expected len={}", auth_header.len(), expected.len());
+
         let is_valid = if auth_header.len() == expected.len() {
             bool::from(auth_header.as_bytes().ct_eq(expected.as_bytes()))
         } else {
+            tracing::warn!("🔐 [Auth] Length mismatch: got {} vs expected {}", auth_header.len(), expected.len());
             false
         };
 

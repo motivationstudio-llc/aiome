@@ -17,6 +17,7 @@ use crate::error::AiomeError;
 use crate::contracts::OracleVerdict;
 use async_trait::async_trait;
 use std::path::PathBuf;
+use serde_json;
 
 /// トレンド調査ツール (TrendSonar)
 ///
@@ -253,6 +254,11 @@ pub trait JobQueue: Send + Sync {
     async fn get_biome_topic_status(&self, topic_id: &str) -> Result<Option<(i32, Option<String>)>, AiomeError>;
     /// トピックを1ターン進め、クールダウンを設定する
     async fn advance_biome_turn(&self, topic_id: &str, cooldown_minutes: i64) -> Result<i32, AiomeError>;
+    /// 指定トピックのメッセージ履歴を取得する
+    async fn fetch_biome_messages(&self, topic_id: &str, limit: i64) -> Result<Vec<serde_json::Value>, AiomeError>;
+    /// メッセージを保存する
+    async fn store_biome_message(&self, message: &crate::biome::BiomeMessage) -> Result<(), AiomeError>;
+
     /// 指定Pubkeyの評判（Reputation）を更新する
     async fn update_biome_reputation(&self, pubkey: &str, delta: f64) -> Result<f64, AiomeError>;
 
@@ -322,6 +328,12 @@ pub trait JobQueue: Send + Sync {
     // --- Chat & Memory (The Soul Persistence) ---
     async fn store_chat_message(&self, channel_id: &str, role: &str, content: &str) -> Result<(), AiomeError>;
     async fn fetch_chat_history(&self, channel_id: &str, limit: i64) -> Result<Vec<serde_json::Value>, AiomeError>;
+
+    // --- Expression Engine (V4) ---
+    async fn store_expression(&self, expression: &crate::expression::Expression) -> Result<(), AiomeError>;
+    async fn fetch_expressions(&self, limit: i64) -> Result<Vec<crate::expression::Expression>, AiomeError>;
+    async fn get_auto_expression_enabled(&self) -> Result<bool, AiomeError>;
+    async fn set_auto_expression_enabled(&self, enabled: bool) -> Result<(), AiomeError>;
 }
 
 /// コンテンツ・パブリッシャー (Publishing Engine)

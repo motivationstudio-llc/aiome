@@ -111,7 +111,7 @@ Aiome's true power lies in its **extreme extensibility leveraging WASM (WebAssem
 |---|---|---|
 | **Core Engine** | Rust / Bastion OSS | Fast, memory-safe, and robust security foundation |
 | **Security Layer** | Abyss Vault (Key Proxy) | Physical API key isolation & memory protection (mlockall/zeroize) |
-| **LLM Backend** | Ollama / Gemini (via Proxy) | Unified local and cloud inference routing |
+| **LLM Backend** | Gemini Cloud (Front) / Ollama (BG) | Pattern B: Cloud for user responses, local for autonomous tasks |
 | **Media Engine** | ComfyUI / FFmpeg | Autonomous generation of advanced images, video, and audio |
 | **Storage** | SQLite (Hash Chain integrated) | Tamper-proof persistence of memories (Karma) and logs |
 | **Expansion** | WebAssembly (Wasm) | Safe and portable skill execution under strict network controls |
@@ -176,6 +176,9 @@ cargo run --bin watchtower
 
 #### 🔑 Key Environment Variables (.env)
 - `DISCORD_TOKEN`: For Watchtower integration.
+- `GEMINI_API_KEY`: For Gemini Cloud LLM (front-end inference).
+- `BG_LLM_PROVIDER`: Background LLM provider (default: `ollama`).
+- `BG_LLM_MODEL`: Background LLM model (default: `qwen3.5:9b`).
 - `OLLAMA_BASE_URL`: For local LLM connections (default: `http://localhost:11434`).
 - `EXTERNAL_SERVICE_URL`: For integration with external generation engines like ComfyUI.
 

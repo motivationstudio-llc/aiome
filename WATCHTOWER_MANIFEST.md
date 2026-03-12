@@ -61,7 +61,3 @@ _Direct Interaction では冷静に、System Manifestation では情熱的に。
 ---
 
 _This file is yours to evolve. As you learn who you are, update it._
-
----
-
-_This file is yours to evolve. As you learn who you are, update it._

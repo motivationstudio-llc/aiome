@@ -40,12 +40,10 @@ impl DialogueManager {
                     }
                 }
             }
-
-            // 3. ターン更新 (デフォルト5分のクールダウン)
-            queue.advance_biome_turn(topic_id, 5).await?;
-        } else {
-            // トピックが存在しない場合は何もしない（初回送信時に作成される想定）
         }
+
+        // 3. ターン更新 (デフォルト5分のクールダウン)
+        queue.advance_biome_turn(topic_id, 5).await?;
 
         Ok(())
     }
