@@ -42,6 +42,10 @@ async fn create_test_server() -> (TestServer, tempfile::TempDir) {
     let wasm_skill_manager = Arc::new(infrastructure::skills::WasmSkillManager::new(skills_dir.to_str().unwrap(), sandbox_dir.to_str().unwrap()).unwrap());
     let skill_forge = Arc::new(infrastructure::skills::forge::SkillForge::new(forge_dir.to_str().unwrap(), skills_dir.to_str().unwrap()));
     let artifact_store = Arc::new(infrastructure::artifact_store::SqliteArtifactStore::new(job_queue.get_pool().clone(), artifacts_dir));
+    let context_engine = Arc::new(infrastructure::context_engine::ContextEngine::new(provider.clone(), job_queue.clone(), Arc::new(tokio::sync::Semaphore::new(1))));
+    let soul_mutator = Arc::new(infrastructure::soul_mutator::SoulMutator::new(provider.clone(), tmp_dir.path().join("SOUL.md")));
+    let autonomous_running = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let autonomous_config = Arc::new(tokio::sync::RwLock::new(None));
 
     let state = AppState {
         health_monitor: Arc::new(Mutex::new(HealthMonitor::new())),
@@ -55,7 +59,10 @@ async fn create_test_server() -> (TestServer, tempfile::TempDir) {
         mcp_manager: Arc::new(mcp::client::McpProcessManager::new()),
         artifact_store,
         event_sender: tokio::sync::broadcast::channel(10).0,
-        context_engine: Arc::new(infrastructure::context_engine::ContextEngine::new(provider.clone(), job_queue, Arc::new(tokio::sync::Semaphore::new(1)))),
+        context_engine,
+        soul_mutator,
+        autonomous_running,
+        autonomous_config,
         provider,
     };
 
