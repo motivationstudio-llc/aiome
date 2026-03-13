@@ -30,6 +30,22 @@ pub async fn karma_bootstrap(_session_id: String) -> Result<()> {
 }
 
 #[napi]
+pub async fn get_karma_directives(topic: String, skill_id: String) -> Result<String> {
+    let db = get_db().await.map_err(map_err)?;
+    let result = db.fetch_relevant_karma(&topic, &skill_id, 3, "current").await.map_err(map_err)?;
+    
+    if result.entries.is_empty() {
+        return Ok(String::new());
+    }
+
+    let mut directives = String::from("\n[Karma-based Operational Directives]:\n");
+    for entry in result.entries {
+        directives.push_str(&format!("- {}\n", entry.lesson));
+    }
+    Ok(directives)
+}
+
+#[napi]
 pub async fn karma_ingest(session_id: String, message_json: String) -> Result<()> {
     let db = get_db().await.map_err(map_err)?;
     let msg: serde_json::Value = serde_json::from_str(&message_json)
@@ -53,9 +69,13 @@ pub async fn karma_distill_turn(messages_json: String, success: bool) -> Result<
     // ここでは、非同期ジョブキュー（sqlite等）に「要約・抽出タスク」を投げるのが本来の姿。
     let db = get_db().await.map_err(map_err)?;
     
-    // (デモ用ダミー抽出: 実際のLLMでの抽出は独立したワーカーに任せる)
+    // Record the turn result for experience calculation
     if success {
+         tracing::info!("🔮 [Karma] Turn succeeded. Crystallizing experience...");
          db.add_tech_exp(1).await.map_err(map_err)?;
+    } else {
+         tracing::warn!("💔 [Karma] Turn failed. Recording error for future optimization...");
+         // Future: extraction of failure reason from messages_json
     }
     
     Ok(())
@@ -71,14 +91,30 @@ pub async fn karma_fetch_relevant(session_id: String, _limit: u32) -> Result<Str
 }
 
 #[napi]
-pub fn immune_get_warnings() -> String {
-    String::new()
+pub async fn immune_get_warnings() -> Result<String> {
+    let db = get_db().await.map_err(map_err)?;
+    let rules = db.fetch_active_immune_rules().await.map_err(map_err)?;
+    
+    if rules.is_empty() {
+        return Ok(String::new());
+    }
+
+    let mut warnings = String::from("\n[🛡️ Sentinel Active Safeguards]:\n");
+    for rule in rules.iter().take(5) {
+        warnings.push_str(&format!("- Pattern: {} (Action: {})\n", rule.pattern, rule.action));
+    }
+    Ok(warnings)
 }
 
 #[napi]
 pub async fn karma_compact(session_id: String, _session_file: String, _token_budget: u32) -> Result<()> {
     tracing::info!("karma_compact for session {}", session_id);
-    // メモリ圧縮のトリガー。
+    let db = get_db().await.map_err(map_err)?;
+    
+    // Memory distillation / Purging old chats
+    db.purge_old_distilled_chats(7).await.map_err(map_err)?; // Purge 7 days old
+    db.karma_decay_sweep().await.map_err(map_err)?;
+    
     Ok(())
 }
 
@@ -89,7 +125,17 @@ pub async fn quarantine_check_spawn(_child_session_key: String) -> Result<Subage
 }
 
 #[napi]
-pub async fn karma_learn_from_subagent(_target_session_key: String, _outcome: String) -> Result<()> {
+pub async fn karma_learn_from_subagent(target_session_key: String, outcome: String) -> Result<()> {
+    let db = get_db().await.map_err(map_err)?;
+    db.store_karma(
+        &format!("subagent-{}", uuid::Uuid::new_v4()),
+        "subagent",
+        &format!("Subagent session {} outcome: {}", target_session_key, outcome),
+        "Technical",
+        "current",
+        Some("quarantine"),
+        Some("subagent_outcome")
+    ).await.map_err(map_err)?;
     Ok(())
 }
 
@@ -149,12 +195,41 @@ pub async fn immune_check_tool(tool_name: String, params: String) -> Result<Tool
 #[napi]
 pub async fn karma_learn_from_tool(tool_name: String, result: String, error_msg: String) -> Result<()> {
     tracing::info!("karma_learn_from_tool: {} | res len: {} | err len: {}", tool_name, result.len(), error_msg.len());
+    let db = get_db().await.map_err(map_err)?;
+    
+    if !error_msg.is_empty() {
+        // Record failure lesson
+        db.store_karma(
+            &format!("tool-fail-{}", uuid::Uuid::new_v4()),
+            "tool",
+            &format!("Tool {} failed with error: {}. Result context: {}", tool_name, error_msg, result),
+            "Technical",
+            "current",
+            Some("safety"),
+            Some("tool_error")
+        ).await.map_err(map_err)?;
+    }
+    
     Ok(())
 }
 
 #[napi]
-pub async fn karma_preserve_facts(_session_file: String) -> Result<()> {
-    tracing::info!("karma_preserve_facts placeholder");
+pub async fn karma_preserve_facts(session_file: String) -> Result<()> {
+    tracing::info!("karma_preserve_facts for {}", session_file);
+    let db = get_db().await.map_err(map_err)?;
+    
+    // In a real scenario, we would parse the session file and extract key facts.
+    // For now, we record that fact preservation was triggered.
+    db.store_karma(
+        &format!("preserve-{}", uuid::Uuid::new_v4()),
+        "system",
+        &format!("Preservation checkpoint triggered for session file: {}", session_file),
+        "Technical",
+        "current",
+        Some("pivotal"),
+        Some("checkpoint")
+    ).await.map_err(map_err)?;
+    
     Ok(())
 }
 

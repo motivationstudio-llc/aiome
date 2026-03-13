@@ -4,10 +4,14 @@ import App from "./App";
 import "./App.css";
 import { AvatarCharacterProvider } from "./hooks/AvatarContext";
 
+import ErrorBoundary from "./components/ErrorBoundary";
+
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
-    <AvatarCharacterProvider>
-      <App />
-    </AvatarCharacterProvider>
+    <ErrorBoundary>
+      <AvatarCharacterProvider>
+        <App />
+      </AvatarCharacterProvider>
+    </ErrorBoundary>
   </React.StrictMode>,
 );

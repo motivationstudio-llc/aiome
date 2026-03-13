@@ -1,31 +1,21 @@
 
 /**
- * 認証トークン（シークレット）を取得します。
- * 開発環境では 'dev_secret' をフォールバックとして使用します。
+ * セキュア認証トークン管理
+ * - sessionStorage を使用（ブラウザ閉鎖で自動消去）
+ * - 本番環境での 'dev_secret' フォールバックを廃止
  */
-export const getAuthToken = (): string => {
-    const token = localStorage.getItem('aiome_secret') || 'dev_secret';
-    const updatedAt = localStorage.getItem('aiome_secret_updated_at');
-
-    if (updatedAt) {
-        const age = Date.now() - parseInt(updatedAt);
-        if (age > 24 * 60 * 60 * 1000) {
-            console.warn("🔐 [Auth] Token is over 24h old. Consider rotation.");
-        }
-    }
-
-    return token;
+export const getAuthToken = (): string | null => {
+    return sessionStorage.getItem('aiome_secret');
 };
 
 /**
  * 認証済みの fetch リクエストを実行するためのヘルパー。
- * 将来的に Cookie 認証に移行する場合、この関数内で処理を集約できます。
  */
 export const authenticatedFetch = async (url: string, options: RequestInit = {}): Promise<Response> => {
     const token = getAuthToken();
     const headers = {
         ...options.headers,
-        'Authorization': `Bearer ${token}`,
+        ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
     };
 
     return fetch(url, { ...options, headers });
@@ -35,23 +25,31 @@ export const authenticatedFetch = async (url: string, options: RequestInit = {})
  * API の全エンドポイントで共通して使用する認証ヘッダーを生成します。
  */
 export const getAuthHeaders = () => {
+    const token = getAuthToken();
     return {
-        'Authorization': `Bearer ${getAuthToken()}`,
+        ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
     };
 };
 
 /**
- * トークンを LocalStorage に保存し、タイムスタンプを更新します。
+ * トークンを SessionStorage に保存します。
  */
 export const setAuthToken = (token: string): void => {
-    localStorage.setItem('aiome_secret', token);
-    localStorage.setItem('aiome_secret_updated_at', Date.now().toString());
+    sessionStorage.setItem('aiome_secret', token);
+    sessionStorage.setItem('aiome_secret_updated_at', Date.now().toString());
 };
 
 /**
- * トークンを LocalStorage から削除します。
+ * トークンを SessionStorage から削除します。
  */
 export const clearAuthToken = (): void => {
-    localStorage.removeItem('aiome_secret');
-    localStorage.removeItem('aiome_secret_updated_at');
+    sessionStorage.removeItem('aiome_secret');
+    sessionStorage.removeItem('aiome_secret_updated_at');
+};
+
+/**
+ * 現在認証されているかどうかを判定します。
+ */
+export const isAuthenticated = (): boolean => {
+    return getAuthToken() !== null;
 };

@@ -12,6 +12,9 @@ impl aiome_core::llm_provider::LlmProvider for DummyLlm {
     async fn complete(&self, _prompt: &str, _sys: Option<&str>) -> Result<String, aiome_core::error::AiomeError> {
         Ok("Dummy Output".to_string())
     }
+    async fn test_connection(&self) -> Result<(), aiome_core::error::AiomeError> {
+        Ok(())
+    }
     fn name(&self) -> &str { "Dummy" }
 }
 
@@ -64,6 +67,9 @@ async fn create_test_server() -> (TestServer, tempfile::TempDir) {
         autonomous_running,
         autonomous_config,
         provider,
+        docker_failures: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+        http_client: reqwest::Client::new(),
+        security_policy: shared::security::SecurityPolicy::default(),
     };
 
     let cors_layer = CorsLayer::new().allow_origin(AllowOrigin::any());

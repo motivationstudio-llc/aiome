@@ -4,7 +4,7 @@
 # ==========================================
 
 # --- Build Stage ---
-FROM rust:1.80-slim-bookworm AS builder
+FROM rust:1.85-slim-bookworm AS builder
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y \
@@ -62,8 +62,8 @@ ENV RUST_LOG=info \
     AIOME_DATA_DIR=/app/data \
     TMPDIR=/tmp
 
-# Standard ports (Command Center uses 8080, Key Proxy uses 9999 - mapped via compose)
-EXPOSE 8080 9999
+# Standard ports (Command Center uses 3015, Key Proxy uses 9999 - mapped via compose)
+EXPOSE 3015 9999
 
 # Execution
 ENTRYPOINT ["/app/aiome-app"]

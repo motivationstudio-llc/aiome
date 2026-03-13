@@ -38,6 +38,7 @@ serde_yaml = "0.9"
 automerge = { workspace = true }
 serenity = { version = "0.12", default-features = false, features = ["client", "gateway", "rustls_backend", "model", "http"] }
 teloxide = { version = "0.13", features = ["macros"] }
+once_cell = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"

@@ -93,9 +93,19 @@ impl ArtifactStore for SqliteArtifactStore {
         // Phase 2: Generate Embedding
         let mut embedding_blob: Option<Vec<u8>> = None;
         if let Some(ref provider) = self.embed_provider {
-            let context = format!("{} {:?} {}", req.title, req.category, req.tags.join(" "));
-            if let Ok(vec) = provider.embed(&context).await {
-                embedding_blob = Some(vec.iter().flat_map(|f| f.to_le_bytes()).collect());
+            // Include text_content in embedding context for higher semantic quality
+            let context = format!("{} {:?} {} {}", 
+                req.title, 
+                req.category, 
+                req.tags.join(" "),
+                req.text_content.as_deref().unwrap_or("")
+            );
+            match provider.embed(&context, false).await {
+                Ok(vec) => {
+                    info!("🧠 Generated embedding for artifact: {} ({} dims)", req.title, vec.len());
+                    embedding_blob = Some(vec.iter().flat_map(|f| f.to_le_bytes()).collect());
+                }
+                Err(e) => warn!("⚠️ Failed to generate embedding for {}: {:?}", req.title, e),
             }
         }
 
@@ -103,8 +113,8 @@ impl ArtifactStore for SqliteArtifactStore {
 
         // 3. Store in SQLite
         sqlx::query(
-            "INSERT INTO ai_artifacts (id, title, category, tags, created_by, dir_path, file_manifest, karma_refs, job_ref, signature, embedding) 
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            "INSERT INTO ai_artifacts (id, title, category, tags, created_by, dir_path, file_manifest, karma_refs, job_ref, signature, embedding, text_content) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         )
         .bind(&id)
         .bind(&req.title)
@@ -117,6 +127,7 @@ impl ArtifactStore for SqliteArtifactStore {
         .bind(req.job_ref)
         .bind(&signature)
         .bind(embedding_blob)
+        .bind(req.text_content)
         .execute(&self.pool)
         .await
         .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to store artifact metadata: {}", e) })?;
@@ -171,6 +182,7 @@ impl ArtifactStore for SqliteArtifactStore {
                 job_ref: row.get("job_ref"),
                 soul_version_hash: row.get("soul_version_hash"),
                 signature: row.get("signature"),
+                text_content: row.get("text_content"),
                 edges: Vec::new(), // Populated on-demand or with specific fetch
                 created_at: row.get("created_at"),
             });
@@ -202,6 +214,7 @@ impl ArtifactStore for SqliteArtifactStore {
                 job_ref: r.get("job_ref"),
                 soul_version_hash: r.get("soul_version_hash"),
                 signature: r.get("signature"),
+                text_content: r.get("text_content"),
                 edges,
                 created_at: r.get("created_at"),
             }))
@@ -289,16 +302,29 @@ impl ArtifactStore for SqliteArtifactStore {
         Ok(())
     }
 
-    async fn search_artifacts_semantic(&self, query: &str, _category: Option<ArtifactCategory>, limit: i64) -> Result<Vec<ArtifactMeta>, AiomeError> {
+    async fn search_artifacts_semantic(&self, query: &str, category: Option<ArtifactCategory>, limit: i64) -> Result<Vec<ArtifactMeta>, AiomeError> {
         let provider = self.embed_provider.as_ref()
             .ok_or_else(|| AiomeError::Infrastructure { reason: "Embedding provider not configured for Semantic Search".into() })?;
 
-        let query_vec = provider.embed(query).await?;
+        let query_vec = provider.embed(query, true).await?;
         let query_vec_f64: Vec<f64> = query_vec.iter().map(|&f| f as f64).collect();
 
-        // SEC-7: Safety-clamp SQL fetch to avoid DoS on large datasets
-        let rows = sqlx::query("SELECT id, title, category, tags, created_by, dir_path, file_manifest, embedding, created_at FROM ai_artifacts WHERE embedding IS NOT NULL ORDER BY created_at DESC LIMIT 1000")
-            .fetch_all(&self.pool).await
+        // 1. Build filtered query (SEC-7: Safety-clamp SQL fetch to avoid DoS)
+        let mut sql = "SELECT id, title, category, tags, created_by, dir_path, file_manifest, embedding, text_content, created_at 
+                       FROM ai_artifacts WHERE embedding IS NOT NULL".to_string();
+        
+        if category.is_some() {
+            sql.push_str(" AND category = ?");
+        }
+        sql.push_str(" ORDER BY created_at DESC LIMIT 1000");
+
+        let mut db_query = sqlx::query(&sql);
+        if let Some(ref cat) = category {
+            let cat_str = serde_json::to_string(cat).expect("Failed to serialize category").replace("\"", "");
+            db_query = db_query.bind(cat_str);
+        }
+
+        let rows = db_query.fetch_all(&self.pool).await
             .map_err(|e| AiomeError::Infrastructure { reason: e.to_string() })?;
 
         let mut candidates = Vec::new();
@@ -308,8 +334,6 @@ impl ArtifactStore for SqliteArtifactStore {
                 .map(|c| f32::from_le_bytes(c.try_into().expect("Invalid byte slice length")) as f64)
                 .collect();
             
-            // Re-using cosine_similarity from job_queue (it's in the same crate, so let's check accessibility)
-            // Since artifact_store.rs and karma.rs are in libs/infrastructure/src, we can access crate-level helpers.
             let score = crate::job_queue::cosine_similarity(&query_vec_f64, &emb_vec);
             candidates.push((score, r));
         }
@@ -326,10 +350,11 @@ impl ArtifactStore for SqliteArtifactStore {
                 created_by: r.get("created_by"),
                 dir_path: r.get("dir_path"),
                 files: serde_json::from_str(r.get("file_manifest")).unwrap_or_default(),
-                karma_refs: Vec::new(), // Omitted for performance in search
+                karma_refs: Vec::new(), 
                 job_ref: None,
                 soul_version_hash: None,
                 signature: None,
+                text_content: r.get("text_content"),
                 edges: Vec::new(),
                 created_at: r.get("created_at"),
             });

@@ -95,8 +95,8 @@ impl KarmaOps for SqliteJobQueue {
         let mut max_score = 0.0;
         let mut searched_semantically = false;
         if !rows.is_empty() {
-            if let Some(ref provider) = self.embed_provider {
-                if let Ok(topic_vec_f32) = provider.embed(topic).await {
+            if let Some(provider) = self.get_embedding_provider().await {
+                if let Ok(topic_vec_f32) = provider.embed(topic, true).await {
                     searched_semantically = true;
                     let topic_vec: Vec<f64> = topic_vec_f32.into_iter().map(|f| f as f64).collect();
                     for candidate in &mut candidates {
@@ -170,8 +170,8 @@ impl KarmaOps for SqliteJobQueue {
         let signature = self.sign_swarm_payload(&sign_target).await.ok();
 
         let mut embedding: Option<Vec<u8>> = None;
-        if let Some(ref provider) = self.embed_provider {
-            if let Ok(vec) = provider.embed(lesson).await {
+        if let Some(provider) = self.get_embedding_provider().await {
+            if let Ok(vec) = provider.embed(lesson, false).await {
                 let bytes: Vec<u8> = vec.iter().flat_map(|f| f.to_le_bytes()).collect();
                 embedding = Some(bytes);
             } else {

@@ -18,11 +18,12 @@ use tracing::info;
 pub struct SoulMutator {
     provider: Arc<dyn LlmProvider>,
     prosecutor_provider: Option<Arc<dyn LlmProvider>>,
+    workspace_dir: PathBuf,
 }
 
 impl SoulMutator {
-    pub fn new(provider: Arc<dyn LlmProvider>, _workspace_dir: PathBuf) -> Self {
-        Self { provider, prosecutor_provider: None }
+    pub fn new(provider: Arc<dyn LlmProvider>, workspace_dir: PathBuf) -> Self {
+        Self { provider, prosecutor_provider: None, workspace_dir }
     }
 
     pub fn with_prosecutor(mut self, prosecutor: Arc<dyn LlmProvider>) -> Self {
@@ -37,19 +38,11 @@ impl SoulMutator {
         let soul_filename = "SOUL.md";
         let evolving_soul_filename = "EVOLVING_SOUL.md";
         
-        let mut soul_path = std::path::PathBuf::from(soul_filename);
-        let mut evolving_soul_path = std::path::PathBuf::from(evolving_soul_filename);
-
-        if !soul_path.exists() {
-            let parent_soul = std::path::PathBuf::from(format!("../../{}", soul_filename));
-            if parent_soul.exists() {
-                soul_path = parent_soul;
-                evolving_soul_path = std::path::PathBuf::from(format!("../../{}", evolving_soul_filename));
-            }
-        }
+        let soul_path = self.workspace_dir.join(soul_filename);
+        let evolving_soul_path = self.workspace_dir.join(evolving_soul_filename);
 
         if !soul_path.exists() || !evolving_soul_path.exists() {
-            return Err(format!("{} or {} not found. Transmutation impossible.", soul_filename, evolving_soul_filename).into());
+            return Err(format!("{} or {} not found at {:?}. Transmutation impossible.", soul_filename, evolving_soul_filename, self.workspace_dir).into());
         }
 
         // 1. Read Current Soul State
@@ -137,19 +130,11 @@ impl SoulMutator {
         let soul_filename = "SOUL.md";
         let evolving_soul_filename = "EVOLVING_SOUL.md";
         
-        let mut soul_path = std::path::PathBuf::from(soul_filename);
-        let mut evolving_soul_path = std::path::PathBuf::from(evolving_soul_filename);
-
-        if !soul_path.exists() {
-            let parent_soul = std::path::PathBuf::from(format!("../../{}", soul_filename));
-            if parent_soul.exists() {
-                soul_path = parent_soul;
-                evolving_soul_path = std::path::PathBuf::from(format!("../../{}", evolving_soul_filename));
-            }
-        }
+        let soul_path = self.workspace_dir.join(soul_filename);
+        let evolving_soul_path = self.workspace_dir.join(evolving_soul_filename);
 
         if !soul_path.exists() || !evolving_soul_path.exists() {
-            return Err("SOUL.md or EVOLVING_SOUL.md not found.".into());
+            return Err(format!("SOUL.md or EVOLVING_SOUL.md not found at {:?}.", self.workspace_dir).into());
         }
 
         let master_soul = fs::read_to_string(&soul_path).await?;
@@ -196,9 +181,11 @@ impl SoulMutator {
 
     /// 現在の AI の中心的な人格定義を取得する
     pub async fn get_active_prompt(&self) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-        let filenames = ["EVOLVING_SOUL.md", "../../EVOLVING_SOUL.md", "SOUL.md", "../../SOUL.md"];
-        for f in filenames {
-            let p = std::path::PathBuf::from(f);
+        let paths = [
+            self.workspace_dir.join("EVOLVING_SOUL.md"),
+            self.workspace_dir.join("SOUL.md"),
+        ];
+        for p in paths {
             if p.exists() {
                 return Ok(fs::read_to_string(p).await?);
             }

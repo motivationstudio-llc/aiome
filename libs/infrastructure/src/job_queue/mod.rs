@@ -57,7 +57,7 @@ use expression::ExpressionOps;
 #[derive(Clone, Debug)]
 pub struct SqliteJobQueue {
     pool: SqlitePool,
-    embed_provider: Option<Arc<dyn EmbeddingProvider>>,
+    embed_provider: Arc<tokio::sync::RwLock<Option<Arc<dyn EmbeddingProvider>>>>,
     karma_cache: Arc<tokio::sync::RwLock<HashMap<String, (KarmaSearchResult, Instant)>>>,
 }
 
@@ -66,8 +66,8 @@ impl SqliteJobQueue {
         &self.pool
     }
 
-    pub fn get_embedding_provider(&self) -> Option<Arc<dyn EmbeddingProvider>> {
-        self.embed_provider.clone()
+    pub async fn get_embedding_provider(&self) -> Option<Arc<dyn EmbeddingProvider>> {
+        self.embed_provider.read().await.clone()
     }
 
     /// Connects to the SQLite database and initializes the WAL mode and schema.
@@ -87,7 +87,7 @@ impl SqliteJobQueue {
 
         let instance = Self {
             pool,
-            embed_provider: None,
+            embed_provider: Arc::new(tokio::sync::RwLock::new(None)),
             karma_cache: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
         };
 
@@ -95,9 +95,17 @@ impl SqliteJobQueue {
         Ok(instance)
     }
 
-    pub fn with_embeddings(mut self, provider: Arc<dyn EmbeddingProvider>) -> Self {
-        self.embed_provider = Some(provider);
-        self
+    pub async fn set_embedding_provider(&self, provider: Arc<dyn EmbeddingProvider>) {
+        let mut w = self.embed_provider.write().await;
+        *w = Some(provider);
+    }
+
+    pub fn with_embeddings(self, provider: Arc<dyn EmbeddingProvider>) -> Self {
+        Self {
+            pool: self.pool,
+            embed_provider: Arc::new(tokio::sync::RwLock::new(Some(provider))),
+            karma_cache: self.karma_cache,
+        }
     }
 }
 
@@ -518,7 +526,7 @@ impl SqliteJobQueue {
         self.set_setting(key, value, category, is_secret).await
     }
 
-    pub async fn fetch_all_settings(&self) -> Result<Vec<settings::SettingEntry>, AiomeError> {
+    pub async fn fetch_all_settings(&self) -> Result<Vec<aiome_core::contracts::SystemSetting>, AiomeError> {
         self.get_all_settings().await
     }
 }

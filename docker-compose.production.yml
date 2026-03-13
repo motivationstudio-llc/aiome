@@ -5,13 +5,14 @@ services:
   # Responsible for holding sensitive API keys in memory (locked).
   key-proxy:
     build:
-      context: ..
+      context: .
       dockerfile: docker/production.Dockerfile
       args:
         BIN_NAME: key-proxy
     environment:
       - BIND_ALL=true
       - KEY_PROXY_PORT=9999
+      - VAULT_SECRET=${VAULT_SECRET}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
     cap_add:
       - IPC_LOCK # REQUIRED for mlockall() security
@@ -21,20 +22,49 @@ services:
 
   # The AIOME Command Center (Main Application)
   # No API keys in environment; communicates through the proxy.
-  command-center:
+  api-server:
     build:
-      context: ..
+      context: .
       dockerfile: docker/production.Dockerfile
       args:
-        BIN_NAME: command-center
+        BIN_NAME: api-server
     environment:
       - KEY_PROXY_URL=http://key-proxy:9999
+      - SAMSARA_HUB_REST=http://samsara-hub:3016
+      - SAMSARA_HUB_WS=ws://samsara-hub:3016/api/v1/federation/ws
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      - RURI_EMBED_URL=http://ruri-embed-server:8100
       - DISCORD_TOKEN=${DISCORD_TOKEN}
+      - API_SERVER_SECRET=${API_SERVER_SECRET}
+      - FEDERATION_SECRET=${FEDERATION_SECRET}
     depends_on:
       - key-proxy
+      - samsara-hub
+      - ruri-embed-server
     restart: always
     ports:
-      - "8080:8080"
+      - "3015:3015"
     extra_hosts:
-      - "host.docker.internal:host-gateway" # For accessing local Ollama
+      - "host.docker.internal:host-gateway"
+
+  samsara-hub:
+    build:
+      context: .
+      dockerfile: docker/production.Dockerfile
+      args:
+        BIN_NAME: samsara-hub
+    environment:
+      - PORT=3016
+      - DATABASE_URL=sqlite:///app/data/samsara_hub.db
+      - FEDERATION_SECRET=${FEDERATION_SECRET}
+    volumes:
+      - ./data/hub:/app/data
+    restart: always
+    ports:
+      - "3016:3016"
+
+  ruri-embed-server:
+    image: ghcr.io/motivationstudio-llc/ruri-embed-server:latest
+    restart: always
+    ports:
+      - "8100:8100"

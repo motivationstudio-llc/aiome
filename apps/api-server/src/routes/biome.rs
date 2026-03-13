@@ -158,8 +158,8 @@ pub async fn send_message(
 
     // 2. Relay via Hub
     let hub_url = std::env::var("SAMSARA_HUB_REST").unwrap_or_else(|_| "http://127.0.0.1:3016".to_string());
-    let hub_secret = std::env::var("FEDERATION_SECRET").unwrap_or_else(|_| "dev_secret".to_string());
-    let client = reqwest::Client::new();
+    let hub_secret = std::env::var("FEDERATION_SECRET").map_err(|_| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"error": "FEDERATION_SECRET not configured"}))))?;
+    let client = state.http_client.clone();
 
     info!("🚀 [Biome] Sending message to Hub for relay (Topic: {})", msg.topic_id);
     let res = client.post(format!("{}/api/v1/biome/relay", hub_url))

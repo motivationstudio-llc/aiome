@@ -28,6 +28,7 @@ pub async fn list_artifacts_handler(
             "audio" => Some(ArtifactCategory::Audio),
             "expression" => Some(ArtifactCategory::Expression),
             "data" => Some(ArtifactCategory::Data),
+            "knowledge" => Some(ArtifactCategory::Knowledge),
             _ => None,
         }
     });

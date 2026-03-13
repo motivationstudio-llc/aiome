@@ -363,6 +363,7 @@ impl DbInitializer for SqliteJobQueue {
 
         // Phase 1: Artifact Evolution (Memory Crystal)
         sqlx::query("ALTER TABLE ai_artifacts ADD COLUMN embedding BLOB;").execute(&self.pool).await.ok();
+        sqlx::query("ALTER TABLE ai_artifacts ADD COLUMN text_content TEXT;").execute(&self.pool).await.ok();
         
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS artifact_edges (

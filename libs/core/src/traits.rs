@@ -440,6 +440,7 @@ pub enum ArtifactCategory {
     Audio,
     Expression,
     Data,
+    Knowledge,
 }
 
 /// 個別ファイルのメタデータ
@@ -487,6 +488,7 @@ pub struct ArtifactMeta {
     pub job_ref: Option<String>,
     pub soul_version_hash: Option<String>,
     pub signature: Option<String>,
+    pub text_content: Option<String>,
     pub edges: Vec<ArtifactEdge>,
     pub created_at: String,
 }
@@ -500,6 +502,7 @@ pub struct CreateArtifactRequest {
     pub created_by: String,
     pub files: Vec<(String, Vec<u8>, String)>, // (filename, content, mime_type)
     pub karma_refs: Vec<String>,
+    pub text_content: Option<String>,
     pub job_ref: Option<String>,
     pub parent_refs: Vec<ArtifactEdgeInput>,
 }

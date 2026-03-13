@@ -19,7 +19,7 @@ async fn main() -> anyhow::Result<()> {
 
     let discord_token = std::env::var("DISCORD_TOKEN").ok();
     let telegram_token = std::env::var("TELEGRAM_TOKEN").ok();
-    let api_secret = std::env::var("API_SERVER_SECRET").unwrap_or_else(|_| "dev_secret".to_string());
+    let api_secret = std::env::var("API_SERVER_SECRET").expect("🚨 API_SERVER_SECRET must be set for security!");
     let api_ws_url = std::env::var("API_WS_URL").unwrap_or_else(|_| "ws://127.0.0.1:3015/api/v1/watchtower/ws".to_string());
 
     let (command_tx, mut command_rx) = mpsc::channel::<ControlCommand>(100);
@@ -61,7 +61,7 @@ async fn main() -> anyhow::Result<()> {
         let mut request = url::Url::parse(&api_ws_url)?.into_client_request()?;
         request.headers_mut().insert(
             "Authorization",
-            format!("Bearer {}", api_secret).parse().unwrap()
+            format!("Bearer {}", api_secret).parse().map_err(|e| anyhow::anyhow!("Failed to parse auth header: {}", e))?
         );
 
         match connect_async(request).await {

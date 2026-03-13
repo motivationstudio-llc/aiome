@@ -40,7 +40,6 @@ impl SecurityPolicy {
             .allow_endpoint("127.0.0.1")
             .allow_endpoint("localhost")
             .allow_endpoint("trends.google.co.jp")
-            .allow_endpoint("142.250.207.3") // trends.google.co.jp の固定解決IP例（Bastion検証用）
             .block_private_ips(true) // プライベートIPへのSSRFを防止（Allowlist以外）
             .build()
             .expect("Failed to build network shield");

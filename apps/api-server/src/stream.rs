@@ -19,24 +19,9 @@ use crate::routes::agent::{AgentChatRequest, build_system_instructions, parse_to
 
 pub async fn trigger_agent_chat_stream(
     State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
+    _auth: crate::auth::Authenticated,
     Json(payload): Json<AgentChatRequest>,
 ) -> impl axum::response::IntoResponse {
-    use subtle::ConstantTimeEq;
-    let auth = headers.get(axum::http::header::AUTHORIZATION).and_then(|h| h.to_str().ok()).unwrap_or("");
-    let expected = format!("Bearer {}", std::env::var("API_SERVER_SECRET").unwrap_or_else(|_| "dev_secret".to_string()));
-    let is_auth_valid = if auth.len() == expected.len() {
-        bool::from(auth.as_bytes().ct_eq(expected.as_bytes()))
-    } else {
-        false
-    };
-
-    if !is_auth_valid {
-        return (
-            axum::http::StatusCode::UNAUTHORIZED, 
-            "Unauthorized"
-        ).into_response();
-    }
 
     let provider = state.provider.clone();
 
@@ -62,14 +47,13 @@ pub async fn trigger_agent_chat_stream(
             return;
         }
 
-        let soul = read_workspace_file("SOUL.md");
-        let evolving_soul = read_workspace_file("EVOLVING_SOUL.md");
         let soul_hash = {
-            let mut h: u64 = 0;
-            for b in format!("{}{}", soul, evolving_soul).as_bytes() {
-                h = h.wrapping_add(*b as u64).wrapping_mul(31);
-            }
-            format!("{:x}", h)
+            use std::hash::{Hash, Hasher};
+            let soul = read_workspace_file("SOUL.md");
+            let evolving_soul = read_workspace_file("EVOLVING_SOUL.md");
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            format!("{}{}", soul, evolving_soul).hash(&mut hasher);
+            format!("{:x}", hasher.finish())
         };
 
         // Sprint 1-A: Fetch relevant karma using proper search
@@ -94,6 +78,27 @@ pub async fn trigger_agent_chat_stream(
         });
         yield Ok::<Event, Infallible>(Event::default().event("karma_data").data(karma_json.to_string()));
 
+        // God Mode (Phase 21): Fetch relevant project knowledge
+        let knowledge_result = state.artifact_store.search_artifacts_semantic(
+            &payload.prompt, 
+            Some(aiome_core::traits::ArtifactCategory::Knowledge), 
+            2
+        ).await.unwrap_or_default();
+        let knowledge_str = if knowledge_result.is_empty() {
+            None
+        } else {
+            Some(knowledge_result.iter()
+                .map(|a| format!("--- {} ---\n{}", a.title, a.text_content.as_deref().unwrap_or("（内容なし）")))
+                .collect::<Vec<_>>()
+                .join("\n\n"))
+        };
+
+        if let Some(ref ks) = knowledge_str {
+            // Notify client about relevant knowledge being used
+            let titles = knowledge_result.iter().map(|a| a.title.as_str()).collect::<Vec<_>>().join(", ");
+            yield Ok::<Event, Infallible>(Event::default().event("knowledge").data(&titles));
+        }
+
         let channel_id = payload.channel_id.unwrap_or_else(|| "default_console".to_string());
         
         // Phase 3-B: Persist user message
@@ -113,7 +118,7 @@ pub async fn trigger_agent_chat_stream(
         }
 
         let ai_name = state.job_queue.get_setting_value("ai_name").await.ok().flatten();
-        let system_instructions = build_system_instructions(&state, &karma_str, summary.as_deref(), ai_name);
+        let system_instructions = build_system_instructions(&state, &karma_str, summary.as_deref(), ai_name, knowledge_str.as_deref());
 
         let mut turn = 0;
         let max_turns = 15;

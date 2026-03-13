@@ -27,6 +27,9 @@ const SettingsPage = React.lazy(() => import("./components/SettingsPage"));
 const ExpressionPipeline = React.lazy(() => import("./components/ExpressionPipeline"));
 const BiomeDialogueView = React.lazy(() => import("./components/BiomeDialogueView"));
 import DioramaView from "./components/diorama/DioramaView";
+const AuthOverlay = React.lazy(() => import("./components/AuthOverlay"));
+
+import { isAuthenticated } from "./lib/auth";
 import { useAvatarState } from "./hooks/useAvatarState";
 import { useDisplayMode } from "./hooks/useDisplayMode";
 import { AgentStats, VitalityUIEvent, Karma } from "./types";
@@ -38,6 +41,7 @@ function App() {
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [showBirth, setShowBirth] = useState(false);
   const [recentEvents, setRecentEvents] = useState<VitalityUIEvent[]>([]);
+  const [isAuth, setIsAuth] = useState(isAuthenticated());
 
   const { lastEvent, connectionStatus, toggleConnection, lastPingMs } = useSystemVitality();
 
@@ -160,6 +164,14 @@ function App() {
 
   return (
     <div className="app-container">
+      <AnimatePresence>
+        {!isAuth && (
+          <React.Suspense fallback={null}>
+            <AuthOverlay onAuthenticated={() => setIsAuth(true)} />
+          </React.Suspense>
+        )}
+      </AnimatePresence>
+
       {/* Digital Diorama — Resident Avatar */}
       <DioramaView status={avatarState} mode={mode} activeTab={activeTab} />
 

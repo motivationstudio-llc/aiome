@@ -52,14 +52,21 @@ impl BiomeMessage {
     /// メッセージ本文を指定された共有鍵で暗号化する
     pub fn encrypt(&mut self, key: &[u8; 32]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce, aead::{Aead, KeyInit}};
+        use rand::{RngCore, thread_rng};
         
         let cipher = ChaCha20Poly1305::new(Key::from_slice(key));
-        let nonce = Nonce::from_slice(b"biome-proto1"); // 12 bytes nonce for MVP
+        let mut nonce_bytes = [0u8; 12];
+        thread_rng().fill_bytes(&mut nonce_bytes);
+        let nonce = Nonce::from_slice(&nonce_bytes);
         
         let ciphertext = cipher.encrypt(nonce, self.content.as_bytes())
             .map_err(|e| format!("Encryption failed: {:?}", e))?;
         
-        self.content = base64::engine::general_purpose::STANDARD.encode(ciphertext);
+        // Prepend nonce to ciphertext
+        let mut combined = nonce_bytes.to_vec();
+        combined.extend_from_slice(&ciphertext);
+        
+        self.content = base64::engine::general_purpose::STANDARD.encode(combined);
         self.encryption = "chacha20-poly1305".to_string();
         Ok(())
     }
@@ -72,12 +79,17 @@ impl BiomeMessage {
         
         use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce, aead::{Aead, KeyInit}};
         use base64::Engine;
-
-        let cipher = ChaCha20Poly1305::new(Key::from_slice(key));
-        let nonce = Nonce::from_slice(b"biome-proto1"); // 12 bytes
         
-        let ciphertext = base64::engine::general_purpose::STANDARD.decode(&self.content)?;
-        let plaintext = cipher.decrypt(nonce, ciphertext.as_slice())
+        let combined = base64::engine::general_purpose::STANDARD.decode(&self.content)?;
+        if combined.len() < 12 {
+            return Err("Invalid ciphertext: too short for nonce".into());
+        }
+        
+        let (nonce_bytes, ciphertext) = combined.split_at(12);
+        let cipher = ChaCha20Poly1305::new(Key::from_slice(key));
+        let nonce = Nonce::from_slice(nonce_bytes);
+        
+        let plaintext = cipher.decrypt(nonce, ciphertext)
             .map_err(|e| format!("Decryption failed: {:?}", e))?;
         
         self.content = String::from_utf8(plaintext)?;

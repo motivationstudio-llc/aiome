@@ -40,7 +40,7 @@ impl<T> fmt::Display for Secret<T> {
 }
 
 /// リソースの使用状況
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct ResourceStatus {
     pub memory_usage_mb: u64,
     pub total_memory_mb: u64,
@@ -49,6 +49,12 @@ pub struct ResourceStatus {
     pub disk_free_gb: u64,
     pub total_disk_gb: u64,
     pub open_files: Option<u64>,
+    // AI Stats (Evolvable)
+    pub level: i32,
+    pub exp: i32,
+    pub resonance: i32,
+    pub creativity: i32,
+    pub fatigue: i32,
 }
 
 /// システムの状態を監視する
@@ -78,8 +84,8 @@ impl HealthMonitor {
     pub fn check(&mut self) -> ResourceStatus {
         // 全体のメモリと特定のプロセスをリフレッシュ
         self.sys.refresh_memory();
-        self.sys.refresh_process(self.pid);
-        self.disks.refresh_list();
+        self.sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[self.pid]), true);
+        self.disks.refresh(true);
         
         let mut memory_usage_mb = 0;
         let mut cpu_usage_percent = 0.0;
@@ -125,6 +131,11 @@ impl HealthMonitor {
             disk_free_gb: disk_info.0,
             total_disk_gb: disk_info.1,
             open_files: None,
+            level: 1,
+            exp: 0,
+            resonance: 50,
+            creativity: 30,
+            fatigue: 10,
         }
     }
 }

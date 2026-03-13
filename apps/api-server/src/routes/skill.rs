@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::AppState;
 use tracing::info;
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct SkillSummary {
     pub name: String,
     pub description: String,
@@ -22,8 +22,20 @@ pub struct SkillSummary {
     pub tools: Vec<String>,
 }
 
-/// [A-3] Skill Management Console API
-/// Provides endpoints to list, import, and manage skills in the Swarm.
+#[derive(Deserialize, utoipa::ToSchema)]
+pub struct ImportSkillRequest {
+    pub url: String,
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/skills",
+    responses(
+        (status = 200, description = "List all active skills in the Swarm", body = [SkillSummary]),
+        (status = 401, description = "Unauthorized")
+    ),
+    security(("api_key" = []))
+)]
 pub async fn list_skills(
     State(state): State<AppState>,
 ) -> Json<Vec<SkillSummary>> {
@@ -102,27 +114,42 @@ pub async fn list_skills(
     Json(skills)
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 pub struct ImportRequest {
     pub url: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 pub struct McpSpawnRequest {
     pub id: String,
     pub command: String,
     pub args: Vec<String>,
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/skills/import",
+    request_body = ImportRequest,
+    responses(
+        (status = 200, description = "Skill imported successfully"),
+        (status = 400, description = "Invalid URL or fetch failed"),
+        (status = 401, description = "Unauthorized"),
+        (status = 403, description = "Security Block (SSRF)")
+    ),
+    security(("api_key" = []))
+)]
 pub async fn import_skill(
     State(state): State<AppState>,
     Json(payload): Json<ImportRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     info!("👹 [Vampire Attack] Attempting to import skill from: {}", payload.url);
 
-    // 1. Fetch the content
-    let client = reqwest::Client::new();
-    let resp = client.get(&payload.url)
+    // 1. SSRF Validation
+    state.security_policy.validate_url(&payload.url).await
+        .map_err(|e| (StatusCode::FORBIDDEN, Json(serde_json::json!({"error": e.to_string()}))))?;
+    
+    // 2. Fetch the content
+    let resp = state.http_client.get(&payload.url)
         .send()
         .await
         .map_err(|e| (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": format!("Failed to fetch URL: {}", e)}))))?;

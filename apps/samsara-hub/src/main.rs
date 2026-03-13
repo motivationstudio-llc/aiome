@@ -102,16 +102,6 @@ async fn main() -> anyhow::Result<()> {
     // Spawn the Approval Worker to process quarantine
     tokio::spawn(approval_worker(pool, token.clone()));
 
-    // Secure CORS Policy: Restrict to specific trusted origins
-    let _cors = CorsLayer::new()
-        .allow_origin([
-            "http://localhost:3000".parse().unwrap(),
-            "http://127.0.0.1:3000".parse().unwrap(),
-            "http://localhost:3015".parse().unwrap(), // Management Console
-            "http://localhost:3016".parse().unwrap(),
-        ]) 
-        .allow_methods([axum::http::Method::GET, axum::http::Method::POST])
-        .allow_headers([axum::http::header::CONTENT_TYPE, axum::http::header::AUTHORIZATION]);
 
 
     let state_bg = state.clone();
@@ -889,13 +879,21 @@ async fn timeline_sync_handler(
 }
 
 pub fn build_app(state: Arc<HubState>) -> Router {
+    let origins_env = std::env::var("ALLOWED_ORIGINS").unwrap_or_default();
+    let mut allowed_origins = vec![
+        "http://localhost:3000".parse().unwrap(),
+        "http://127.0.0.1:3000".parse().unwrap(),
+        "http://localhost:3015".parse().unwrap(), // Management Console
+        "http://localhost:3016".parse().unwrap(),
+    ];
+    for extra in origins_env.split(',') {
+        if let Ok(parsed) = extra.trim().parse() {
+            allowed_origins.push(parsed);
+        }
+    }
+
     let cors = CorsLayer::new()
-        .allow_origin([
-            "http://localhost:3000".parse().unwrap(),
-            "http://127.0.0.1:3000".parse().unwrap(),
-            "http://localhost:3015".parse().unwrap(), // Management Console
-            "http://localhost:3016".parse().unwrap(),
-        ]) 
+        .allow_origin(allowed_origins) 
         .allow_methods([axum::http::Method::GET, axum::http::Method::POST])
         .allow_headers([axum::http::header::CONTENT_TYPE, axum::http::header::AUTHORIZATION]);
 

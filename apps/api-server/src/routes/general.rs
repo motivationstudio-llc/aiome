@@ -8,7 +8,7 @@ use axum::{
 };
 use std::fs;
 use crate::AppState;
-use crate::ResourceStatus;
+use shared::health::{ResourceStatus, HealthMonitor};
 use aiome_core::traits::JobQueue;
 
 pub async fn list_wiki_files(
@@ -53,6 +53,15 @@ pub async fn get_mock_clouddoc_page(
     }.into_response()
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/health",
+    responses(
+        (status = 200, description = "Get current system and agent health status", body = ResourceStatus),
+        (status = 401, description = "Unauthorized")
+    ),
+    security(("api_key" = []))
+)]
 pub async fn get_health_status(
     State(state): State<AppState>,
 ) -> Json<ResourceStatus> {

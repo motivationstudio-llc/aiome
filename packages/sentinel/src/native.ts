@@ -15,7 +15,8 @@ export interface AiomeNativeBridge {
     karmaIngest(sessionId: string, message: string): Promise<void>;
     karmaDistillTurn(messages: string, success: boolean): Promise<void>;
     karmaFetchRelevant(sessionId: string, limit: number): Promise<string>;
-    immuneGetWarnings(): string;
+    get_karma_directives(topic: string, skillId: string): Promise<string>;
+    immuneGetWarnings(): Promise<string>;
     karmaCompact(sessionId: string, sessionFile: string, tokenBudget: number): Promise<void>;
     quarantineCheckSpawn(childSessionKey: string): Promise<SubagentSpawnResponse>;
     karmaLearnFromSubagent(targetSessionKey: string, outcome: string): Promise<void>;
@@ -41,8 +42,9 @@ try {
         async karmaBootstrap() { },
         async karmaIngest() { },
         async karmaDistillTurn() { },
-        async karmaFetchRelevant() { return "\n[Aiome Karma]: Test karma injected\n"; },
-        immuneGetWarnings() { return "\n[Aiome Immune]: Test immune warning\n"; },
+        async karmaFetchRelevant() { return ""; },
+        async get_karma_directives() { return ""; },
+        async immuneGetWarnings() { return ""; },
         async karmaCompact() { },
         async quarantineCheckSpawn() { return { status: 'ok' }; },
         async karmaLearnFromSubagent() { },

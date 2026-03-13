@@ -14,8 +14,9 @@
 
 | Software | Version | Purpose | Install |
 |----------|---------|---------|---------|
-| Rust | 1.75+ | コア開発 | `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \| sh` |
+| Rust | 1.85+ | コア開発 | `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \| sh` |
 | Node.js | 18+ | Management Console UI | `brew install node` |
+| Python | 3.10+ | ruri-v3 embedding server | `brew install python` |
 | Ollama | Latest | バックグラウンドLLM | `brew install ollama` |
 | SQLite | 3.40+ | DB (ビルトイン) | Rust `sqlx` に含まれる |
 
@@ -47,6 +48,8 @@ GEMINI_API_KEY=your_gemini_key_here
 BG_LLM_PROVIDER=ollama
 BG_LLM_MODEL=qwen3.5:9b
 API_SERVER_SECRET=your_random_secret_here
+VAULT_SECRET=your_vault_secret
+FEDERATION_SECRET=your_hub_secret
 ```
 
 ### 2.2 ビルドと初期検証
@@ -135,10 +138,19 @@ RUST_LOG=info cargo run -p api-server
 ## 8. Production Deployment Checklist
 - [ ] `.env` に `GEMINI_API_KEY` を設定
 - [ ] `.env` に `API_SERVER_SECRET` を設定
+- [ ] `.env` に `VAULT_SECRET` を設定 (Key Proxy用)
+- [ ] `.env` に `FEDERATION_SECRET` を設定 (Samsara Hub用)
 - [ ] `SOUL.md` を確認・カスタマイズ
 - [ ] Ollama でモデルをダウンロード (`ollama pull qwen3.5:9b`)
 - [ ] `cargo run -p api-server` でテスト起動
 - [ ] ブラウザで `http://localhost:3015` にアクセスし動作確認
+
+### 9. local Embedding Server (ruri-v3) の起動
+1. `tools/ruri-embed-server` に移動。
+2. `python3 -m venv venv` で仮想環境作成。
+3. `source venv/bin/activate` (Mac/Linux)。
+4. `pip install -r requirements.txt`。
+5. `python3 server.py` で起動 (デフォルト 8100 ポート)。
 
 ---
 *Happy coding!*

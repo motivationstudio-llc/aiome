@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { Bot, Send, Cpu, Brain, Sparkles, ThumbsUp, ThumbsDown } from 'lucide-react';
+import { Bot, Send, Cpu, Brain, Sparkles, ThumbsUp, ThumbsDown, BookOpen } from 'lucide-react';
 import { API_BASE } from "../config";
 import { ChatMessage } from '../types';
 import { getAuthHeaders } from '../lib/auth';
@@ -14,6 +14,7 @@ const AgentConsole: React.FC = () => {
     const [status, setStatus] = useState<string>("IDLE");
     const [relevantKarma, setRelevantKarma] = useState<string | null>(null);
     const [relevantKarmaData, setRelevantKarmaData] = useState<{ is_ood: boolean, entries: { id: string, lesson: string }[] } | null>(null);
+    const [activeKnowledge, setActiveKnowledge] = useState<string | null>(null);
     const [channelId] = useState(() => {
         const stored = sessionStorage.getItem('aiome_console_channel_id');
         if (stored) return stored;
@@ -40,6 +41,7 @@ const AgentConsole: React.FC = () => {
         setStatus("THINKING");
         setRelevantKarma(null);
         setRelevantKarmaData(null);
+        setActiveKnowledge(null);
 
         try {
             const response = await fetch(`${API_BASE}/api/agent/chat/stream`, {
@@ -99,6 +101,8 @@ const AgentConsole: React.FC = () => {
                             } catch (e) {
                                 console.error("Failed to parse karma_data", e);
                             }
+                        } else if (currentEvent === 'knowledge') {
+                            setActiveKnowledge(data);
                         }
                     }
                 }
@@ -202,6 +206,29 @@ const AgentConsole: React.FC = () => {
                         </div>
                         <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.5, color: 'rgba(255,255,255,0.8)' }}>
                             {relevantKarma}
+                        </div>
+                    </motion.div>
+                )}
+
+                {activeKnowledge && (
+                    <motion.div
+                        initial={{ opacity: 0, y: -10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        style={{
+                            padding: '1rem',
+                            background: 'rgba(255, 171, 0, 0.1)',
+                            border: '1px solid rgba(255, 171, 0, 0.2)',
+                            borderLeft: '4px solid #ffab00',
+                            borderRadius: '4px 12px 12px 4px',
+                            marginBottom: '1rem',
+                        }}
+                    >
+                        <div style={{ fontWeight: 800, fontSize: '0.7rem', color: 'rgba(255,171,0,0.8)', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.6rem', letterSpacing: '0.1em' }}>
+                            <BookOpen size={14} />
+                            PROJECT KNOWLEDGE ACCESSED
+                        </div>
+                        <div style={{ fontSize: '0.85rem', color: 'rgba(255,255,255,0.9)', fontWeight: 500 }}>
+                            {activeKnowledge}
                         </div>
                     </motion.div>
                 )}

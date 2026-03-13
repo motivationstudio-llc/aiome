@@ -83,6 +83,72 @@ export function registerHooks(api: any) {
         if (native.watchtowerShutdown) native.watchtowerShutdown();
     }, p1Opts);
 
-    // Note: Only listing a subset here for now, full 25 hooks will be mapped similarly
-    api.logger.info("Aiome Hooks registered (P0 & P1).");
+    // 21. Subagent Monitoring
+    api.on("subagent_start", async (event: any) => {
+        if (native.quarantineCheckSpawn) {
+            await native.quarantineCheckSpawn(event.childSessionKey);
+        }
+    }, p1Opts);
+
+    api.on("subagent_end", async (event: any) => {
+        if (native.karmaLearnFromSubagent) {
+            await native.karmaLearnFromSubagent(event.targetSessionKey, event.outcome);
+        }
+    }, p1Opts);
+
+    // 22. Error & Stability Monitoring
+    api.on("error", async (event: any) => {
+        api.logger.error(`[SENTINEL] Error caught: ${event.error}`);
+        if (native.karmaLearnFromTool) {
+            await native.karmaLearnFromTool("system_error", "", event.error.toString());
+        }
+    }, p1Opts);
+
+    // 23. Step-level Monitoring
+    api.on("step_start", async (event: any) => {
+         api.logger.info(`[SENTINEL] Executing Step: ${event.stepId}`);
+    }, p1Opts);
+
+    api.on("step_end", async (event: any) => {
+         api.logger.info(`[SENTINEL] Step Completed: ${event.stepId}`);
+    }, p1Opts);
+
+    // 24. Thought & Planning
+    api.on("thought", async (event: any) => {
+        // AI internal reasoning trace
+    }, p1Opts);
+
+    api.on("plan", async (event: any) => {
+        // AI execution plan
+    }, p1Opts);
+
+    // 25. Checkpoint Preservation
+    api.on("checkpoint", async (event: any) => {
+        if (native.karmaPreserveFacts) {
+            await native.karmaPreserveFacts(event.checkpointId || "auto");
+        }
+    }, p1Opts);
+
+    // 26-30. Additional visibility hooks
+    api.on("tool_start", async (event: any) => {
+        api.logger.debug(`[SENTINEL] Tool Start: ${event.toolName}`);
+    }, p1Opts);
+
+    api.on("tool_end", async (event: any) => {
+        api.logger.debug(`[SENTINEL] Tool End: ${event.toolName}`);
+    }, p1Opts);
+
+    api.on("artifact_create", async (event: any) => {
+        api.logger.info(`[SENTINEL] Artifact Created: ${event.path}`);
+    }, p1Opts);
+
+    api.on("artifact_delete", async (event: any) => {
+        api.logger.warn(`[SENTINEL] Artifact Deleted: ${event.path}`);
+    }, p1Opts);
+
+    api.on("retry", async (event: any) => {
+        api.logger.warn(`[SENTINEL] Retry Triggered (Attempt ${event.attempt})`);
+    }, p1Opts);
+
+    api.logger.info("Aiome Sentinel: All 25+ holistic hooks registered.");
 }

@@ -19,7 +19,9 @@ tokio-util = { workspace = true }
 bastion = { package = "bastion-core", git = "https://github.com/for4xex-droid/bastion.git", branch = "main", features = ["fs", "net"] }
 anyhow = { workspace = true }
 config = { workspace = true }
+utoipa = { workspace = true }
 unicode-normalization = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3.8"
+serial_test = { workspace = true }

@@ -436,6 +436,16 @@ pub enum HubMessage {
     /// Biome プロトコルメッセージの転送
     BiomeRelay(crate::biome::BiomeMessage),
 }
+
+/// System Setting entry for Management Console
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct SystemSetting {
+    pub key: String,
+    pub value: String,
+    pub category: String,
+    pub is_secret: bool,
+    pub updated_at: String,
+}
 // --- Phase 20: Samsara Evolution Events ---
 
 /// Samsara Engine で発生する成長イベント

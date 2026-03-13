@@ -73,6 +73,11 @@ impl LlmProvider for ProxyLlmProvider {
         Ok(body.result)
     }
 
+    async fn test_connection(&self) -> Result<(), AiomeError> {
+        self.complete("ping", None).await?;
+        Ok(())
+    }
+
     fn name(&self) -> &str {
         "KeyProxy"
     }
@@ -80,7 +85,7 @@ impl LlmProvider for ProxyLlmProvider {
 
 #[async_trait]
 impl aiome_core::llm_provider::EmbeddingProvider for ProxyLlmProvider {
-    async fn embed(&self, text: &str) -> Result<Vec<f32>, AiomeError> {
+    async fn embed(&self, text: &str, _is_query: bool) -> Result<Vec<f32>, AiomeError> {
         let url = format!("{}/api/v1/llm/embed", self.proxy_url);
         
         let payload = ProxyRequest {
@@ -108,6 +113,11 @@ impl aiome_core::llm_provider::EmbeddingProvider for ProxyLlmProvider {
             .map_err(|e| AiomeError::Infrastructure { reason: e.to_string() })?;
 
         Ok(body.embedding)
+    }
+
+    async fn test_connection(&self) -> Result<(), AiomeError> {
+        self.embed("ping", false).await?;
+        Ok(())
     }
 
     fn name(&self) -> &str {

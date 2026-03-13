@@ -14,7 +14,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/License-ELv2-blue.svg" alt="License: ELv2">
-  <img src="https://img.shields.io/badge/Rust-1.75%2B-orange.svg" alt="Rust 1.75+">
+  <img src="https://img.shields.io/badge/Rust-1.85%2B-orange.svg" alt="Rust 1.85+">
   <img src="https://img.shields.io/badge/PRs-Welcome-brightgreen.svg" alt="PRs Welcome">
   <a href="https://github.com/google/antigravity"><img src="https://img.shields.io/badge/Built%20by-Agents-blueviolet" alt="Built by Agents"></a>
 </p>
@@ -163,13 +163,19 @@ cp .env.example .env
 
 # 3. Start Abyss Vault (Key Proxy)
 # ⚠️ ALL API requests pass through this proxy. Be sure to start this first.
+export VAULT_SECRET=your_vault_secret
 GEMINI_API_KEY=your_key_here cargo run --bin key-proxy &
 
 # 4. Start API Server (The Body)
+export API_SERVER_SECRET=your_api_secret
 cargo run --bin api-server
 
 # 5. Start Watchtower (Bridge) (The Soul - API_SERVER_SECRET required)
 cargo run --bin watchtower
+
+# 6. Start Samsara Hub (Federation) (Collective Intelligence)
+export FEDERATION_SECRET=your_hub_secret
+cargo run --bin samsara-hub
 ```
 
 > **Note**: `api-server` and `watchtower` communicate bi-directionally in real-time via WebSocket (ws://). Both processes must be running simultaneously to enable interactive features (Discord/Telegram integration).
@@ -181,6 +187,9 @@ cargo run --bin watchtower
 - `BG_LLM_MODEL`: Background LLM model (default: `qwen3.5:9b`).
 - `OLLAMA_BASE_URL`: For local LLM connections (default: `http://localhost:11434`).
 - `EXTERNAL_SERVICE_URL`: For integration with external generation engines like ComfyUI.
+- `VAULT_SECRET`: Authentication for Abyss Vault (Key Proxy).
+- `FEDERATION_SECRET`: Authentication for Samsara Hub communication.
+- `API_SERVER_SECRET`: Authentication for all API Server requests.
 
 ---
 

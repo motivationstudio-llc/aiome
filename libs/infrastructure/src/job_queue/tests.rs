@@ -35,6 +35,9 @@ impl LlmProvider for MockLlmProvider {
     async fn complete(&self, _prompt: &str, _system: Option<&str>) -> Result<String, AiomeError> {
         Ok(self.json_response.clone())
     }
+    async fn test_connection(&self) -> Result<(), AiomeError> {
+        Ok(())
+    }
     fn name(&self) -> &str { "Mock" }
 }
 
@@ -290,12 +293,15 @@ struct MockEmbedProvider;
 #[async_trait]
 impl EmbeddingProvider for MockEmbedProvider {
     fn name(&self) -> &str { "mock" }
-    async fn embed(&self, text: &str) -> Result<Vec<f32>, aiome_core::error::AiomeError> {
+    async fn embed(&self, text: &str, _is_query: bool) -> Result<Vec<f32>, aiome_core::error::AiomeError> {
         if text.contains("alien") {
             Ok(vec![0.0; 1536])
         } else {
             Ok(vec![1.0; 1536])
         }
+    }
+    async fn test_connection(&self) -> Result<(), aiome_core::error::AiomeError> {
+        Ok(())
     }
 }
 

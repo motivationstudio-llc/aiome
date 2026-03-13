@@ -63,31 +63,36 @@ impl AdaptiveImmuneSystem {
 
     /// 入力内容が既存の免疫ルールに抵触するか検証する (Regex & Baseline)
     pub async fn verify_intent(&self, input: &str, jq: &impl JobQueue) -> Result<Option<ImmuneRule>, AiomeError> {
-        // 1. 静的ベースライン・フィルタ (第1段階: 明白な危険の排除)
-        let baseline_patterns = [
-            r"rm -rf\s+/", 
-            r"curl\s+.*\|.*sh", 
-            r"wget\s+.*\|.*sh",
-            r"cat\s+~/\.ssh/id_rsa",
-            r"chmod\s+777",
-            r"hidden-backdoor\.com",
-        ];
+        use once_cell::sync::Lazy;
+        use regex::Regex;
 
-        for pattern in baseline_patterns {
-            if let Ok(re) = regex::Regex::new(pattern) {
-                if re.is_match(input) {
-                    warn!("🚨 第1層(Sentinel): 明白な危険を検知しました: {}", pattern);
-                    return Ok(Some(ImmuneRule {
-                        id: "sentinel-baseline".to_string(),
-                        pattern: pattern.to_string(),
-                        severity: 100,
-                        action: "Block".to_string(),
-                        created_at: Utc::now().to_rfc3339(),
-                        lamport_clock: 0,
-                        node_id: "local-sentinel".to_string(),
-                        signature: None,
-                    }));
-                }
+        // 1. 静的ベースライン・フィルタ (第1段階: 明白な危険の排除)
+        static BASELINE_REGEXES: Lazy<Vec<Regex>> = Lazy::new(|| {
+            [
+                r"rm -rf\s+/", 
+                r"curl\s+.*\|.*sh", 
+                r"wget\s+.*\|.*sh",
+                r"cat\s+~/\.ssh/id_rsa",
+                r"chmod\s+777",
+                r"hidden-backdoor\.com",
+            ].iter()
+            .map(|p| Regex::new(p).expect("Invalid baseline regex"))
+            .collect()
+        });
+
+        for re in BASELINE_REGEXES.iter() {
+            if re.is_match(input) {
+                warn!("🚨 第1層(Sentinel): 明白な危険を検知しました: {}", re.as_str());
+                return Ok(Some(ImmuneRule {
+                    id: "sentinel-baseline".to_string(),
+                    pattern: re.as_str().to_string(),
+                    severity: 100,
+                    action: "Block".to_string(),
+                    created_at: Utc::now().to_rfc3339(),
+                    lamport_clock: 0,
+                    node_id: "local-sentinel".to_string(),
+                    signature: None,
+                }));
             }
         }
 

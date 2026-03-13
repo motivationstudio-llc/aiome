@@ -12,17 +12,9 @@ use sqlx::Row;
 pub trait SettingsOps {
     async fn get_setting(&self, key: &str) -> Result<Option<String>, AiomeError>;
     async fn set_setting(&self, key: &str, value: &str, category: &str, is_secret: bool) -> Result<(), AiomeError>;
-    async fn get_all_settings(&self) -> Result<Vec<SettingEntry>, AiomeError>;
+    async fn get_all_settings(&self) -> Result<Vec<aiome_core::contracts::SystemSetting>, AiomeError>;
 }
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
-pub struct SettingEntry {
-    pub key: String,
-    pub value: String,
-    pub category: String,
-    pub is_secret: bool,
-    pub updated_at: String,
-}
 
 #[async_trait]
 impl SettingsOps for SqliteJobQueue {
@@ -57,7 +49,7 @@ impl SettingsOps for SqliteJobQueue {
         Ok(())
     }
 
-    async fn get_all_settings(&self) -> Result<Vec<SettingEntry>, AiomeError> {
+    async fn get_all_settings(&self) -> Result<Vec<aiome_core::contracts::SystemSetting>, AiomeError> {
         let rows = sqlx::query("SELECT key, value, category, is_secret, updated_at FROM system_settings")
             .fetch_all(&self.pool)
             .await
@@ -65,7 +57,7 @@ impl SettingsOps for SqliteJobQueue {
 
         let mut entries = Vec::new();
         for row in rows {
-            entries.push(SettingEntry {
+            entries.push(aiome_core::contracts::SystemSetting {
                 key: row.get("key"),
                 value: row.get("value"),
                 category: row.get("category"),

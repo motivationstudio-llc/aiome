@@ -27,7 +27,11 @@ export class AiomeContextEngine {
     async assemble({ sessionId, messages, tokenBudget }: any) {
         // We get warnings and karmas from Rust backend
         const karmas = native.karmaFetchRelevant ? await native.karmaFetchRelevant(sessionId, 5) : "";
-        const warnings = native.immuneGetWarnings ? native.immuneGetWarnings() : "";
+        const warnings = native.immuneGetWarnings ? await native.immuneGetWarnings() : "";
+
+        // Also fetch directives if available
+        const topic = messages[messages.length - 1]?.content || "";
+        const directives = native.get_karma_directives ? await native.get_karma_directives(topic, "global") : "";
 
         const estimatedTokens = messages.reduce((acc: number, m: any) => {
             const contentLen = typeof m.content === 'string' ? m.content.length : JSON.stringify(m.content || '').length;
@@ -37,7 +41,7 @@ export class AiomeContextEngine {
         return {
             messages,
             estimatedTokens,
-            prependSystemContext: warnings || undefined,
+            prependSystemContext: (warnings || "") + (directives || "") || undefined,
             prependContext: karmas || undefined,
         };
     }

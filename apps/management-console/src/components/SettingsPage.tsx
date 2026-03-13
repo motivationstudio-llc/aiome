@@ -98,7 +98,7 @@ const SettingsPage: React.FC = () => {
 
     return (
         <div className="settings-page" style={{ paddingBottom: '8rem' }}>
-            <div className="settings-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: '2rem' }}>
+            <div className="settings-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: '2rem', alignItems: 'start' }}>
 
                 {/* 1. Appearance Section */}
                 <section className="glass-panel" style={{ padding: '2rem', borderRadius: 'var(--radius-lg)' }}>
@@ -265,8 +265,7 @@ const SettingsPage: React.FC = () => {
                                     if (provider === 'ollama') {
                                         testConnection('ollama', getSetting('ollama_host') || 'http://localhost:11434', getSetting('ollama_model') || 'qwen2.5-coder:7b');
                                     } else {
-                                        // TODO: Cloud connection test in API server if needed
-                                        alert("Cloud provider connection testing is not yet fully implemented in the bridge. Settings saved.");
+                                        testConnection(provider, 'cloud', getSetting('llm_api_key'));
                                     }
                                 }}
                                 style={testBtnStyle}

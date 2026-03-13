@@ -95,7 +95,7 @@ pub fn parse_tool_calls(text: &str) -> Vec<(String, String)> {
     calls
 }
 
-pub fn build_system_instructions(state: &AppState, karma_str: &str, summary: Option<&str>, ai_name: Option<String>) -> String {
+pub fn build_system_instructions(state: &AppState, karma_str: &str, summary: Option<&str>, ai_name: Option<String>, knowledge_str: Option<&str>) -> String {
     let skill_list = state.wasm_skill_manager.list_skills_with_metadata()
         .iter()
         .map(|m| {
@@ -136,6 +136,12 @@ pub fn build_system_instructions(state: &AppState, karma_str: &str, summary: Opt
     } else {
         "".to_string()
     };
+
+    let project_knowledge = if let Some(ks) = knowledge_str {
+        format!("\n[関連するプロジェクト知識 (自動検索)]\n{}\n---\n", ks)
+    } else {
+        "".to_string()
+    };
     
     format!(
         "{}[利用可能なスキル (概要)]\n\
@@ -151,6 +157,7 @@ pub fn build_system_instructions(state: &AppState, karma_str: &str, summary: Opt
         3. 自分が現在使えるスキルの全スキーマは上記リストを参照。\n\n\
         現在のディレクトリ: {}\n\
         過去の教訓: {}\n\n\
+        {}\n\n\
         [これまでの会話の要約]\n\
         {}\n\n\
         {}\n\
@@ -159,6 +166,7 @@ pub fn build_system_instructions(state: &AppState, karma_str: &str, summary: Opt
         skill_list,
         std::env::current_dir().unwrap_or_default().display(),
         karma_str,
+        project_knowledge,
         summary.unwrap_or("なし"),
         forge_prompt,
         supplemental_context
@@ -167,25 +175,9 @@ pub fn build_system_instructions(state: &AppState, karma_str: &str, summary: Opt
 
 pub async fn trigger_agent_chat(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    _auth: crate::auth::Authenticated,
     Json(payload): Json<AgentChatRequest>,
 ) -> impl IntoResponse {
-    use subtle::ConstantTimeEq;
-
-    let auth = headers.get(axum::http::header::AUTHORIZATION).and_then(|h| h.to_str().ok()).unwrap_or("");
-    let expected = format!("Bearer {}", std::env::var("API_SERVER_SECRET").unwrap_or_else(|_| "dev_secret".to_string()));
-    let is_auth_valid = if auth.len() == expected.len() {
-        bool::from(auth.as_bytes().ct_eq(expected.as_bytes()))
-    } else {
-        false
-    };
-
-    if !is_auth_valid {
-        return (
-            StatusCode::UNAUTHORIZED, 
-            Json(serde_json::json!({"status": "blocked", "reply": "Unauthorized"}))
-        ).into_response();
-    }
 
     if let shared::guardrails::ValidationResult::Blocked(reason) = shared::guardrails::validate_input(&payload.prompt) {
         return Json(serde_json::json!({
@@ -207,13 +199,12 @@ pub async fn trigger_agent_chat(
     }
 
     let soul_hash = {
+        use std::hash::{Hash, Hasher};
         let soul = read_workspace_file("SOUL.md");
         let evolving_soul = read_workspace_file("EVOLVING_SOUL.md");
-        let mut h: u64 = 0;
-        for b in format!("{}{}", soul, evolving_soul).as_bytes() {
-            h = h.wrapping_add(*b as u64).wrapping_mul(31);
-        }
-        format!("{:x}", h)
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        format!("{}{}", soul, evolving_soul).hash(&mut hasher);
+        format!("{:x}", hasher.finish())
     };
 
     let karma_result = state.job_queue.fetch_relevant_karma(&payload.prompt, "global", 5, &soul_hash).await.unwrap_or_else(|_| aiome_core::traits::KarmaSearchResult::empty());
@@ -241,8 +232,23 @@ pub async fn trigger_agent_chat(
         current_history.push(format!("{}{}", prefix, content));
     }
 
+    // God Mode (Phase 21): Fetch relevant project knowledge
+    let knowledge_result = state.artifact_store.search_artifacts_semantic(
+        &payload.prompt, 
+        Some(aiome_core::traits::ArtifactCategory::Knowledge), 
+        2
+    ).await.unwrap_or_default();
+    let knowledge_str = if knowledge_result.is_empty() {
+        None
+    } else {
+        Some(knowledge_result.iter()
+            .map(|a| format!("--- {} ---\n{}", a.title, a.text_content.as_deref().unwrap_or("（内容なし）")))
+            .collect::<Vec<_>>()
+            .join("\n\n"))
+    };
+
     let ai_name = state.job_queue.get_setting_value("ai_name").await.ok().flatten();
-    let system_instructions = build_system_instructions(&state, &karma_str, summary.as_deref(), ai_name);
+    let system_instructions = build_system_instructions(&state, &karma_str, summary.as_deref(), ai_name, knowledge_str.as_deref());
 
     let mut turn = 0;
     let max_turns = 15;
@@ -298,8 +304,27 @@ pub async fn trigger_agent_chat(
                                 let res = docker::delegator::delegate_docker_worker(&req.agent_yaml, &req.task).await;
                                 
                                 // Stream A-1: Karma Feedback Loop
-                                // Classify error and store karma if needed
-                                let (_weight, k_type, lesson) = docker::karma_bridge::KarmaBridge::distill_karma(&res, 0); // TODO: Track consecutive failures
+                                // 1. Fetch consecutive failures for this agent
+                                let agent_key = req.agent_yaml.clone();
+                                let consecutive = {
+                                    let fails = state.docker_failures.read().await;
+                                    *fails.get(&agent_key).unwrap_or(&0)
+                                };
+
+                                // 2. Classify error and store karma if needed
+                                let (_weight, k_type, lesson) = docker::karma_bridge::KarmaBridge::distill_karma(&res, consecutive);
+                                
+                                // 3. Update failure counter
+                                {
+                                    let mut fails = state.docker_failures.write().await;
+                                    if res.is_success() {
+                                        fails.remove(&agent_key);
+                                    } else {
+                                        let count = fails.entry(agent_key).or_insert(0);
+                                        *count = (*count + 1).min(10); // Cap at 10 to avoid excessive penalties
+                                    }
+                                }
+
                                 if !res.is_success() {
                                     let _ = state.job_queue.store_karma(
                                         "watchtower_chat_job", // Virtual job_id

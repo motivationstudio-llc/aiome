@@ -37,6 +37,9 @@ pub trait LlmProvider: Send + Sync + Debug {
         Ok(Box::pin(s))
     }
 
+    /// 接続テスト
+    async fn test_connection(&self) -> Result<(), AiomeError>;
+
     /// プロバイダー名を取得（デバッグ用）
     fn name(&self) -> &str;
 }
@@ -45,7 +48,12 @@ pub trait LlmProvider: Send + Sync + Debug {
 #[async_trait]
 pub trait EmbeddingProvider: Send + Sync + Debug {
     /// テキストをベクトルに変換
-    async fn embed(&self, text: &str) -> Result<Vec<f32>, AiomeError>;
+    /// is_query: trueの場合は検索クエリ用、falseの場合はドキュメント用として解釈する
+    async fn embed(&self, text: &str, is_query: bool) -> Result<Vec<f32>, AiomeError>;
+    
+    /// 接続テスト
+    async fn test_connection(&self) -> Result<(), AiomeError>;
+
     fn name(&self) -> &str;
 }
 
@@ -189,9 +197,66 @@ impl LlmProvider for OllamaProvider {
         Ok(Box::pin(stream))
     }
 
+    async fn test_connection(&self) -> Result<(), AiomeError> {
+        let url = format!("{}/api/tags", self.host);
+        let resp = self.client.get(&url)
+            .send()
+            .await
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Ollama connection test failed: {}", e) })?;
+
+        if !resp.status().is_success() {
+            return Err(AiomeError::Infrastructure { reason: format!("Ollama connection error: {}", resp.status()) });
+        }
+        Ok(())
+    }
+
     fn name(&self) -> &str {
         "Ollama"
     }
+}
+
+#[async_trait]
+impl EmbeddingProvider for OllamaProvider {
+    async fn embed(&self, text: &str, _is_query: bool) -> Result<Vec<f32>, AiomeError> {
+        let url = format!("{}/api/embeddings", self.host);
+        let payload = serde_json::json!({
+            "model": self.model,
+            "prompt": text
+        });
+
+        let resp = self.client.post(&url)
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Ollama embedding request failed: {}", e) })?;
+
+        if !resp.status().is_success() {
+            return Err(AiomeError::Infrastructure { reason: format!("Ollama embedding error: {}", resp.status()) });
+        }
+
+        let body: serde_json::Value = resp.json().await
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Ollama embedding parse failed: {}", e) })?;
+
+        let embedding = body["embedding"].as_array()
+            .ok_or_else(|| AiomeError::Infrastructure { reason: "Ollama embedding missing in response".into() })?
+            .iter()
+            .map(|v| v.as_f64().unwrap_or(0.0) as f32)
+            .collect();
+
+        Ok(embedding)
+    }
+
+    async fn test_connection(&self) -> Result<(), AiomeError> {
+        let url = format!("{}/api/tags", self.host);
+        let resp = self.client.get(&url).send().await
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Ollama embed connection test failed: {}", e) })?;
+        if !resp.status().is_success() {
+            return Err(AiomeError::Infrastructure { reason: "Ollama embed connection error".into() });
+        }
+        Ok(())
+    }
+
+    fn name(&self) -> &str { "Ollama(Embed)" }
 }
 
 /// Abyss Vault (Key Proxy) 経由の Gemini プロバイダー (DEPRECATED: Direct GeminiProvider推奨)
@@ -289,6 +354,17 @@ impl LlmProvider for AbyssVaultProvider {
         Ok(Box::pin(stream))
     }
 
+    async fn test_connection(&self) -> Result<(), AiomeError> {
+        // Vault proxy connection test
+        let url = format!("{}/api/v1/health", self.proxy_url);
+        let resp = self.client.get(&url).send().await
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("VaultProxy connection failed: {}", e) })?;
+        if !resp.status().is_success() {
+            return Err(AiomeError::Infrastructure { reason: "VaultProxy connection error".into() });
+        }
+        Ok(())
+    }
+
     fn name(&self) -> &str {
         "AbyssVault(Gemini)"
     }
@@ -344,7 +420,130 @@ impl LlmProvider for GeminiProvider {
         Ok(body["candidates"][0]["content"]["parts"][0]["text"].as_str().unwrap_or("").to_string())
     }
 
+    async fn stream_complete(
+        &self,
+        prompt: &str,
+        system: Option<&str>
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<String, AiomeError>> + Send>>, AiomeError> {
+        let url = format!(
+            "https://generativelanguage.googleapis.com/v1beta/models/{}:streamGenerateContent?alt=sse&key={}",
+            self.model, self.api_key
+        );
+
+        let payload = serde_json::json!({
+            "contents": [{
+                "parts": [{ "text": prompt }]
+            }],
+            "system_instruction": system.map(|s| {
+                serde_json::json!({ "parts": [{ "text": s }] })
+            })
+        });
+
+        let mut resp = self.client.post(&url)
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Gemini stream request failed: {}", e) })?;
+
+        if !resp.status().is_success() {
+            let err_text = resp.text().await.unwrap_or_default();
+            return Err(AiomeError::Infrastructure { reason: format!("Gemini stream error: {}", err_text) });
+        }
+
+        let stream = async_stream::stream! {
+            let mut buffer = String::new();
+            while let Ok(Some(chunk)) = resp.chunk().await {
+                if let Ok(text) = String::from_utf8(chunk.to_vec()) {
+                    buffer.push_str(&text);
+                    while let Some(idx) = buffer.find("data: ") {
+                        let total_len;
+                        let json_str_opt = {
+                            let remainder = &buffer[idx + 6..];
+                            if let Some(end_idx) = remainder.find("\n\n") {
+                                total_len = Some(idx + 6 + end_idx + 2);
+                                Some(remainder[..end_idx].to_string())
+                            } else {
+                                total_len = None;
+                                None
+                            }
+                        };
+
+                        if let (Some(t_len), Some(json_str)) = (total_len, json_str_opt) {
+                            buffer = buffer[t_len..].to_string();
+                            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&json_str) {
+                                if let Some(content) = json["candidates"][0]["content"]["parts"][0]["text"].as_str() {
+                                    yield Ok(content.to_string());
+                                }
+                            }
+                        } else {
+                            break;
+                        }
+                    }
+                }
+            }
+        };
+
+        Ok(Box::pin(stream))
+    }
+
+    async fn test_connection(&self) -> Result<(), AiomeError> {
+        self.complete("ping", None).await?;
+        Ok(())
+    }
+
     fn name(&self) -> &str { "Gemini" }
+}
+
+#[async_trait]
+impl EmbeddingProvider for GeminiProvider {
+    async fn embed(&self, text: &str, _is_query: bool) -> Result<Vec<f32>, AiomeError> {
+        let embedding_model = if self.model.contains("embed") {
+            self.model.clone()
+        } else {
+            "gemini-embedding-001".to_string() // Fallback to standard embedding model
+        };
+
+        let url = format!(
+            "https://generativelanguage.googleapis.com/v1beta/models/{}:embedContent?key={}",
+            embedding_model, self.api_key
+        );
+
+        let payload = serde_json::json!({
+            "model": format!("models/{}", embedding_model),
+            "content": {
+                "parts": [{ "text": text }]
+            }
+        });
+
+        let resp = self.client.post(&url)
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Gemini embedding request failed: {}", e) })?;
+
+        if !resp.status().is_success() {
+            let err_text = resp.text().await.unwrap_or_default();
+            return Err(AiomeError::Infrastructure { reason: format!("Gemini embedding error: {}", err_text) });
+        }
+
+        let body: serde_json::Value = resp.json().await
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Gemini embedding parse failed: {}", e) })?;
+
+        let embedding = body["embedding"]["values"].as_array()
+            .ok_or_else(|| AiomeError::Infrastructure { reason: "Gemini embedding missing in response".into() })?
+            .iter()
+            .map(|v| v.as_f64().unwrap_or(0.0) as f32)
+            .collect();
+
+        Ok(embedding)
+    }
+
+    async fn test_connection(&self) -> Result<(), AiomeError> {
+        self.embed("ping", false).await?;
+        Ok(())
+    }
+
+    fn name(&self) -> &str { "Gemini(Embed)" }
 }
 
 /// OpenAI Chat Completions Provider
@@ -396,6 +595,80 @@ impl LlmProvider for OpenAiProvider {
         Ok(body["choices"][0]["message"]["content"].as_str().unwrap_or("").to_string())
     }
 
+    async fn stream_complete(
+        &self,
+        prompt: &str,
+        system: Option<&str>
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<String, AiomeError>> + Send>>, AiomeError> {
+        let url = "https://api.openai.com/v1/chat/completions";
+        let mut messages = Vec::new();
+
+        if let Some(sys) = system {
+            messages.push(serde_json::json!({ "role": "system", "content": sys }));
+        }
+        messages.push(serde_json::json!({ "role": "user", "content": prompt }));
+
+        let payload = serde_json::json!({
+            "model": self.model,
+            "messages": messages,
+            "stream": true
+        });
+
+        let mut resp = self.client.post(url)
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("OpenAI stream request failed: {}", e) })?;
+
+        if !resp.status().is_success() {
+            let err_text = resp.text().await.unwrap_or_default();
+            return Err(AiomeError::Infrastructure { reason: format!("OpenAI stream error: {}", err_text) });
+        }
+
+        let stream = async_stream::stream! {
+            let mut buffer = String::new();
+            while let Ok(Some(chunk)) = resp.chunk().await {
+                if let Ok(text) = String::from_utf8(chunk.to_vec()) {
+                    buffer.push_str(&text);
+                    while let Some(idx) = buffer.find("data: ") {
+                        let total_len;
+                        let line_opt = {
+                            let remainder = &buffer[idx + 6..];
+                            if let Some(end_idx) = remainder.find('\n') {
+                                total_len = Some(idx + 6 + end_idx + 1);
+                                Some(remainder[..end_idx].trim().to_string())
+                            } else {
+                                total_len = None;
+                                None
+                            }
+                        };
+
+                        if let (Some(t_len), Some(line)) = (total_len, line_opt) {
+                            buffer = buffer[t_len..].to_string();
+                            if line == "[DONE]" { break; }
+
+                            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&line) {
+                                if let Some(content) = json["choices"][0]["delta"]["content"].as_str() {
+                                    yield Ok(content.to_string());
+                                }
+                            }
+                        } else {
+                            break;
+                        }
+                    }
+                }
+            }
+        };
+
+        Ok(Box::pin(stream))
+    }
+
+    async fn test_connection(&self) -> Result<(), AiomeError> {
+        self.complete("ping", None).await?;
+        Ok(())
+    }
+
     fn name(&self) -> &str { "OpenAI" }
 }
 
@@ -444,6 +717,77 @@ impl LlmProvider for ClaudeProvider {
             .map_err(|e| AiomeError::Infrastructure { reason: format!("Claude parse failed: {}", e) })?;
 
         Ok(body["content"][0]["text"].as_str().unwrap_or("").to_string())
+    }
+
+    async fn stream_complete(
+        &self,
+        prompt: &str,
+        system: Option<&str>
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<String, AiomeError>> + Send>>, AiomeError> {
+        let url = "https://api.anthropic.com/v1/messages";
+
+        let payload = serde_json::json!({
+            "model": self.model,
+            "max_tokens": 4096,
+            "system": system,
+            "messages": [
+                { "role": "user", "content": prompt }
+            ],
+            "stream": true
+        });
+
+        let mut resp = self.client.post(url)
+            .header("x-api-key", &self.api_key)
+            .header("anthropic-version", "2023-06-01")
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Claude stream request failed: {}", e) })?;
+
+        if !resp.status().is_success() {
+            let err_text = resp.text().await.unwrap_or_default();
+            return Err(AiomeError::Infrastructure { reason: format!("Claude stream error: {}", err_text) });
+        }
+
+        let stream = async_stream::stream! {
+            let mut buffer = String::new();
+            while let Ok(Some(chunk)) = resp.chunk().await {
+                if let Ok(text) = String::from_utf8(chunk.to_vec()) {
+                    buffer.push_str(&text);
+                    while let Some(idx) = buffer.find("data: ") {
+                        let total_len;
+                        let line_opt = {
+                            let remainder = &buffer[idx + 6..];
+                            if let Some(end_idx) = remainder.find('\n') {
+                                total_len = Some(idx + 6 + end_idx + 1);
+                                Some(remainder[..end_idx].trim().to_string())
+                            } else {
+                                total_len = None;
+                                None
+                            }
+                        };
+
+                        if let (Some(t_len), Some(line)) = (total_len, line_opt) {
+                            buffer = buffer[t_len..].to_string();
+                            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&line) {
+                                if let Some(content) = json["delta"]["text"].as_str() {
+                                    yield Ok(content.to_string());
+                                }
+                            }
+                        } else {
+                            break;
+                        }
+                    }
+                }
+            }
+        };
+
+        Ok(Box::pin(stream))
+    }
+
+    async fn test_connection(&self) -> Result<(), AiomeError> {
+        self.complete("ping", None).await?;
+        Ok(())
     }
 
     fn name(&self) -> &str { "Claude" }
@@ -498,7 +842,165 @@ impl LlmProvider for LmStudioProvider {
         Ok(body["choices"][0]["message"]["content"].as_str().unwrap_or("").to_string())
     }
 
+    async fn stream_complete(
+        &self,
+        prompt: &str,
+        system: Option<&str>
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<String, AiomeError>> + Send>>, AiomeError> {
+        let url = format!("{}/v1/chat/completions", self.host.trim_end_matches('/'));
+        let mut messages = Vec::new();
+
+        if let Some(sys) = system {
+            messages.push(serde_json::json!({ "role": "system", "content": sys }));
+        }
+        messages.push(serde_json::json!({ "role": "user", "content": prompt }));
+
+        let payload = serde_json::json!({
+            "model": self.model,
+            "messages": messages,
+            "temperature": 0.7,
+            "stream": true
+        });
+
+        let mut resp = self.client.post(&url)
+            .header("Authorization", "Bearer lm-studio")
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("LM Studio stream request failed: {}", e) })?;
+
+        if !resp.status().is_success() {
+            let err_text = resp.text().await.unwrap_or_default();
+            return Err(AiomeError::Infrastructure { reason: format!("LM Studio stream error: {}", err_text) });
+        }
+
+        let stream = async_stream::stream! {
+            let mut buffer = String::new();
+            while let Ok(Some(chunk)) = resp.chunk().await {
+                if let Ok(text) = String::from_utf8(chunk.to_vec()) {
+                    buffer.push_str(&text);
+                    while let Some(idx) = buffer.find("data: ") {
+                        let total_len;
+                        let line_opt = {
+                            let remainder = &buffer[idx + 6..];
+                            if let Some(end_idx) = remainder.find('\n') {
+                                total_len = Some(idx + 6 + end_idx + 1);
+                                Some(remainder[..end_idx].trim().to_string())
+                            } else {
+                                total_len = None;
+                                None
+                            }
+                        };
+
+                        if let (Some(t_len), Some(line)) = (total_len, line_opt) {
+                            buffer = buffer[t_len..].to_string();
+                            if line == "[DONE]" { break; }
+
+                            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&line) {
+                                if let Some(content) = json["choices"][0]["delta"]["content"].as_str() {
+                                    yield Ok(content.to_string());
+                                }
+                            }
+                        } else {
+                            break;
+                        }
+                    }
+                }
+            }
+        };
+
+        Ok(Box::pin(stream))
+    }
+
+    async fn test_connection(&self) -> Result<(), AiomeError> {
+        self.complete("ping", None).await?;
+        Ok(())
+    }
+
     fn name(&self) -> &str { "LMStudio" }
+}
+
+/// Ruri-v3 ローカル Embedding プロバイダー
+/// Python サイドカー (tools/ruri-embed-server) 経由で ruri-v3-310m を利用
+#[derive(Debug, Clone)]
+pub struct RuriProvider {
+    client: reqwest::Client,
+    base_url: String,
+}
+
+impl RuriProvider {
+    pub fn new(client: reqwest::Client, base_url: String) -> Self {
+        Self { client, base_url }
+    }
+}
+
+#[async_trait]
+impl EmbeddingProvider for RuriProvider {
+    async fn embed(&self, text: &str, is_query: bool) -> Result<Vec<f32>, AiomeError> {
+        if text.trim().is_empty() {
+            return Err(AiomeError::Infrastructure {
+                reason: "Cannot generate embedding for empty text".into()
+            });
+        }
+
+        let url = format!("{}/embed", self.base_url);
+        let mode = if is_query { "query" } else { "document" };
+        let payload = serde_json::json!({
+            "text": text,
+            "mode": mode
+        });
+
+        let resp = self.client.post(&url)
+            .timeout(std::time::Duration::from_secs(30))
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e| {
+                if e.is_timeout() {
+                    AiomeError::Infrastructure {
+                        reason: format!("Ruri embedding timed out after 30s ({})", self.base_url)
+                    }
+                } else {
+                    AiomeError::Infrastructure {
+                        reason: format!("Ruri embedding request failed (is ruri-embed-server running on {}?): {}", self.base_url, e)
+                    }
+                }
+            })?;
+
+        if !resp.status().is_success() {
+            let err_text = resp.text().await.unwrap_or_default();
+            return Err(AiomeError::Infrastructure {
+                reason: format!("Ruri embedding error: {}", err_text)
+            });
+        }
+
+        let body: serde_json::Value = resp.json().await
+            .map_err(|e| AiomeError::Infrastructure {
+                reason: format!("Ruri embedding parse failed: {}", e)
+            })?;
+
+        let embedding = body["embedding"].as_array()
+            .ok_or_else(|| AiomeError::Infrastructure {
+                reason: "Ruri embedding missing in response".into()
+            })?
+            .iter()
+            .map(|v| v.as_f64().unwrap_or(0.0) as f32)
+            .collect();
+
+        Ok(embedding)
+    }
+
+    async fn test_connection(&self) -> Result<(), AiomeError> {
+        let url = format!("{}/health", self.base_url);
+        let resp = self.client.get(&url).send().await
+            .map_err(|e| AiomeError::Infrastructure { reason: format!("Ruri connection failed: {}", e) })?;
+        if !resp.status().is_success() {
+            return Err(AiomeError::Infrastructure { reason: "Ruri connection error".into() });
+        }
+        Ok(())
+    }
+
+    fn name(&self) -> &str { "Ruri-v3(Embed)" }
 }
 
 #[cfg(test)]
@@ -512,10 +1014,10 @@ mod tests {
         let client = reqwest::Client::new();
         
         let ollama = OllamaProvider::new("http://localhost:11434".to_string(), "llama3".to_string());
-        assert_eq!(ollama.name(), "Ollama");
+        assert_eq!(LlmProvider::name(&ollama), "Ollama");
         
         let gemini = GeminiProvider::new(client.clone(), "key".to_string(), "gemini".to_string());
-        assert_eq!(gemini.name(), "Gemini");
+        assert_eq!(LlmProvider::name(&gemini), "Gemini");
 
         let openai = OpenAiProvider::new(client.clone(), "key".to_string(), "gpt-4".to_string());
         assert_eq!(openai.name(), "OpenAI");

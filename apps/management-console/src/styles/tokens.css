@@ -19,6 +19,8 @@
     --accent-rose-rgb: 255, 77, 148;
     --accent-emerald: #10b981;
     --accent-amber: #f59e0b;
+    --accent-fuchsia: #d946ef;
+    --accent-fuchsia-rgb: 217, 70, 239;
 
     /* Glass Variants */
     --accent-cyan-glass: rgba(0, 242, 255, 0.08);

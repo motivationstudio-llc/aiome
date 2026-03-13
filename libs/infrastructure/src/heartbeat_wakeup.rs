@@ -79,8 +79,11 @@ impl HeartbeatWakeupService {
                 continue;
             }
             // Skip markdown header lines (# followed by space or EOL, ## etc)
-            if trimmed.starts_with('#') && (trimmed.len() == 1 || trimmed.chars().nth(1).unwrap().is_whitespace()) {
-                continue;
+            if trimmed.starts_with('#') {
+                let after_hash = &trimmed[1..];
+                if after_hash.is_empty() || after_hash.chars().next().map(|c| c.is_whitespace()).unwrap_or(false) {
+                    continue;
+                }
             }
             // Skip empty markdown list items like "- [ ]" or "* [ ]" or just "- "
             if (trimmed.starts_with("- [ ]") || trimmed.starts_with("* [ ]") || trimmed.starts_with("+ [ ]")) && trimmed.len() <= 5 {

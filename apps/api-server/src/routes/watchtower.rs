@@ -17,6 +17,7 @@ use crate::routes::agent::{AgentChatRequest};
 pub async fn ws_handler(
     ws: WebSocketUpgrade,
     State(state): State<AppState>,
+    _auth: crate::auth::Authenticated,
 ) -> impl IntoResponse {
     ws.on_upgrade(move |socket| handle_socket(socket, state))
 }
@@ -109,7 +110,7 @@ async fn handle_chat_command(state: AppState, payload: AgentChatRequest) -> anyh
     let karma_str = "Watchtower context active.";
 
     let ai_name = state.job_queue.get_setting_value("ai_name").await.ok().flatten();
-    let system_instructions = build_system_instructions(&state, karma_str, summary, ai_name);
+    let system_instructions = build_system_instructions(&state, karma_str, summary, ai_name, None);
     let full_prompt = format!(
         "{}\nUSER: {}\nAI: ", 
         system_instructions, 

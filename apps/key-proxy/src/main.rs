@@ -6,15 +6,18 @@
 use axum::{
     extract::State,
     http::StatusCode,
-    response::IntoResponse,
-    routing::post,
+    response::{IntoResponse, Response},
+    routing::{get, post},
     Json, Router,
 };
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::env;
+use std::path::PathBuf;
+use tokio::sync::RwLock;
 use tracing::{info, error, warn};
+use chrono::{Utc, Datelike};
 
 
 #[derive(Debug, Deserialize)]
@@ -30,14 +33,29 @@ struct ProxyResponse {
     result: String,
 }
 
-use std::sync::atomic::{AtomicU64, Ordering};
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct QuotaState {
+    total_calls: u64,
+    last_reset_day: u32, // Day of the year
+}
+
+impl Default for QuotaState {
+    fn default() -> Self {
+        Self {
+            total_calls: 0,
+            last_reset_day: Utc::now().ordinal(),
+        }
+    }
+}
+
 use std::collections::HashMap;
 
 #[derive(Clone)]
 struct AppState {
     gemini_key: Arc<SecretString>,
     client: reqwest::Client,
-    total_calls: Arc<AtomicU64>,
+    state: Arc<RwLock<QuotaState>>,
+    persistence_path: PathBuf,
     caller_quotas: Arc<HashMap<String, u64>>,
 }
 
@@ -84,13 +102,28 @@ async fn main() -> anyhow::Result<()> {
     quotas.insert("api-server".to_string(), 1000);
     quotas.insert("aiome-agent".to_string(), 1000);
 
+    let persistence_path = env::var("QUOTA_DB_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("workspace/config/key_proxy_state.json"));
+
+    if let Some(parent) = persistence_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+
+    let quota_state = if persistence_path.exists() {
+        let data = std::fs::read_to_string(&persistence_path).unwrap_or_default();
+        serde_json::from_str(&data).unwrap_or_default()
+    } else {
+        QuotaState::default()
+    };
+
     let state = AppState {
         gemini_key: Arc::new(SecretString::from(gemini_key)),
-        // 3. Ex-Machina: No-Redirect Policy
         client: reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
             .build()?,
-        total_calls: Arc::new(AtomicU64::new(0)),
+        state: Arc::new(RwLock::new(quota_state)),
+        persistence_path,
         caller_quotas: Arc::new(quotas),
     };
 
@@ -98,6 +131,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/llm/complete", post(handle_llm_complete))
         .route("/api/v1/llm/stream", post(handle_llm_stream))
         .route("/api/v1/llm/embed", post(handle_llm_embed))
+        .route("/api/v1/health", get(|| async { StatusCode::OK }))
+        .layer(axum::middleware::from_fn(auth_middleware))
         .with_state(state);
 
     // 4. Level 5: Unix Domain Sockets (Optional/Configurable)
@@ -117,6 +152,26 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+async fn auth_middleware(
+    req: axum::http::Request<axum::body::Body>,
+    next: axum::middleware::Next,
+) -> Result<Response, StatusCode> {
+    let auth_header = req.headers().get(axum::http::header::AUTHORIZATION)
+        .and_then(|h| h.to_str().ok());
+    
+    let expected_secret = env::var("VAULT_SECRET").expect("🚨 VAULT_SECRET must be set for Abyss Vault access!");
+    let expected = format!("Bearer {}", expected_secret);
+
+    if let Some(auth) = auth_header {
+        if auth == expected {
+            return Ok(next.run(req).await);
+        }
+    }
+    
+    warn!("⛔ [KeyProxy] Unauthorized access attempt.");
+    Err(StatusCode::UNAUTHORIZED)
+}
+
 async fn handle_llm_complete(
     State(state): State<AppState>,
     Json(payload): Json<ProxyRequest>,
@@ -124,20 +179,14 @@ async fn handle_llm_complete(
     info!("📩 [KeyProxy] Request from caller: {}", payload.caller_id);
 
     // 8. Zero-Trust: Caller & Quota Check
-    if !state.caller_quotas.contains_key(&payload.caller_id) {
-        warn!("🚫 [KeyProxy] Unknown caller: {}", payload.caller_id);
-        return (StatusCode::FORBIDDEN, "Unknown caller").into_response();
-    }
-    
-    let total = state.total_calls.fetch_add(1, Ordering::SeqCst);
-    if total > 5000 { // Global Hard Limit
-        error!("🛑 [KeyProxy] Global quota exceeded!");
-        return (StatusCode::TOO_MANY_REQUESTS, "Global quota exceeded").into_response();
+    if let Err(status) = check_and_increment_quota(&state, &payload.caller_id).await {
+        return status.into_response();
     }
 
     // 5. SSRF Defense: Hardcoded Endpoints
+    let gemini_model = env::var("GEMINI_MODEL").unwrap_or_else(|_| "gemini-2.0-flash".to_string());
     let url = match payload.endpoint.as_str() {
-        "gemini" => "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent",
+        "gemini" => format!("https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent", gemini_model),
         _ => return (StatusCode::BAD_REQUEST, "Invalid endpoint").into_response(),
     };
 
@@ -207,13 +256,13 @@ async fn handle_llm_embed(
 ) -> impl IntoResponse {
     info!("🧬 [KeyProxy] Embedding request from caller: {}", payload.caller_id);
 
-    if !state.caller_quotas.contains_key(&payload.caller_id) {
-        return (StatusCode::FORBIDDEN, "Unknown caller").into_response();
+    if let Err(status) = check_and_increment_quota(&state, &payload.caller_id).await {
+        return status.into_response();
     }
-    state.total_calls.fetch_add(1, Ordering::SeqCst);
 
+    let embed_model = env::var("GEMINI_EMBED_MODEL").unwrap_or_else(|_| "text-embedding-004".to_string());
     let url = match payload.endpoint.as_str() {
-        "gemini-embed" => "https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent",
+        "gemini-embed" => format!("https://generativelanguage.googleapis.com/v1beta/models/{}:embedContent", embed_model),
         _ => return (StatusCode::BAD_REQUEST, "Invalid endpoint").into_response(),
     };
 
@@ -259,13 +308,13 @@ async fn handle_llm_stream(
 ) -> impl IntoResponse {
     info!("🌊 [KeyProxy] Streaming request from caller: {}", payload.caller_id);
 
-    if !state.caller_quotas.contains_key(&payload.caller_id) {
-        return (StatusCode::FORBIDDEN, "Unknown caller").into_response();
+    if let Err(status) = check_and_increment_quota(&state, &payload.caller_id).await {
+        return status.into_response();
     }
-    state.total_calls.fetch_add(1, Ordering::SeqCst);
 
+    let gemini_model = env::var("GEMINI_MODEL").unwrap_or_else(|_| "gemini-2.0-flash".to_string());
     let url = match payload.endpoint.as_str() {
-        "gemini" => "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:streamGenerateContent?alt=sse",
+        "gemini" => format!("https://generativelanguage.googleapis.com/v1beta/models/{}:streamGenerateContent?alt=sse", gemini_model),
         _ => return (StatusCode::BAD_REQUEST, "Invalid endpoint").into_response(),
     };
 
@@ -313,4 +362,40 @@ async fn handle_llm_stream(
         }
         Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, "Upstream Provider Error").into_response(),
     }
+}
+
+async fn check_and_increment_quota(state: &AppState, caller_id: &str) -> Result<(u64, u32), StatusCode> {
+    if !state.caller_quotas.contains_key(caller_id) {
+        warn!("🚫 [KeyProxy] Unknown caller: {}", caller_id);
+        return Err(StatusCode::FORBIDDEN);
+    }
+    
+    let mut q = state.state.write().await;
+    let today = Utc::now().ordinal();
+    if q.last_reset_day != today {
+        info!("🗓️ [KeyProxy] New day detected. Resetting global quota.");
+        q.total_calls = 0;
+        q.last_reset_day = today;
+    }
+    
+    q.total_calls += 1;
+    let total = q.total_calls;
+    
+    if total > 5000 {
+        error!("🛑 [KeyProxy] Global quota exceeded! (Day: {})", q.last_reset_day);
+        return Err(StatusCode::TOO_MANY_REQUESTS);
+    }
+
+    // Occasional save
+    if total % 10 == 0 {
+        let path = state.persistence_path.clone();
+        let state_clone = q.clone();
+        tokio::spawn(async move {
+            if let Ok(data) = serde_json::to_string(&state_clone) {
+                let _ = tokio::fs::write(path, data).await;
+            }
+        });
+    }
+
+    Ok((total, q.last_reset_day))
 }

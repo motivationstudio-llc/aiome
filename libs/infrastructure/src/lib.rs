@@ -37,3 +37,4 @@ pub mod security;
 pub mod publisher;
 pub mod artifact_store;
 pub mod channel_bridge;
+pub mod knowledge_indexer;

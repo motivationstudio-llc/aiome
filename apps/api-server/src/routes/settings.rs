@@ -14,14 +14,14 @@ use url::Url;
 use std::net::{IpAddr, ToSocketAddrs};
 use tracing::{info, error, warn};
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
 pub struct UpdateSettingsRequest {
     pub key: String,
     pub value: String,
     pub category: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
 pub struct TestConnectionRequest {
     pub service: String, // "ollama", "discord", "telegram"
     pub url: String,
@@ -29,12 +29,21 @@ pub struct TestConnectionRequest {
     pub model: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct TestConnectionResponse {
     pub success: bool,
     pub message: String,
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/settings",
+    responses(
+        (status = 200, description = "List all settings", body = [aiome_core::contracts::SystemSetting]),
+        (status = 401, description = "Unauthorized")
+    ),
+    security(("api_key" = []))
+)]
 pub async fn get_settings(
     State(state): State<AppState>,
     _auth: Authenticated,
@@ -54,6 +63,17 @@ pub async fn get_settings(
     }
 }
 
+#[utoipa::path(
+    put,
+    path = "/api/v1/settings",
+    request_body = UpdateSettingsRequest,
+    responses(
+        (status = 200, description = "Setting updated successfully"),
+        (status = 400, description = "Invalid request or unauthorized key"),
+        (status = 401, description = "Unauthorized")
+    ),
+    security(("api_key" = []))
+)]
 pub async fn update_setting(
     State(state): State<AppState>,
     _auth: Authenticated,
@@ -63,10 +83,11 @@ pub async fn update_setting(
     let allowed_keys = [
         "ollama_host", "ollama_model", 
         "llm_provider", "llm_api_key", "llm_model", "lm_studio_host",
+        "bg_llm_provider", "bg_llm_model", "bg_llm_api_key",
         "discord_chat_channel_id", "discord_command_channel_id", "discord_log_channel_id",
         "telegram_chat_id", "watchtower_enabled", 
         "enforce_guardrail", "log_level", "node_id", "samsara_hub_url",
-        "allowed_origins"
+        "allowed_origins", "ai_name", "ai_motto", "ai_vrm_url"
     ];
 
     if !allowed_keys.contains(&payload.key.as_str()) {
@@ -75,7 +96,7 @@ pub async fn update_setting(
     }
 
     // 2. Category validation
-    let allowed_categories = ["llm", "channel", "system", "security", "cors"];
+    let allowed_categories = ["llm", "channel", "system", "security", "cors", "identity"];
     if !allowed_categories.contains(&payload.category.as_str()) {
         return (StatusCode::BAD_REQUEST, "Invalid category").into_response();
     }
@@ -104,6 +125,16 @@ pub async fn update_setting(
     }
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/settings/test",
+    request_body = TestConnectionRequest,
+    responses(
+        (status = 200, description = "Connection test completed", body = TestConnectionResponse),
+        (status = 401, description = "Unauthorized")
+    ),
+    security(("api_key" = []))
+)]
 pub async fn test_connection(
     _state: State<AppState>,
     _auth: Authenticated,
@@ -119,11 +150,26 @@ pub async fn test_connection(
 
     match payload.service.as_str() {
         "ollama" => test_ollama(&payload.url, payload.model.as_deref()).await.into_response(),
+        "gemini" | "openai" | "anthropic" => test_cloud_connection(&payload.service, payload.token.as_deref(), payload.model.as_deref()).await.into_response(),
         _ => Json(TestConnectionResponse {
             success: false,
             message: format!("Service '{}' testing not implemented yet", payload.service),
         }).into_response(),
     }
+}
+
+async fn test_cloud_connection(service: &str, token: Option<&str>, _model: Option<&str>) -> Json<TestConnectionResponse> {
+    if token.is_none() || token.unwrap().is_empty() {
+        return Json(TestConnectionResponse { 
+            success: false, 
+            message: format!("API Key is required for {}", service) 
+        });
+    }
+    // TODO: Implement actual upstream validation for cloud providers
+    Json(TestConnectionResponse { 
+        success: true, 
+        message: format!("{} configuration is valid (Simulated)", service.to_uppercase()) 
+    })
 }
 
 fn validate_safe_url(url_str: &str) -> Result<(), String> {
