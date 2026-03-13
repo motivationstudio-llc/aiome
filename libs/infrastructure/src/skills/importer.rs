@@ -87,7 +87,7 @@ impl SkillImporter {
         }
 
         let parsed: AgencyYaml = serde_yaml::from_str(content).ok()?;
-        
+
         Some(SkillManifest {
             l1: L1Metadata {
                 name: parsed.name.clone(),
@@ -115,21 +115,30 @@ impl SkillImporter {
                 for (path, methods) in paths {
                     if let Some(methods_obj) = methods.as_object() {
                         for (method, details) in methods_obj {
-                            let operation_id = details.get("operationId")
+                            let operation_id = details
+                                .get("operationId")
                                 .and_then(|v| v.as_str())
                                 .unwrap_or(path);
-                            let summary = details.get("summary")
+                            let summary = details
+                                .get("summary")
                                 .and_then(|v| v.as_str())
                                 .unwrap_or("No description");
-                            
+
                             skills.push(SkillManifest {
                                 l1: L1Metadata {
                                     name: operation_id.to_string(),
                                     trigger_description: summary.to_string(),
                                 },
                                 l2: L2Metadata {
-                                    extended_description: format!("Endpoint: {} {}", method.to_uppercase(), path),
-                                    inputs_schema: details.get("parameters").cloned().unwrap_or(serde_json::json!([])),
+                                    extended_description: format!(
+                                        "Endpoint: {} {}",
+                                        method.to_uppercase(),
+                                        path
+                                    ),
+                                    inputs_schema: details
+                                        .get("parameters")
+                                        .cloned()
+                                        .unwrap_or(serde_json::json!([])),
                                     examples: vec![],
                                 },
                                 l3: L3Metadata {

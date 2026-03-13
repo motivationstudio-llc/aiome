@@ -1,25 +1,35 @@
 /*
  * Aiome - The Autonomous AI Operating System
  * Copyright (C) 2026 motivationstudio, LLC
- * 
+ *
  * Licensed under the Elastic License 2.0 (ELv2).
  */
 
-use async_trait::async_trait;
-use aiome_core::traits::{Job, JobStatus};
+use super::try_get_optional_string;
+use super::SqliteJobQueue;
 use aiome_core::error::AiomeError;
+use aiome_core::traits::{Job, JobStatus};
+use async_trait::async_trait;
+use chrono::Utc;
 use sqlx::Row;
 use uuid::Uuid;
-use chrono::Utc;
-use super::SqliteJobQueue;
-use super::try_get_optional_string;
 
 #[async_trait]
 pub trait CoreOps {
-    async fn do_enqueue(&self, category: &str, topic: &str, style: &str, karma_directives: Option<&str>) -> Result<String, AiomeError>;
+    async fn do_enqueue(
+        &self,
+        category: &str,
+        topic: &str,
+        style: &str,
+        karma_directives: Option<&str>,
+    ) -> Result<String, AiomeError>;
     async fn do_fetch_job(&self, job_id: &str) -> Result<Option<Job>, AiomeError>;
     async fn do_dequeue(&self, capable_categories: &[&str]) -> Result<Option<Job>, AiomeError>;
-    async fn do_complete_job(&self, job_id: &str, output_artifacts: Option<&str>) -> Result<(), AiomeError>;
+    async fn do_complete_job(
+        &self,
+        job_id: &str,
+        output_artifacts: Option<&str>,
+    ) -> Result<(), AiomeError>;
     async fn do_fail_job(&self, job_id: &str, reason: &str) -> Result<(), AiomeError>;
     async fn do_reclaim_zombie_jobs(&self, timeout_minutes: i64) -> Result<u64, AiomeError>;
     async fn do_set_creative_rating(&self, job_id: &str, rating: i32) -> Result<(), AiomeError>;
@@ -28,7 +38,10 @@ pub trait CoreOps {
     async fn do_purge_old_jobs(&self, days: i64) -> Result<u64, AiomeError>;
     async fn do_fetch_recent_jobs(&self, limit: i64) -> Result<Vec<Job>, AiomeError>;
     async fn do_get_pending_job_count(&self) -> Result<i64, AiomeError>;
-    async fn do_get_job_count_since(&self, since: chrono::DateTime<chrono::Utc>) -> Result<i64, AiomeError>;
+    async fn do_get_job_count_since(
+        &self,
+        since: chrono::DateTime<chrono::Utc>,
+    ) -> Result<i64, AiomeError>;
     async fn do_fetch_job_retry_count(&self, job_id: &str) -> Result<i64, AiomeError>;
     async fn do_increment_job_retry_count(&self, job_id: &str) -> Result<bool, AiomeError>;
     async fn do_reset_job_retry_count(&self, job_id: &str) -> Result<(), AiomeError>;
@@ -37,7 +50,13 @@ pub trait CoreOps {
 
 #[async_trait]
 impl CoreOps for SqliteJobQueue {
-    async fn do_enqueue(&self, category: &str, topic: &str, style: &str, karma_directives: Option<&str>) -> Result<String, AiomeError> {
+    async fn do_enqueue(
+        &self,
+        category: &str,
+        topic: &str,
+        style: &str,
+        karma_directives: Option<&str>,
+    ) -> Result<String, AiomeError> {
         let id = Uuid::new_v4().to_string();
         let now = Utc::now().to_rfc3339();
         let directives = karma_directives.unwrap_or("{}");
@@ -110,10 +129,19 @@ impl CoreOps for SqliteJobQueue {
     }
 
     async fn do_dequeue(&self, capable_categories: &[&str]) -> Result<Option<Job>, AiomeError> {
-        let mut tx = self.pool.begin().await
-            .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to start transaction: {}", e) })?;
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| AiomeError::Infrastructure {
+                reason: format!("Failed to start transaction: {}", e),
+            })?;
 
-        let placeholders = capable_categories.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+        let placeholders = capable_categories
+            .iter()
+            .map(|_| "?")
+            .collect::<Vec<_>>()
+            .join(", ");
         let query_str = format!(
             "SELECT id, category, topic, style_name, karma_directives, status, started_at, last_heartbeat, tech_karma_extracted, creative_rating, execution_log, error_message, sns_platform, sns_content_id, published_at, output_artifacts FROM jobs WHERE status = ? AND category IN ({}) ORDER BY created_at ASC LIMIT 1",
             placeholders
@@ -123,9 +151,12 @@ impl CoreOps for SqliteJobQueue {
             query = query.bind(*cat);
         }
 
-        let row = query.fetch_optional(&mut *tx)
+        let row = query
+            .fetch_optional(&mut *tx)
             .await
-            .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to fetch pending job: {}", e) })?;
+            .map_err(|e| AiomeError::Infrastructure {
+                reason: format!("Failed to fetch pending job: {}", e),
+            })?;
 
         if let Some(r) = row {
             let id: String = r.get("id");
@@ -152,8 +183,9 @@ impl CoreOps for SqliteJobQueue {
                 .await
                 .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to update job status: {}", e) })?;
 
-            tx.commit().await
-                .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to commit transaction: {}", e) })?;
+            tx.commit().await.map_err(|e| AiomeError::Infrastructure {
+                reason: format!("Failed to commit transaction: {}", e),
+            })?;
 
             Ok(Some(Job {
                 id,
@@ -178,16 +210,24 @@ impl CoreOps for SqliteJobQueue {
         }
     }
 
-    async fn do_complete_job(&self, job_id: &str, output_artifacts: Option<&str>) -> Result<(), AiomeError> {
+    async fn do_complete_job(
+        &self,
+        job_id: &str,
+        output_artifacts: Option<&str>,
+    ) -> Result<(), AiomeError> {
         let now = Utc::now().to_rfc3339();
-        sqlx::query("UPDATE jobs SET status = ?, output_artifacts = ?, updated_at = ? WHERE id = ?")
-            .bind(JobStatus::Completed.to_string())
-            .bind(output_artifacts)
-            .bind(&now)
-            .bind(job_id)
-            .execute(&self.pool)
-            .await
-            .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to complete job {}: {}", job_id, e) })?;
+        sqlx::query(
+            "UPDATE jobs SET status = ?, output_artifacts = ?, updated_at = ? WHERE id = ?",
+        )
+        .bind(JobStatus::Completed.to_string())
+        .bind(output_artifacts)
+        .bind(&now)
+        .bind(job_id)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| AiomeError::Infrastructure {
+            reason: format!("Failed to complete job {}: {}", job_id, e),
+        })?;
         Ok(())
     }
 
@@ -200,7 +240,9 @@ impl CoreOps for SqliteJobQueue {
             .bind(job_id)
             .execute(&self.pool)
             .await
-            .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to fail job {}: {}", job_id, e) })?;
+            .map_err(|e| AiomeError::Infrastructure {
+                reason: format!("Failed to fail job {}: {}", job_id, e),
+            })?;
         Ok(())
     }
 
@@ -239,7 +281,10 @@ impl CoreOps for SqliteJobQueue {
 
         if result.rows_affected() == 0 {
             return Err(AiomeError::Infrastructure {
-                reason: format!("Atomic Guard: Job '{}' is not in Completed/Processing state, rating rejected", job_id),
+                reason: format!(
+                    "Atomic Guard: Job '{}' is not in Completed/Processing state, rating rejected",
+                    job_id
+                ),
             });
         }
         Ok(())
@@ -253,7 +298,9 @@ impl CoreOps for SqliteJobQueue {
             .bind(job_id)
             .execute(&self.pool)
             .await
-            .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to pulse heartbeat for job {}: {}", job_id, e) })?;
+            .map_err(|e| AiomeError::Infrastructure {
+                reason: format!("Failed to pulse heartbeat for job {}: {}", job_id, e),
+            })?;
         Ok(())
     }
 
@@ -265,7 +312,9 @@ impl CoreOps for SqliteJobQueue {
             .bind(job_id)
             .execute(&self.pool)
             .await
-            .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to store execution log for job {}: {}", job_id, e) })?;
+            .map_err(|e| AiomeError::Infrastructure {
+                reason: format!("Failed to store execution log for job {}: {}", job_id, e),
+            })?;
         Ok(())
     }
 
@@ -326,17 +375,24 @@ impl CoreOps for SqliteJobQueue {
             .bind(JobStatus::Pending.to_string())
             .fetch_one(&self.pool)
             .await
-            .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to count pending jobs: {}", e) })?;
+            .map_err(|e| AiomeError::Infrastructure {
+                reason: format!("Failed to count pending jobs: {}", e),
+            })?;
         Ok(row.get("count"))
     }
 
-    async fn do_get_job_count_since(&self, since: chrono::DateTime<chrono::Utc>) -> Result<i64, AiomeError> {
+    async fn do_get_job_count_since(
+        &self,
+        since: chrono::DateTime<chrono::Utc>,
+    ) -> Result<i64, AiomeError> {
         let since_str = since.to_rfc3339();
         let row = sqlx::query("SELECT COUNT(*) as count FROM jobs WHERE created_at >= ?")
             .bind(since_str)
             .fetch_one(&self.pool)
             .await
-            .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to count jobs since: {}", e) })?;
+            .map_err(|e| AiomeError::Infrastructure {
+                reason: format!("Failed to count jobs since: {}", e),
+            })?;
         Ok(row.get("count"))
     }
 
@@ -345,8 +401,10 @@ impl CoreOps for SqliteJobQueue {
             .bind(job_id)
             .fetch_optional(&self.pool)
             .await
-            .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to fetch retry count: {}", e) })?;
-        
+            .map_err(|e| AiomeError::Infrastructure {
+                reason: format!("Failed to fetch retry count: {}", e),
+            })?;
+
         if let Some(r) = row {
             Ok(r.get("retry_count"))
         } else {
@@ -359,23 +417,29 @@ impl CoreOps for SqliteJobQueue {
             .bind(job_id)
             .execute(&self.pool)
             .await
-            .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to reset retry count: {}", e) })?;
+            .map_err(|e| AiomeError::Infrastructure {
+                reason: format!("Failed to reset retry count: {}", e),
+            })?;
         Ok(())
     }
 
     async fn do_increment_job_retry_count(&self, job_id: &str) -> Result<bool, AiomeError> {
-        let row = sqlx::query("UPDATE jobs SET retry_count = retry_count + 1 WHERE id = ? RETURNING retry_count")
-            .bind(job_id)
-            .fetch_one(&self.pool)
-            .await
-            .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to increment job retry count: {}", e) })?;
-            
+        let row = sqlx::query(
+            "UPDATE jobs SET retry_count = retry_count + 1 WHERE id = ? RETURNING retry_count",
+        )
+        .bind(job_id)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| AiomeError::Infrastructure {
+            reason: format!("Failed to increment job retry count: {}", e),
+        })?;
+
         let count: i64 = row.get("retry_count");
         if count >= 3 {
             sqlx::query("UPDATE jobs SET status = 'Failed', error_message = 'Poison Pill Activated: API continually fails.' WHERE id = ?")
                 .bind(job_id)
                 .execute(&self.pool).await.ok();
-            Ok(true) 
+            Ok(true)
         } else {
             Ok(false)
         }
@@ -383,7 +447,7 @@ impl CoreOps for SqliteJobQueue {
 
     async fn do_storage_gc(&self, threshold_gb: f64) -> Result<u64, AiomeError> {
         let threshold_bytes = (threshold_gb * 1024.0 * 1024.0 * 1024.0) as u64;
-        
+
         // 1. Fetch all jobs with artifacts, ordered by ASC (oldest first)
         let rows = sqlx::query("SELECT id, output_artifacts FROM jobs WHERE output_artifacts IS NOT NULL AND status IN ('Completed', 'Failed') ORDER BY created_at ASC")
             .fetch_all(&self.pool)
@@ -419,21 +483,29 @@ impl CoreOps for SqliteJobQueue {
         let mut reduced_so_far = 0;
 
         for (id, paths, size) in job_artifacts {
-            if reduced_so_far >= target_reduction { break; }
+            if reduced_so_far >= target_reduction {
+                break;
+            }
 
             for p in paths {
                 if std::fs::remove_file(&p).is_ok() {
                     deleted_count += 1;
                 }
             }
-            
+
             // Clear artifact list in DB to prevent re-scanning
-            let _ = sqlx::query("UPDATE jobs SET output_artifacts = NULL WHERE id = ?").bind(&id).execute(&self.pool).await;
-            
+            let _ = sqlx::query("UPDATE jobs SET output_artifacts = NULL WHERE id = ?")
+                .bind(&id)
+                .execute(&self.pool)
+                .await;
+
             reduced_so_far += size;
         }
 
-        tracing::info!("♻️ [StorageGC] Cleanup complete. Removed {} artifact files.", deleted_count);
+        tracing::info!(
+            "♻️ [StorageGC] Cleanup complete. Removed {} artifact files.",
+            deleted_count
+        );
         Ok(deleted_count)
     }
 }

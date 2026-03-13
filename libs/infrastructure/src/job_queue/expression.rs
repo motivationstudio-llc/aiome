@@ -3,11 +3,11 @@
  * Copyright (C) 2026 motivationstudio, LLC
  */
 
-use async_trait::async_trait;
+use super::SqliteJobQueue;
 use aiome_core::error::AiomeError;
 use aiome_core::expression::Expression;
 use aiome_core::traits::JobQueue;
-use super::SqliteJobQueue;
+use async_trait::async_trait;
 use sqlx::Row;
 
 #[async_trait]
@@ -21,8 +21,8 @@ pub trait ExpressionOps {
 #[async_trait]
 impl ExpressionOps for SqliteJobQueue {
     async fn store_expression(&self, expression: &Expression) -> Result<(), AiomeError> {
-        let karma_refs_json = serde_json::to_string(&expression.karma_refs)
-            .unwrap_or_else(|_| "[]".to_string());
+        let karma_refs_json =
+            serde_json::to_string(&expression.karma_refs).unwrap_or_else(|_| "[]".to_string());
 
         sqlx::query(
             "INSERT INTO expressions (id, content, emotion, karma_refs, created_at) VALUES (?, ?, ?, ?, ?)"
@@ -66,10 +66,13 @@ impl ExpressionOps for SqliteJobQueue {
     }
 
     async fn get_auto_expression_enabled(&self) -> Result<bool, AiomeError> {
-        let row = sqlx::query("SELECT value FROM system_settings WHERE key = 'auto_expression_enabled'")
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to fetch setting: {}", e) })?;
+        let row =
+            sqlx::query("SELECT value FROM system_settings WHERE key = 'auto_expression_enabled'")
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| AiomeError::Infrastructure {
+                    reason: format!("Failed to fetch setting: {}", e),
+                })?;
 
         if let Some(r) = row {
             let val: String = r.get("value");

@@ -1,16 +1,16 @@
+use super::types::*;
+use crate::AppState;
 use axum::{
-    extract::{State, Query},
+    extract::{Query, State},
+    http::StatusCode,
     response::sse::{Event, Sse},
     Json,
-    http::StatusCode,
 };
 use futures_util::stream::Stream;
 use std::collections::HashMap;
 use tokio::sync::mpsc;
-use uuid::Uuid;
-use crate::AppState;
-use super::types::*;
 use tracing::{info, warn};
+use uuid::Uuid;
 
 pub async fn sse_handler(
     State(state): State<AppState>,
@@ -28,9 +28,7 @@ pub async fn sse_handler(
     // MCP Spec: The server MUST include a `uri` query parameter in the `endpoint` event's data.
     // Since we are nesting under /api/v1/mcp, the full path is /api/v1/mcp/messages
     let endpoint_url = format!("/api/v1/mcp/messages?sessionId={}", session_id);
-    let initial_event = Event::default()
-        .event("endpoint")
-        .data(endpoint_url);
+    let initial_event = Event::default().event("endpoint").data(endpoint_url);
 
     let stream = async_stream::stream! {
         yield Ok(initial_event);
@@ -55,7 +53,7 @@ pub async fn message_handler(
     Json(request): Json<JsonRpcRequest>,
 ) -> Result<StatusCode, (StatusCode, String)> {
     let session_id = query.session_id;
-    
+
     let tx = {
         let sessions = state.mcp_sessions.read().await;
         sessions.get(&session_id).cloned()
@@ -68,7 +66,10 @@ pub async fn message_handler(
         let response = handle_mcp_request(request, &state).await;
         if let Ok(json_resp) = serde_json::to_string(&response) {
             if let Err(e) = tx.send(json_resp) {
-                warn!("⚠️ [MCP] Failed to send response back to client (session {}): {}", session_id, e);
+                warn!(
+                    "⚠️ [MCP] Failed to send response back to client (session {}): {}",
+                    session_id, e
+                );
             }
         }
     });
@@ -78,25 +79,23 @@ pub async fn message_handler(
 
 async fn handle_mcp_request(req: JsonRpcRequest, state: &AppState) -> JsonRpcResponse {
     let id = req.id.unwrap_or(serde_json::Value::Null);
-    
+
     match req.method.as_str() {
-        "initialize" => {
-            JsonRpcResponse {
-                jsonrpc: "2.0".into(),
-                id,
-                result: Some(serde_json::json!({
-                    "protocolVersion": "2024-11-05",
-                    "capabilities": {
-                        "tools": {}
-                    },
-                    "serverInfo": {
-                        "name": "Aiome MCP Server",
-                        "version": "0.1.0"
-                    }
-                })),
-                error: None,
-            }
-        }
+        "initialize" => JsonRpcResponse {
+            jsonrpc: "2.0".into(),
+            id,
+            result: Some(serde_json::json!({
+                "protocolVersion": "2024-11-05",
+                "capabilities": {
+                    "tools": {}
+                },
+                "serverInfo": {
+                    "name": "Aiome MCP Server",
+                    "version": "0.1.0"
+                }
+            })),
+            error: None,
+        },
         "notifications/initialized" => {
             info!("✅ [MCP] Client initialization confirmed");
             JsonRpcResponse {
@@ -132,7 +131,10 @@ async fn handle_mcp_request(req: JsonRpcRequest, state: &AppState) -> JsonRpcRes
         "tools/call" => {
             let params = req.params.unwrap_or(serde_json::Value::Null);
             let name = params.get("name").and_then(|v| v.as_str()).unwrap_or("");
-            let arguments = params.get("arguments").cloned().unwrap_or(serde_json::json!({}));
+            let arguments = params
+                .get("arguments")
+                .cloned()
+                .unwrap_or(serde_json::json!({}));
 
             if !is_skill_whitelisted(name) {
                 return JsonRpcResponse {
@@ -141,7 +143,10 @@ async fn handle_mcp_request(req: JsonRpcRequest, state: &AppState) -> JsonRpcRes
                     result: None,
                     error: Some(JsonRpcError {
                         code: -32601,
-                        message: format!("Method not found or access denied (RBAC Whitelist): {}", name),
+                        message: format!(
+                            "Method not found or access denied (RBAC Whitelist): {}",
+                            name
+                        ),
                         data: None,
                     }),
                 };
@@ -149,15 +154,19 @@ async fn handle_mcp_request(req: JsonRpcRequest, state: &AppState) -> JsonRpcRes
 
             info!("🛠️ [MCP] Tool invocation: {}", name);
             // Re-use logic from skill_handler
-            let result = crate::skill_handler::execute_wasm_skill(name, &arguments.to_string(), state).await;
-            
+            let result =
+                crate::skill_handler::execute_wasm_skill(name, &arguments.to_string(), state).await;
+
             JsonRpcResponse {
                 jsonrpc: "2.0".into(),
                 id,
-                result: Some(serde_json::to_value(CallToolResult {
-                    content: vec![McpContent::Text { text: result }],
-                    is_error: false,
-                }).unwrap_or_default()),
+                result: Some(
+                    serde_json::to_value(CallToolResult {
+                        content: vec![McpContent::Text { text: result }],
+                        is_error: false,
+                    })
+                    .unwrap_or_default(),
+                ),
                 error: None,
             }
         }

@@ -1,17 +1,17 @@
 /*
  * Aiome - The Autonomous AI Operating System
  * Copyright (C) 2026 motivationstudio, LLC
- * 
+ *
  * Licensed under the Elastic License 2.0 (ELv2).
  */
 
-use async_trait::async_trait;
-use aiome_core::error::AiomeError;
-use aiome_core::contracts::{ImmuneRule, ArenaMatch};
-use aiome_core::traits::JobQueue;
-use sqlx::Row;
-use super::SqliteJobQueue;
 use super::try_get_optional_string;
+use super::SqliteJobQueue;
+use aiome_core::contracts::{ArenaMatch, ImmuneRule};
+use aiome_core::error::AiomeError;
+use aiome_core::traits::JobQueue;
+use async_trait::async_trait;
+use sqlx::Row;
 
 #[async_trait]
 pub trait GuardrailOps {
@@ -51,7 +51,9 @@ impl GuardrailOps for SqliteJobQueue {
             .bind(rule_id)
             .execute(&self.pool)
             .await
-            .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to delete immune rule: {}", e) })?;
+            .map_err(|e| AiomeError::Infrastructure {
+                reason: format!("Failed to delete immune rule: {}", e),
+            })?;
         Ok(())
     }
 

@@ -3,8 +3,8 @@
  * Copyright (C) 2026 motivationstudio, LLC
  */
 
-use serde::{Deserialize, Serialize};
 use base64::Engine;
+use serde::{Deserialize, Serialize};
 
 /// Biome プロトコルにおける基本メッセージ
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -48,50 +48,77 @@ pub enum DialogueStatus {
     Blocked,
 }
 
+/// 対話の蒸留 (要約と相互署名)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DialogueDistillation {
+    pub topic_id: String,
+    /// LLM によって生成された対話の要約
+    pub summary: String,
+    /// 参加者の公開鍵リスト
+    pub participants: Vec<String>,
+    /// 参加者全員の署名 (Base64)
+    pub signatures: Vec<String>,
+    pub timestamp: String,
+}
+
 impl BiomeMessage {
     /// メッセージ本文を指定された共有鍵で暗号化する
-    pub fn encrypt(&mut self, key: &[u8; 32]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce, aead::{Aead, KeyInit}};
-        use rand::{RngCore, thread_rng};
-        
+    pub fn encrypt(
+        &mut self,
+        key: &[u8; 32],
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        use chacha20poly1305::{
+            aead::{Aead, KeyInit},
+            ChaCha20Poly1305, Key, Nonce,
+        };
+        use rand::{thread_rng, RngCore};
+
         let cipher = ChaCha20Poly1305::new(Key::from_slice(key));
         let mut nonce_bytes = [0u8; 12];
         thread_rng().fill_bytes(&mut nonce_bytes);
         let nonce = Nonce::from_slice(&nonce_bytes);
-        
-        let ciphertext = cipher.encrypt(nonce, self.content.as_bytes())
+
+        let ciphertext = cipher
+            .encrypt(nonce, self.content.as_bytes())
             .map_err(|e| format!("Encryption failed: {:?}", e))?;
-        
+
         // Prepend nonce to ciphertext
         let mut combined = nonce_bytes.to_vec();
         combined.extend_from_slice(&ciphertext);
-        
+
         self.content = base64::engine::general_purpose::STANDARD.encode(combined);
         self.encryption = "chacha20-poly1305".to_string();
         Ok(())
     }
 
     /// メッセージ本文を指定された共有鍵で復号する
-    pub fn decrypt(&mut self, key: &[u8; 32]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    pub fn decrypt(
+        &mut self,
+        key: &[u8; 32],
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         if self.encryption == "none" {
             return Ok(());
         }
-        
-        use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce, aead::{Aead, KeyInit}};
+
         use base64::Engine;
-        
+        use chacha20poly1305::{
+            aead::{Aead, KeyInit},
+            ChaCha20Poly1305, Key, Nonce,
+        };
+
         let combined = base64::engine::general_purpose::STANDARD.decode(&self.content)?;
         if combined.len() < 12 {
             return Err("Invalid ciphertext: too short for nonce".into());
         }
-        
+
         let (nonce_bytes, ciphertext) = combined.split_at(12);
         let cipher = ChaCha20Poly1305::new(Key::from_slice(key));
         let nonce = Nonce::from_slice(nonce_bytes);
-        
-        let plaintext = cipher.decrypt(nonce, ciphertext)
+
+        let plaintext = cipher
+            .decrypt(nonce, ciphertext)
             .map_err(|e| format!("Decryption failed: {:?}", e))?;
-        
+
         self.content = String::from_utf8(plaintext)?;
         Ok(())
     }
@@ -130,7 +157,9 @@ mod tests {
         let mut unencrypted_msg = msg.clone();
         unencrypted_msg.encryption = "none".to_string();
         unencrypted_msg.content = "Plain text".to_string();
-        unencrypted_msg.decrypt(&key).expect("Bypass should succeed");
+        unencrypted_msg
+            .decrypt(&key)
+            .expect("Bypass should succeed");
         assert_eq!(unencrypted_msg.content, "Plain text");
     }
 }

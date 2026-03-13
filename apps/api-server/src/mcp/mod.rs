@@ -1,13 +1,13 @@
-pub mod server;
-pub mod types;
 pub mod client;
 pub mod discovery;
+pub mod server;
+pub mod types;
 
+use crate::AppState;
 use axum::{
     routing::{get, post},
     Router,
 };
-use crate::AppState;
 
 pub fn router() -> Router<AppState> {
     Router::new()

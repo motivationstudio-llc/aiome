@@ -2,9 +2,9 @@
  * Aiome - The Autonomous AI Operating System
  */
 
-use async_trait::async_trait;
-use aiome_core::llm_provider::LlmProvider;
 use aiome_core::error::AiomeError;
+use aiome_core::llm_provider::LlmProvider;
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug)]
@@ -47,7 +47,7 @@ impl ProxyLlmProvider {
 impl LlmProvider for ProxyLlmProvider {
     async fn complete(&self, prompt: &str, system: Option<&str>) -> Result<String, AiomeError> {
         let url = format!("{}/api/v1/llm/complete", self.proxy_url);
-        
+
         let payload = ProxyRequest {
             caller_id: self.caller_id.clone(),
             prompt: prompt.to_string(),
@@ -55,20 +55,25 @@ impl LlmProvider for ProxyLlmProvider {
             endpoint: self.endpoint_tag.clone(),
         };
 
-        let res = self.client.post(&url)
+        let res = self
+            .client
+            .post(&url)
             .json(&payload)
             .send()
             .await
-            .map_err(|e| AiomeError::Infrastructure { reason: e.to_string() })?;
+            .map_err(|e| AiomeError::Infrastructure {
+                reason: e.to_string(),
+            })?;
 
         if !res.status().is_success() {
-            return Err(AiomeError::Infrastructure { 
-                reason: format!("KeyProxy returned error status: {}", res.status()) 
+            return Err(AiomeError::Infrastructure {
+                reason: format!("KeyProxy returned error status: {}", res.status()),
             });
         }
 
-        let body: ProxyResponse = res.json().await
-            .map_err(|e| AiomeError::Infrastructure { reason: e.to_string() })?;
+        let body: ProxyResponse = res.json().await.map_err(|e| AiomeError::Infrastructure {
+            reason: e.to_string(),
+        })?;
 
         Ok(body.result)
     }
@@ -87,30 +92,37 @@ impl LlmProvider for ProxyLlmProvider {
 impl aiome_core::llm_provider::EmbeddingProvider for ProxyLlmProvider {
     async fn embed(&self, text: &str, _is_query: bool) -> Result<Vec<f32>, AiomeError> {
         let url = format!("{}/api/v1/llm/embed", self.proxy_url);
-        
+
         let payload = ProxyRequest {
             caller_id: self.caller_id.clone(),
             prompt: text.to_string(),
             system: None,
-            endpoint: "gemini-embed".to_string(), 
+            endpoint: "gemini-embed".to_string(),
         };
 
-        let res = self.client.post(&url)
+        let res = self
+            .client
+            .post(&url)
             .json(&payload)
             .send()
             .await
-            .map_err(|e| AiomeError::Infrastructure { reason: e.to_string() })?;
+            .map_err(|e| AiomeError::Infrastructure {
+                reason: e.to_string(),
+            })?;
 
         if !res.status().is_success() {
-            return Err(AiomeError::Infrastructure { 
-                reason: format!("KeyProxy (Embed) error: {}", res.status()) 
+            return Err(AiomeError::Infrastructure {
+                reason: format!("KeyProxy (Embed) error: {}", res.status()),
             });
         }
 
         #[derive(Deserialize)]
-        struct EmbedRes { embedding: Vec<f32> }
-        let body: EmbedRes = res.json().await
-            .map_err(|e| AiomeError::Infrastructure { reason: e.to_string() })?;
+        struct EmbedRes {
+            embedding: Vec<f32>,
+        }
+        let body: EmbedRes = res.json().await.map_err(|e| AiomeError::Infrastructure {
+            reason: e.to_string(),
+        })?;
 
         Ok(body.embedding)
     }

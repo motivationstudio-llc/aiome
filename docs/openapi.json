@@ -106,6 +106,700 @@
         ]
       }
     },
+    "/api/v1/agent/chat": {
+      "post": {
+        "tags": [
+          "crate::routes::agent"
+        ],
+        "operationId": "trigger_agent_chat",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentChatRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Agent reply",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "403": {
+            "description": "Blocked by security guardrails"
+          }
+        },
+        "security": [
+          {
+            "api_key": []
+          }
+        ]
+      }
+    },
+    "/api/v1/artifacts": {
+      "get": {
+        "tags": [
+          "crate::routes::artifacts"
+        ],
+        "operationId": "list_artifacts_handler",
+        "parameters": [
+          {
+            "name": "category",
+            "in": "query",
+            "description": "Filter by category",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "description": "Semantic search query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Limit results",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of artifacts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/artifacts/{id}": {
+      "get": {
+        "tags": [
+          "crate::routes::artifacts"
+        ],
+        "operationId": "get_artifact_handler",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Artifact ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Artifact metadata",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "Artifact not found"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "crate::routes::artifacts"
+        ],
+        "operationId": "delete_artifact_handler",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Artifact ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Artifact deleted"
+          },
+          "500": {
+            "description": "Internal error"
+          }
+        }
+      }
+    },
+    "/api/v1/artifacts/{id}/edges": {
+      "get": {
+        "tags": [
+          "crate::routes::artifacts"
+        ],
+        "operationId": "get_artifact_edges_handler",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Artifact ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Artifact edges (graph)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/artifacts/{id}/files/{filename}": {
+      "get": {
+        "tags": [
+          "crate::routes::artifacts"
+        ],
+        "operationId": "download_artifact_file_handler",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Artifact ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "filename",
+            "in": "path",
+            "description": "File name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "File content stream"
+          },
+          "400": {
+            "description": "Invalid filename"
+          },
+          "404": {
+            "description": "File not found"
+          }
+        }
+      }
+    },
+    "/api/v1/biome/autonomous/start": {
+      "post": {
+        "tags": [
+          "crate::routes::biome"
+        ],
+        "operationId": "autonomous_start",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartAutonomousRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Autonomous dialogue started",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "409": {
+            "description": "Dialogue already running"
+          }
+        }
+      }
+    },
+    "/api/v1/biome/autonomous/status": {
+      "get": {
+        "tags": [
+          "crate::routes::biome"
+        ],
+        "operationId": "autonomous_status",
+        "responses": {
+          "200": {
+            "description": "Current autonomous status",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/biome/autonomous/stop": {
+      "post": {
+        "tags": [
+          "crate::routes::biome"
+        ],
+        "operationId": "autonomous_stop",
+        "responses": {
+          "200": {
+            "description": "Stopping autonomous dialogue",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/biome/messages": {
+      "get": {
+        "tags": [
+          "crate::routes::biome"
+        ],
+        "operationId": "list_messages",
+        "responses": {
+          "200": {
+            "description": "List biome messages",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/biome/send": {
+      "post": {
+        "tags": [
+          "crate::routes::biome"
+        ],
+        "operationId": "send_message",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendBiomeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Message sent/relayed",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/biome/status": {
+      "get": {
+        "tags": [
+          "crate::routes::biome"
+        ],
+        "operationId": "biome_status",
+        "responses": {
+          "200": {
+            "description": "Biome protocol status",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/biome/topics": {
+      "get": {
+        "tags": [
+          "crate::routes::biome"
+        ],
+        "operationId": "list_topics",
+        "responses": {
+          "200": {
+            "description": "List topics from Hub",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "crate::routes::biome"
+        ],
+        "operationId": "create_topic",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Topic created",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "api_key": []
+          }
+        ]
+      }
+    },
+    "/api/v1/evolution": {
+      "get": {
+        "tags": [
+          "crate::routes::karma"
+        ],
+        "operationId": "get_evolution_history_handler",
+        "responses": {
+          "200": {
+            "description": "Evolution history",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/expression/auto": {
+      "post": {
+        "tags": [
+          "crate::routes::expression"
+        ],
+        "operationId": "toggle_auto_expression",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AutoToggle"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Toggled auto-expression",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/expression/generate": {
+      "post": {
+        "tags": [
+          "crate::routes::expression"
+        ],
+        "operationId": "generate_expression",
+        "responses": {
+          "200": {
+            "description": "Generated expression",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": "No karma available"
+          }
+        }
+      }
+    },
+    "/api/v1/expression/list": {
+      "get": {
+        "tags": [
+          "crate::routes::expression"
+        ],
+        "operationId": "list_expressions",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Limit results",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Recent expressions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/expression/status": {
+      "get": {
+        "tags": [
+          "crate::routes::expression"
+        ],
+        "operationId": "expression_status",
+        "responses": {
+          "200": {
+            "description": "Expression engine status",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/immune-rules": {
+      "get": {
+        "tags": [
+          "crate::routes::karma"
+        ],
+        "operationId": "get_immune_rules_handler",
+        "responses": {
+          "200": {
+            "description": "List immune rules",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {}
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "crate::routes::karma"
+        ],
+        "operationId": "add_immune_rule_handler",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImmuneRule"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Rule added",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/immune-rules/{id}": {
+      "delete": {
+        "tags": [
+          "crate::routes::karma"
+        ],
+        "operationId": "delete_immune_rule_handler",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Rule ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Rule deleted",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/karma": {
+      "get": {
+        "tags": [
+          "crate::routes::karma"
+        ],
+        "operationId": "get_karma_stream",
+        "responses": {
+          "200": {
+            "description": "List recent karma",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/karma/demo/failure": {
+      "post": {
+        "tags": [
+          "crate::routes::karma"
+        ],
+        "operationId": "trigger_failure_demo",
+        "responses": {
+          "200": {
+            "description": "Demo failure triggered",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/karma/demo/federation": {
+      "post": {
+        "tags": [
+          "crate::routes::karma"
+        ],
+        "operationId": "trigger_federation_demo",
+        "responses": {
+          "200": {
+            "description": "Demo federation triggered",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/karma/demo/security": {
+      "post": {
+        "tags": [
+          "crate::routes::karma"
+        ],
+        "operationId": "trigger_security_demo",
+        "responses": {
+          "200": {
+            "description": "Demo security triggered",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/karma/feedback": {
+      "post": {
+        "tags": [
+          "crate::routes::agent"
+        ],
+        "operationId": "handle_karma_feedback",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KarmaFeedbackRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Feedback recorded"
+          },
+          "500": {
+            "description": "Internal error"
+          }
+        }
+      }
+    },
     "/api/v1/logs": {
       "get": {
         "tags": [
@@ -241,10 +935,182 @@
           }
         ]
       }
+    },
+    "/api/v1/synergy-graph": {
+      "get": {
+        "tags": [
+          "crate::routes::karma"
+        ],
+        "operationId": "synergy_graph_handler",
+        "responses": {
+          "200": {
+            "description": "Synergy graph data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GraphData"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
     "schemas": {
+      "AgentChatRequest": {
+        "type": "object",
+        "required": [
+          "prompt",
+          "history"
+        ],
+        "properties": {
+          "channel_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "history": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ChatMessage"
+            }
+          },
+          "prompt": {
+            "type": "string"
+          }
+        }
+      },
+      "AutoToggle": {
+        "type": "object",
+        "required": [
+          "enabled"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ChatMessage": {
+        "type": "object",
+        "required": [
+          "role",
+          "content"
+        ],
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          }
+        }
+      },
+      "GraphData": {
+        "type": "object",
+        "required": [
+          "nodes",
+          "edges"
+        ],
+        "properties": {
+          "edges": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GraphEdge"
+            }
+          },
+          "nodes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GraphNode"
+            }
+          }
+        }
+      },
+      "GraphEdge": {
+        "type": "object",
+        "required": [
+          "from",
+          "to"
+        ],
+        "properties": {
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          }
+        }
+      },
+      "GraphNode": {
+        "type": "object",
+        "required": [
+          "id",
+          "label",
+          "group"
+        ],
+        "properties": {
+          "group": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          }
+        }
+      },
+      "ImmuneRule": {
+        "type": "object",
+        "description": "自己防衛のための免疫ルール",
+        "required": [
+          "id",
+          "pattern",
+          "severity",
+          "action",
+          "created_at"
+        ],
+        "properties": {
+          "action": {
+            "type": "string",
+            "description": "適用するアクション (Block, Warn, Quarantine, Revoke)"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "lamport_clock": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "node_id": {
+            "type": "string"
+          },
+          "pattern": {
+            "type": "string",
+            "description": "検知パターンの記述 (自然言語または正規表現)"
+          },
+          "severity": {
+            "type": "integer",
+            "format": "int32",
+            "description": "ルールの重要度 (1-100)",
+            "minimum": 0
+          },
+          "signature": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
       "ImportRequest": {
         "type": "object",
         "required": [
@@ -253,6 +1119,57 @@
         "properties": {
           "url": {
             "type": "string"
+          }
+        }
+      },
+      "KarmaFeedbackRequest": {
+        "type": "object",
+        "required": [
+          "karma_id",
+          "is_positive"
+        ],
+        "properties": {
+          "is_positive": {
+            "type": "boolean"
+          },
+          "karma_id": {
+            "type": "string"
+          }
+        }
+      },
+      "ListArtifactsParams": {
+        "type": "object",
+        "properties": {
+          "category": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "q": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "ListParams": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
           }
         }
       },
@@ -386,6 +1303,25 @@
           }
         }
       },
+      "SendBiomeRequest": {
+        "type": "object",
+        "required": [
+          "recipient_pubkey",
+          "topic_id",
+          "content"
+        ],
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "recipient_pubkey": {
+            "type": "string"
+          },
+          "topic_id": {
+            "type": "string"
+          }
+        }
+      },
       "SkillSummary": {
         "type": "object",
         "required": [
@@ -419,6 +1355,37 @@
             "items": {
               "type": "string"
             }
+          }
+        }
+      },
+      "StartAutonomousRequest": {
+        "type": "object",
+        "required": [
+          "topic_id",
+          "peer_pubkey"
+        ],
+        "properties": {
+          "interval_secs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "max_rounds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "peer_pubkey": {
+            "type": "string"
+          },
+          "topic_id": {
+            "type": "string"
           }
         }
       },

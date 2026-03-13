@@ -3,10 +3,10 @@
  * Copyright (C) 2026 motivationstudio, LLC
  */
 
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use serde::{Deserialize, Serialize};
 use tracing::warn;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -32,14 +32,22 @@ impl SkillArena {
 
     /// [A-3] Skill Culling
     /// Record the outcome of a skill execution to update its reputation.
-    pub async fn record_outcome(&self, skill_name: &str, is_success: bool, latency_ms: u64, karma_delta: f64) {
+    pub async fn record_outcome(
+        &self,
+        skill_name: &str,
+        is_success: bool,
+        latency_ms: u64,
+        karma_delta: f64,
+    ) {
         let mut map = self.performance_map.write().await;
-        let perf = map.entry(skill_name.to_string()).or_insert(SkillPerformance {
-            success_count: 0,
-            failure_count: 0,
-            average_latency_ms: 0,
-            total_karma_weight: 0.0,
-        });
+        let perf = map
+            .entry(skill_name.to_string())
+            .or_insert(SkillPerformance {
+                success_count: 0,
+                failure_count: 0,
+                average_latency_ms: 0,
+                total_karma_weight: 0.0,
+            });
 
         if is_success {
             perf.success_count += 1;
@@ -48,10 +56,11 @@ impl SkillArena {
         }
 
         perf.total_karma_weight += karma_delta;
-        
+
         // Rolling average for latency
         let total_runs = perf.success_count + perf.failure_count;
-        perf.average_latency_ms = (perf.average_latency_ms * (total_runs - 1) + latency_ms) / total_runs;
+        perf.average_latency_ms =
+            (perf.average_latency_ms * (total_runs - 1) + latency_ms) / total_runs;
 
         // Check for culling
         if total_runs > 10 {

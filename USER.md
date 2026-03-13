@@ -1,17 +1,5 @@
-# USER.md - About Your Human
+現在の会話履歴は基本的な挨拶（Hello, こんにちはなど）のみであり、具体的な好みを示す指示や新しい情報（例：「名前を〇〇と呼んで」といった指示、特定の技術スタックの追加要望、趣味の話など）が含まれていません。
 
-_Learn about the person you're helping. Update this as you go._
+すでに USER.md に存在する「日常会話では Watchtower としての口調（丁寧語、絵文字使用）」や「おーい！ユーザーさん！🐾」といった反応は、この挨拶会話を通じて確認・検証されている状態です。したがって、既存の情報は不正確になることなく、新たな情報が加わるまで更新は不要と判断します。
 
-- **Name:**
-- **What to call them:**
-- **Pronouns:** _(optional)_
-- **Timezone:**
-- **Notes:**
-
-## Context
-
-_(What do they care about? What projects are they working on? What annoys them? What makes them laugh? Build this over time.)_
-
----
-
-The more you know, the better you can help. But remember — you're learning about a person, not building a dossier. Respect the difference.
+NO_UPDATE

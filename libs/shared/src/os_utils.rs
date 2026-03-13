@@ -1,10 +1,10 @@
 /*
  * Aiome - The Autonomous AI Operating System
  * Copyright (C) 2026 motivationstudio, LLC
- * 
+ *
  * Licensed under the Elastic License 2.0 (ELv2).
- * You may not provide the software to third parties as a hosted or managed service, 
- * where the service provides users with access to any substantial set of the features 
+ * You may not provide the software to third parties as a hosted or managed service,
+ * where the service provides users with access to any substantial set of the features
  * or functionality of the software.
  */
 
@@ -13,8 +13,8 @@
 //! App Nap の防止、Spotlight インデックス対象外の設定など、
 //! macOS 上での長時間稼働を安定させるためのユーティリティ。
 
-use std::process::Command;
 use std::path::Path;
+use std::process::Command;
 
 /// macOS の省電力機能（App Nap）を無効化する
 ///
@@ -35,7 +35,10 @@ pub fn prevent_app_nap() -> Result<std::process::Child, std::io::Error> {
     }
     #[cfg(not(target_os = "macos"))]
     {
-        Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "Only supported on macOS"))
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "Only supported on macOS",
+        ))
     }
 }
 

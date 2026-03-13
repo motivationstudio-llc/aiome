@@ -4,21 +4,20 @@
  */
 
 use axum::{
+    Json, Router,
     extract::State,
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::{get, post},
-    Json, Router,
 };
+use chrono::{Datelike, Utc};
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 use std::env;
 use std::path::PathBuf;
+use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{info, error, warn};
-use chrono::{Utc, Datelike};
-
+use tracing::{error, info, warn};
 
 #[derive(Debug, Deserialize)]
 struct ProxyRequest {
@@ -67,7 +66,7 @@ async fn main() -> anyhow::Result<()> {
     // 1. Extreme Security: Memory Lock (mlockall)
     #[cfg(target_os = "linux")]
     {
-        use nix::sys::mman::{mlockall, MlockAllFlags};
+        use nix::sys::mman::{MlockAllFlags, mlockall};
         if let Err(e) = mlockall(MlockAllFlags::MCL_CURRENT | MlockAllFlags::MCL_FUTURE) {
             error!("❌ [KeyProxy] mlockall failed: {}. ABORTING for safety.", e);
             panic!("SECURITY VIOLATION: Could not lock memory to RAM.");
@@ -87,9 +86,9 @@ async fn main() -> anyhow::Result<()> {
 
     // 2. Load keys and SELF-WIPE ENV
     dotenvy::dotenv().ok();
-    let gemini_key = env::var("GEMINI_API_KEY")
-        .expect("GEMINI_API_KEY must be set in key-proxy/.env");
-    
+    let gemini_key =
+        env::var("GEMINI_API_KEY").expect("GEMINI_API_KEY must be set in key-proxy/.env");
+
     // Self-Wipe: Remove from environment immediately
     unsafe {
         env::remove_var("GEMINI_API_KEY");
@@ -145,7 +144,7 @@ async fn main() -> anyhow::Result<()> {
     };
     let addr = format!("{}:{}", bind_addr, port);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
-    
+
     info!("🚀 [KeyProxy] Abyss Vault listening on {}", addr);
     axum::serve(listener, app).await?;
 
@@ -156,18 +155,22 @@ async fn auth_middleware(
     req: axum::http::Request<axum::body::Body>,
     next: axum::middleware::Next,
 ) -> Result<Response, StatusCode> {
-    let auth_header = req.headers().get(axum::http::header::AUTHORIZATION)
+    let auth_header = req
+        .headers()
+        .get(axum::http::header::AUTHORIZATION)
         .and_then(|h| h.to_str().ok());
-    
-    let expected_secret = env::var("VAULT_SECRET").expect("🚨 VAULT_SECRET must be set for Abyss Vault access!");
+
+    let expected_secret =
+        env::var("VAULT_SECRET").expect("🚨 VAULT_SECRET must be set for Abyss Vault access!");
     let expected = format!("Bearer {}", expected_secret);
 
-    if let Some(auth) = auth_header {
-        if auth == expected {
-            return Ok(next.run(req).await);
-        }
+    if auth_header
+        .filter(|a| subtle::ConstantTimeEq::ct_eq(a.as_bytes(), expected.as_bytes()).into())
+        .is_some()
+    {
+        return Ok(next.run(req).await);
     }
-    
+
     warn!("⛔ [KeyProxy] Unauthorized access attempt.");
     Err(StatusCode::UNAUTHORIZED)
 }
@@ -186,17 +189,20 @@ async fn handle_llm_complete(
     // 5. SSRF Defense: Hardcoded Endpoints
     let gemini_model = env::var("GEMINI_MODEL").unwrap_or_else(|_| "gemini-2.0-flash".to_string());
     let url = match payload.endpoint.as_str() {
-        "gemini" => format!("https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent", gemini_model),
+        "gemini" => format!(
+            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent",
+            gemini_model
+        ),
         _ => return (StatusCode::BAD_REQUEST, "Invalid endpoint").into_response(),
     };
 
     // DEMO MOCK MODE
     if state.gemini_key.expose_secret() == "mock_key_for_testing" {
-        return Json(ProxyResponse { 
+        return Json(ProxyResponse {
             result: format!("I am Aiome. I hear you loud and clear. Your prompt was: '{}'. Currently operating in Mock Offline Mode inside the Aiome Abyss Vault.", payload.prompt)
         }).into_response();
     }
-    
+
     let gemini_payload = serde_json::json!({
         "contents": [{
             "parts": [{
@@ -208,7 +214,9 @@ async fn handle_llm_complete(
         })
     });
 
-    let res = state.client.post(url)
+    let res = state
+        .client
+        .post(url)
         .header("Content-Type", "application/json")
         .header("x-goog-api-key", state.gemini_key.expose_secret())
         .json(&gemini_payload)
@@ -226,10 +234,11 @@ async fn handle_llm_complete(
                             .as_str()
                             .unwrap_or("")
                             .to_string();
-                        
+
                         Json(ProxyResponse { result: text }).into_response()
                     }
-                    Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, "Upstream Provider Error").into_response()
+                    Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, "Upstream Provider Error")
+                        .into_response(),
                 }
             } else {
                 let status = resp.status();
@@ -254,15 +263,22 @@ async fn handle_llm_embed(
     State(state): State<AppState>,
     Json(payload): Json<ProxyRequest>,
 ) -> impl IntoResponse {
-    info!("🧬 [KeyProxy] Embedding request from caller: {}", payload.caller_id);
+    info!(
+        "🧬 [KeyProxy] Embedding request from caller: {}",
+        payload.caller_id
+    );
 
     if let Err(status) = check_and_increment_quota(&state, &payload.caller_id).await {
         return status.into_response();
     }
 
-    let embed_model = env::var("GEMINI_EMBED_MODEL").unwrap_or_else(|_| "text-embedding-004".to_string());
+    let embed_model =
+        env::var("GEMINI_EMBED_MODEL").unwrap_or_else(|_| "text-embedding-004".to_string());
     let url = match payload.endpoint.as_str() {
-        "gemini-embed" => format!("https://generativelanguage.googleapis.com/v1beta/models/{}:embedContent", embed_model),
+        "gemini-embed" => format!(
+            "https://generativelanguage.googleapis.com/v1beta/models/{}:embedContent",
+            embed_model
+        ),
         _ => return (StatusCode::BAD_REQUEST, "Invalid endpoint").into_response(),
     };
 
@@ -272,7 +288,9 @@ async fn handle_llm_embed(
         }
     });
 
-    let res = state.client.post(url)
+    let res = state
+        .client
+        .post(url)
         .header("Content-Type", "application/json")
         .header("x-goog-api-key", state.gemini_key.expose_secret())
         .json(&gemini_payload)
@@ -285,7 +303,10 @@ async fn handle_llm_embed(
                 let body: serde_json::Value = resp.json().await.unwrap_or_default();
                 let emb = body["embedding"]["values"].as_array();
                 if let Some(values) = emb {
-                    let vec: Vec<f32> = values.iter().map(|v| v.as_f64().unwrap_or(0.0) as f32).collect();
+                    let vec: Vec<f32> = values
+                        .iter()
+                        .map(|v| v.as_f64().unwrap_or(0.0) as f32)
+                        .collect();
                     Json(EmbedResponse { embedding: vec }).into_response()
                 } else {
                     (StatusCode::INTERNAL_SERVER_ERROR, "Upstream Provider Error").into_response()
@@ -306,7 +327,10 @@ async fn handle_llm_stream(
     State(state): State<AppState>,
     Json(payload): Json<ProxyRequest>,
 ) -> impl IntoResponse {
-    info!("🌊 [KeyProxy] Streaming request from caller: {}", payload.caller_id);
+    info!(
+        "🌊 [KeyProxy] Streaming request from caller: {}",
+        payload.caller_id
+    );
 
     if let Err(status) = check_and_increment_quota(&state, &payload.caller_id).await {
         return status.into_response();
@@ -314,7 +338,10 @@ async fn handle_llm_stream(
 
     let gemini_model = env::var("GEMINI_MODEL").unwrap_or_else(|_| "gemini-2.0-flash".to_string());
     let url = match payload.endpoint.as_str() {
-        "gemini" => format!("https://generativelanguage.googleapis.com/v1beta/models/{}:streamGenerateContent?alt=sse", gemini_model),
+        "gemini" => format!(
+            "https://generativelanguage.googleapis.com/v1beta/models/{}:streamGenerateContent?alt=sse",
+            gemini_model
+        ),
         _ => return (StatusCode::BAD_REQUEST, "Invalid endpoint").into_response(),
     };
 
@@ -329,7 +356,9 @@ async fn handle_llm_stream(
         })
     });
 
-    let res = state.client.post(url)
+    let res = state
+        .client
+        .post(url)
         .header("Content-Type", "application/json")
         .header("x-goog-api-key", state.gemini_key.expose_secret())
         .json(&gemini_payload)
@@ -340,20 +369,17 @@ async fn handle_llm_stream(
         Ok(resp) => {
             if resp.status().is_success() {
                 use futures::StreamExt;
-                let stream = resp.bytes_stream().map(|chunk_res| {
-                    match chunk_res {
-                        Ok(bytes) => {
-                            let text = String::from_utf8_lossy(&bytes).to_string();
-                            Ok::<axum::response::sse::Event, std::convert::Infallible>(
-                                axum::response::sse::Event::default().data(text)
-                            )
-                        }
-                        Err(e) => {
-                            Ok::<axum::response::sse::Event, std::convert::Infallible>(
-                                axum::response::sse::Event::default().data(format!("{{\"error\": \"{}\"}}", e))
-                            )
-                        }
+                let stream = resp.bytes_stream().map(|chunk_res| match chunk_res {
+                    Ok(bytes) => {
+                        let text = String::from_utf8_lossy(&bytes).to_string();
+                        Ok::<axum::response::sse::Event, std::convert::Infallible>(
+                            axum::response::sse::Event::default().data(text),
+                        )
                     }
+                    Err(e) => Ok::<axum::response::sse::Event, std::convert::Infallible>(
+                        axum::response::sse::Event::default()
+                            .data(format!("{{\"error\": \"{}\"}}", e)),
+                    ),
                 });
                 axum::response::sse::Sse::new(stream).into_response()
             } else {
@@ -364,12 +390,15 @@ async fn handle_llm_stream(
     }
 }
 
-async fn check_and_increment_quota(state: &AppState, caller_id: &str) -> Result<(u64, u32), StatusCode> {
+async fn check_and_increment_quota(
+    state: &AppState,
+    caller_id: &str,
+) -> Result<(u64, u32), StatusCode> {
     if !state.caller_quotas.contains_key(caller_id) {
         warn!("🚫 [KeyProxy] Unknown caller: {}", caller_id);
         return Err(StatusCode::FORBIDDEN);
     }
-    
+
     let mut q = state.state.write().await;
     let today = Utc::now().ordinal();
     if q.last_reset_day != today {
@@ -377,12 +406,15 @@ async fn check_and_increment_quota(state: &AppState, caller_id: &str) -> Result<
         q.total_calls = 0;
         q.last_reset_day = today;
     }
-    
+
     q.total_calls += 1;
     let total = q.total_calls;
-    
+
     if total > 5000 {
-        error!("🛑 [KeyProxy] Global quota exceeded! (Day: {})", q.last_reset_day);
+        error!(
+            "🛑 [KeyProxy] Global quota exceeded! (Day: {})",
+            q.last_reset_day
+        );
         return Err(StatusCode::TOO_MANY_REQUESTS);
     }
 

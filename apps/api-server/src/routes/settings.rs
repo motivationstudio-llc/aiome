@@ -3,16 +3,16 @@
  * Copyright (C) 2026 motivationstudio, LLC
  */
 
+use crate::{auth::Authenticated, AppState};
 use axum::{
-    extract::{State, Json},
-    response::IntoResponse,
+    extract::{Json, State},
     http::StatusCode,
+    response::IntoResponse,
 };
 use serde::{Deserialize, Serialize};
-use crate::{AppState, auth::Authenticated};
-use url::Url;
 use std::net::{IpAddr, ToSocketAddrs};
-use tracing::{info, error, warn};
+use tracing::{error, info, warn};
+use url::Url;
 
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
 pub struct UpdateSettingsRequest {
@@ -81,17 +81,35 @@ pub async fn update_setting(
 ) -> impl IntoResponse {
     // 1. Key whitelist check
     let allowed_keys = [
-        "ollama_host", "ollama_model", 
-        "llm_provider", "llm_api_key", "llm_model", "lm_studio_host",
-        "bg_llm_provider", "bg_llm_model", "bg_llm_api_key",
-        "discord_chat_channel_id", "discord_command_channel_id", "discord_log_channel_id",
-        "telegram_chat_id", "watchtower_enabled", 
-        "enforce_guardrail", "log_level", "node_id", "samsara_hub_url",
-        "allowed_origins", "ai_name", "ai_motto", "ai_vrm_url"
+        "ollama_host",
+        "ollama_model",
+        "llm_provider",
+        "llm_api_key",
+        "llm_model",
+        "lm_studio_host",
+        "bg_llm_provider",
+        "bg_llm_model",
+        "bg_llm_api_key",
+        "discord_chat_channel_id",
+        "discord_command_channel_id",
+        "discord_log_channel_id",
+        "telegram_chat_id",
+        "watchtower_enabled",
+        "enforce_guardrail",
+        "log_level",
+        "node_id",
+        "samsara_hub_url",
+        "allowed_origins",
+        "ai_name",
+        "ai_motto",
+        "ai_vrm_url",
     ];
 
     if !allowed_keys.contains(&payload.key.as_str()) {
-        warn!("🚨 [Security] Unauthorized settings key attempt: {}", payload.key);
+        warn!(
+            "🚨 [Security] Unauthorized settings key attempt: {}",
+            payload.key
+        );
         return (StatusCode::BAD_REQUEST, "Unauthorized setting key").into_response();
     }
 
@@ -108,15 +126,25 @@ pub async fn update_setting(
 
     // 4. Server-side is_secret determination
     let secrets = [
-        "ollama_host", "discord_token", "telegram_token", "api_server_secret", "llm_api_key"
+        "ollama_host",
+        "discord_token",
+        "telegram_token",
+        "api_server_secret",
+        "llm_api_key",
     ];
     let is_secret = secrets.contains(&payload.key.as_str());
 
     // 5. Audit Logging
-    info!("🔧 [Settings] Audit: Key '{}' updated (category: {}, secret: {})", 
-        payload.key, payload.category, is_secret);
+    info!(
+        "🔧 [Settings] Audit: Key '{}' updated (category: {}, secret: {})",
+        payload.key, payload.category, is_secret
+    );
 
-    match state.job_queue.update_setting(&payload.key, &payload.value, &payload.category, is_secret).await {
+    match state
+        .job_queue
+        .update_setting(&payload.key, &payload.value, &payload.category, is_secret)
+        .await
+    {
         Ok(_) => StatusCode::OK.into_response(),
         Err(e) => {
             error!("❌ [Settings] Update failed for {}: {}", payload.key, e);
@@ -145,31 +173,121 @@ pub async fn test_connection(
         return Json(TestConnectionResponse {
             success: false,
             message: format!("SSRF Blocked: {}", e),
-        }).into_response();
+        })
+        .into_response();
     }
 
     match payload.service.as_str() {
-        "ollama" => test_ollama(&payload.url, payload.model.as_deref()).await.into_response(),
-        "gemini" | "openai" | "anthropic" => test_cloud_connection(&payload.service, payload.token.as_deref(), payload.model.as_deref()).await.into_response(),
+        "ollama" => test_ollama(&payload.url, payload.model.as_deref())
+            .await
+            .into_response(),
+        "gemini" | "openai" | "anthropic" => test_cloud_connection(
+            &payload.service,
+            payload.token.as_deref(),
+            payload.model.as_deref(),
+        )
+        .await
+        .into_response(),
         _ => Json(TestConnectionResponse {
             success: false,
             message: format!("Service '{}' testing not implemented yet", payload.service),
-        }).into_response(),
+        })
+        .into_response(),
     }
 }
 
-async fn test_cloud_connection(service: &str, token: Option<&str>, _model: Option<&str>) -> Json<TestConnectionResponse> {
-    if token.is_none() || token.unwrap().is_empty() {
-        return Json(TestConnectionResponse { 
-            success: false, 
-            message: format!("API Key is required for {}", service) 
+async fn test_cloud_connection(
+    service: &str,
+    token: Option<&str>,
+    _model: Option<&str>,
+) -> Json<TestConnectionResponse> {
+    let Some(token) = token else {
+        return Json(TestConnectionResponse {
+            success: false,
+            message: format!("API Key is required for {}", service),
+        });
+    };
+    if token.is_empty() {
+        return Json(TestConnectionResponse {
+            success: false,
+            message: format!("API Key is required for {}", service),
         });
     }
-    // TODO: Implement actual upstream validation for cloud providers
-    Json(TestConnectionResponse { 
-        success: true, 
-        message: format!("{} configuration is valid (Simulated)", service.to_uppercase()) 
-    })
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .unwrap_or_default();
+
+    match service {
+        "gemini" => {
+            let url = format!(
+                "https://generativelanguage.googleapis.com/v1beta/models?key={}",
+                token
+            );
+            match client.get(url).send().await {
+                Ok(res) if res.status().is_success() => Json(TestConnectionResponse {
+                    success: true,
+                    message: "Gemini connection verified.".to_string(),
+                }),
+                Ok(res) => Json(TestConnectionResponse {
+                    success: false,
+                    message: format!("Gemini error: Status {}", res.status()),
+                }),
+                Err(e) => Json(TestConnectionResponse {
+                    success: false,
+                    message: format!("Gemini connection failed: {}", e),
+                }),
+            }
+        }
+        "openai" => {
+            match client
+                .get("https://api.openai.com/v1/models")
+                .header("Authorization", format!("Bearer {}", token))
+                .send()
+                .await
+            {
+                Ok(res) if res.status().is_success() => Json(TestConnectionResponse {
+                    success: true,
+                    message: "OpenAI connection verified.".to_string(),
+                }),
+                Ok(res) => Json(TestConnectionResponse {
+                    success: false,
+                    message: format!("OpenAI error: Status {}", res.status()),
+                }),
+                Err(e) => Json(TestConnectionResponse {
+                    success: false,
+                    message: format!("OpenAI connection failed: {}", e),
+                }),
+            }
+        }
+        "claude" => {
+            match client
+                .get("https://api.anthropic.com/v1/models")
+                .header("x-api-key", token)
+                .header("anthropic-version", "2023-06-01")
+                .send()
+                .await
+            {
+                Ok(res) if res.status().is_success() => Json(TestConnectionResponse {
+                    success: true,
+                    message: "Claude connection verified.".to_string(),
+                }),
+                Ok(res) => Json(TestConnectionResponse {
+                    success: false,
+                    message: format!("Claude error: Status {}", res.status()),
+                }),
+                Err(e) => Json(TestConnectionResponse {
+                    success: false,
+                    message: format!("Claude connection failed: {}", e),
+                }),
+            }
+        }
+        _ => Json(TestConnectionResponse {
+            success: false,
+            message: format!("Prover '{}' testing not fully implemented", service),
+        }),
+    }
 }
 
 fn validate_safe_url(url_str: &str) -> Result<(), String> {
@@ -191,7 +309,10 @@ fn validate_safe_url(url_str: &str) -> Result<(), String> {
         for addr in addrs {
             let ip = addr.ip();
             if is_private_ip(ip) {
-                return Err(format!("Access to private network address is forbidden: {}", ip));
+                return Err(format!(
+                    "Access to private network address is forbidden: {}",
+                    ip
+                ));
             }
         }
     }
@@ -202,7 +323,11 @@ fn validate_safe_url(url_str: &str) -> Result<(), String> {
 fn is_private_ip(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(v4) => {
-            v4.is_private() || v4.is_link_local() || v4.is_loopback() || v4.is_unspecified() || v4.octets() == [169, 254, 169, 254]
+            v4.is_private()
+                || v4.is_link_local()
+                || v4.is_loopback()
+                || v4.is_unspecified()
+                || v4.octets() == [169, 254, 169, 254]
         }
         IpAddr::V6(v6) => {
             // Check for Link-Local (fe80::/10), Unique Local (fc00::/7), etc.
@@ -218,7 +343,7 @@ async fn test_ollama(host: &str, model: Option<&str>) -> Json<TestConnectionResp
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(5))
         .build()
-        .expect("Failed to build reqwest client");
+        .unwrap_or_else(|_| reqwest::Client::new());
 
     let url = if host.ends_with('/') {
         format!("{}api/tags", host)
@@ -232,18 +357,24 @@ async fn test_ollama(host: &str, model: Option<&str>) -> Json<TestConnectionResp
                 if let Some(model_name) = model {
                     let models = json.get("models").and_then(|m| m.as_array());
                     if let Some(models) = models {
-                        let found = models.iter().any(|m| {
-                            m.get("name").and_then(|n| n.as_str()) == Some(model_name)
-                        });
+                        let found = models
+                            .iter()
+                            .any(|m| m.get("name").and_then(|n| n.as_str()) == Some(model_name));
                         if found {
                             Json(TestConnectionResponse {
                                 success: true,
-                                message: format!("Ollama connection OK. Model '{}' found.", model_name),
+                                message: format!(
+                                    "Ollama connection OK. Model '{}' found.",
+                                    model_name
+                                ),
                             })
                         } else {
                             Json(TestConnectionResponse {
                                 success: false,
-                                message: format!("Ollama connection OK, but model '{}' was not found.", model_name),
+                                message: format!(
+                                    "Ollama connection OK, but model '{}' was not found.",
+                                    model_name
+                                ),
                             })
                         }
                     } else {
@@ -280,12 +411,17 @@ pub async fn get_ollama_models(
     State(state): State<AppState>,
     _auth: Authenticated,
 ) -> impl IntoResponse {
-    let host = state.job_queue.get_setting_value("ollama_host")
-        .await.ok().flatten().unwrap_or_else(|| {
+    let host = state
+        .job_queue
+        .get_setting_value("ollama_host")
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| {
             std::env::var("OLLAMA_HOST").unwrap_or_else(|_| "http://127.0.0.1:11434".to_string())
         });
     let url = format!("{}/api/tags", host.trim_end_matches('/'));
-    
+
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(5))
         .build()
@@ -296,10 +432,22 @@ pub async fn get_ollama_models(
             if let Ok(json) = res.json::<serde_json::Value>().await {
                 Json(json).into_response()
             } else {
-                (StatusCode::INTERNAL_SERVER_ERROR, "Failed to parse Ollama response").into_response()
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to parse Ollama response",
+                )
+                    .into_response()
             }
         }
-        Ok(res) => (StatusCode::BAD_GATEWAY, format!("Ollama returned error: {}", res.status())).into_response(),
-        Err(e) => (StatusCode::SERVICE_UNAVAILABLE, format!("Ollama connection failed: {}", e)).into_response(),
+        Ok(res) => (
+            StatusCode::BAD_GATEWAY,
+            format!("Ollama returned error: {}", res.status()),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            format!("Ollama connection failed: {}", e),
+        )
+            .into_response(),
     }
 }

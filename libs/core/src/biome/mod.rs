@@ -1,8 +1,8 @@
-pub mod protocol;
-pub mod dialogue;
-pub mod delegation;
 pub mod autonomous;
+pub mod delegation;
+pub mod dialogue;
+pub mod protocol;
 
-pub use protocol::{BiomeMessage, BiomeDialogue, DialogueStatus};
 pub use autonomous::{AutonomousBiomeEngine, AutonomousConfig};
 pub use delegation::{DelegationResult, FailureCategory};
+pub use protocol::{BiomeDialogue, BiomeMessage, DialogueStatus};

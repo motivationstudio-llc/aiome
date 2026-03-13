@@ -1,10 +1,10 @@
 /*
  * Aiome - The Autonomous AI Operating System
  * Copyright (C) 2026 motivationstudio, LLC
- * 
+ *
  * Licensed under the Elastic License 2.0 (ELv2).
- * You may not provide the software to third parties as a hosted or managed service, 
- * where the service provides users with access to any substantial set of the features 
+ * You may not provide the software to third parties as a hosted or managed service,
+ * where the service provides users with access to any substantial set of the features
  * or functionality of the software.
  */
 
@@ -23,10 +23,7 @@ pub enum ProcessError {
     /// プロセスの起動に失敗
     SpawnFailed(std::io::Error),
     /// タイムアウトにより強制終了
-    TimedOut {
-        command: String,
-        timeout_secs: u64,
-    },
+    TimedOut { command: String, timeout_secs: u64 },
     /// プロセスが非ゼロの終了コードで終了
     NonZeroExit {
         command: String,
@@ -152,7 +149,6 @@ pub async fn run_with_timeout(
     }
 }
 
-
 /// HTTP リクエスト用のタイムアウト付きクライアントを生成
 ///
 /// 外部API等への通信に使用する。
@@ -173,15 +169,13 @@ pub async fn run_with_timeout_vec(
     run_with_timeout(program, &args_str, timeout).await
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[tokio::test]
     async fn test_successful_command() {
-        let result =
-            run_with_timeout("echo", &["hello"], Duration::from_secs(5)).await;
+        let result = run_with_timeout("echo", &["hello"], Duration::from_secs(5)).await;
         assert!(result.is_ok());
         let output = result.unwrap();
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -191,8 +185,7 @@ mod tests {
     #[tokio::test]
     async fn test_timeout_kills_process() {
         // sleep 10 を 1秒のタイムアウトで実行 → 殺される
-        let result =
-            run_with_timeout("sleep", &["10"], Duration::from_secs(1)).await;
+        let result = run_with_timeout("sleep", &["10"], Duration::from_secs(1)).await;
         assert!(result.is_err());
         match result.unwrap_err() {
             ProcessError::TimedOut { timeout_secs, .. } => {
@@ -205,8 +198,7 @@ mod tests {
     #[tokio::test]
     async fn test_nonzero_exit() {
         let result =
-            run_with_timeout("ls", &["/nonexistent_path_xyz"], Duration::from_secs(5))
-                .await;
+            run_with_timeout("ls", &["/nonexistent_path_xyz"], Duration::from_secs(5)).await;
         assert!(result.is_err());
         match result.unwrap_err() {
             ProcessError::NonZeroExit { exit_code, .. } => {

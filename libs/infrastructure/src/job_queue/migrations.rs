@@ -1,12 +1,12 @@
 /*
  * Aiome - The Autonomous AI Operating System
  * Copyright (C) 2026 motivationstudio, LLC
- * 
+ *
  * Licensed under the Elastic License 2.0 (ELv2).
  */
 
-use async_trait::async_trait;
 use aiome_core::error::AiomeError;
+use async_trait::async_trait;
 use tracing::info;
 
 use super::SqliteJobQueue;
@@ -77,11 +77,15 @@ impl DbInitializer for SqliteJobQueue {
         .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to create karma_logs table: {}", e) })?;
 
         // Indices
-        sqlx::query("CREATE INDEX IF NOT EXISTS idx_jobs_status_started ON jobs(status, started_at);")
-            .execute(&self.pool).await.ok();
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_jobs_status_started ON jobs(status, started_at);",
+        )
+        .execute(&self.pool)
+        .await
+        .ok();
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_karma_logs_skill_weight ON karma_logs(related_skill, weight DESC);")
             .execute(&self.pool).await.ok();
-        
+
         // The Metrics Ledger
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS sns_metrics_history (
@@ -101,8 +105,11 @@ impl DbInitializer for SqliteJobQueue {
                 is_finalized INTEGER NOT NULL DEFAULT 0,
                 recorded_at TEXT DEFAULT (datetime('now')),
                 FOREIGN KEY(job_id) REFERENCES jobs(id) ON DELETE CASCADE
-            );"
-        ).execute(&self.pool).await.map_err(|e| AiomeError::Infrastructure {
+            );",
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|e| AiomeError::Infrastructure {
             reason: format!("Failed to create sns_metrics_history: {}", e),
         })?;
 
@@ -134,7 +141,7 @@ impl DbInitializer for SqliteJobQueue {
         ] {
             let _ = sqlx::query(migration).execute(&self.pool).await;
         }
-        
+
         // Agent Evolution Stats
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS agent_stats (
@@ -145,11 +152,13 @@ impl DbInitializer for SqliteJobQueue {
                 creativity INTEGER NOT NULL DEFAULT 0,
                 fatigue INTEGER NOT NULL DEFAULT 0,
                 updated_at TEXT DEFAULT (datetime('now'))
-            );"
+            );",
         )
         .execute(&self.pool)
         .await
-        .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to create agent_stats table: {}", e) })?;
+        .map_err(|e| AiomeError::Infrastructure {
+            reason: format!("Failed to create agent_stats table: {}", e),
+        })?;
 
         let _ = sqlx::query("INSERT OR IGNORE INTO agent_stats (id, level, exp, resonance, creativity, fatigue) VALUES (1, 1, 0, 0, 0, 0);")
             .execute(&self.pool)
@@ -161,14 +170,19 @@ impl DbInitializer for SqliteJobQueue {
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL,
                 updated_at TEXT DEFAULT (datetime('now'))
-            );"
+            );",
         )
         .execute(&self.pool)
         .await
-        .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to create system_state table: {}", e) })?;
+        .map_err(|e| AiomeError::Infrastructure {
+            reason: format!("Failed to create system_state table: {}", e),
+        })?;
 
-        let _ = sqlx::query("INSERT OR IGNORE INTO system_state (key, value) VALUES ('logical_clock', '0')")
-            .execute(&self.pool).await;
+        let _ = sqlx::query(
+            "INSERT OR IGNORE INTO system_state (key, value) VALUES ('logical_clock', '0')",
+        )
+        .execute(&self.pool)
+        .await;
 
         // Chat History & Memory
         sqlx::query(
@@ -179,10 +193,13 @@ impl DbInitializer for SqliteJobQueue {
                 content TEXT NOT NULL,
                 is_distilled INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT DEFAULT (datetime('now'))
-            );"
+            );",
         )
-        .execute(&self.pool).await
-        .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to create chat_history: {}", e) })?;
+        .execute(&self.pool)
+        .await
+        .map_err(|e| AiomeError::Infrastructure {
+            reason: format!("Failed to create chat_history: {}", e),
+        })?;
 
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_chat_history_channel ON chat_history(channel_id, created_at DESC);")
             .execute(&self.pool).await.ok();
@@ -194,10 +211,13 @@ impl DbInitializer for SqliteJobQueue {
                 channel_id TEXT PRIMARY KEY,
                 summary TEXT NOT NULL,
                 updated_at TEXT DEFAULT (datetime('now'))
-            );"
+            );",
         )
-        .execute(&self.pool).await
-        .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to create chat_memory_summaries: {}", e) })?;
+        .execute(&self.pool)
+        .await
+        .map_err(|e| AiomeError::Infrastructure {
+            reason: format!("Failed to create chat_memory_summaries: {}", e),
+        })?;
 
         // Soul Mutation History
         sqlx::query(
@@ -207,20 +227,26 @@ impl DbInitializer for SqliteJobQueue {
                 new_hash TEXT NOT NULL,
                 mutation_reason TEXT NOT NULL,
                 created_at TEXT DEFAULT (datetime('now'))
-            );"
+            );",
         )
-        .execute(&self.pool).await
-        .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to create soul_mutation_history: {}", e) })?;
+        .execute(&self.pool)
+        .await
+        .map_err(|e| AiomeError::Infrastructure {
+            reason: format!("Failed to create soul_mutation_history: {}", e),
+        })?;
 
         // Federation Peers
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS federation_peers (
                 peer_url TEXT PRIMARY KEY,
                 last_sync_at TEXT NOT NULL
-            );"
+            );",
         )
-        .execute(&self.pool).await
-        .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to create federation_peers: {}", e) })?;
+        .execute(&self.pool)
+        .await
+        .map_err(|e| AiomeError::Infrastructure {
+            reason: format!("Failed to create federation_peers: {}", e),
+        })?;
 
         // Immune Rules & Arena History
         sqlx::query(
@@ -235,9 +261,13 @@ impl DbInitializer for SqliteJobQueue {
                 node_id TEXT DEFAULT '',
                 signature TEXT,
                 created_at TEXT DEFAULT (datetime('now'))
-            );"
-        ).execute(&self.pool).await
-        .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to create immune_rules: {}", e) })?;
+            );",
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|e| AiomeError::Infrastructure {
+            reason: format!("Failed to create immune_rules: {}", e),
+        })?;
 
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS arena_history (
@@ -248,14 +278,23 @@ impl DbInitializer for SqliteJobQueue {
                 winner TEXT,
                 reasoning TEXT,
                 created_at TEXT DEFAULT (datetime('now'))
-            );"
-        ).execute(&self.pool).await
-        .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to create arena_history: {}", e) })?;
+            );",
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|e| AiomeError::Infrastructure {
+            reason: format!("Failed to create arena_history: {}", e),
+        })?;
 
         // Federated Indices (Phase 15 Hardening)
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_karma_logs_federated ON karma_logs(is_federated) WHERE is_federated = 0;").execute(&self.pool).await.ok();
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_immune_rules_federated ON immune_rules(is_federated) WHERE is_federated = 0;").execute(&self.pool).await.ok();
-        sqlx::query("CREATE INDEX IF NOT EXISTS idx_karma_lamport ON karma_logs(lamport_clock, node_id);").execute(&self.pool).await.ok();
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_karma_lamport ON karma_logs(lamport_clock, node_id);",
+        )
+        .execute(&self.pool)
+        .await
+        .ok();
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_immune_lamport ON immune_rules(lamport_clock, node_id);").execute(&self.pool).await.ok();
 
         // Biome Protocol (Phase 20)
@@ -271,18 +310,26 @@ impl DbInitializer for SqliteJobQueue {
                 lamport_clock INTEGER NOT NULL,
                 encryption TEXT NOT NULL,
                 created_at TEXT DEFAULT (datetime('now'))
-            );"
-        ).execute(&self.pool).await
-        .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to create biome_messages: {}", e) })?;
+            );",
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|e| AiomeError::Infrastructure {
+            reason: format!("Failed to create biome_messages: {}", e),
+        })?;
 
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS biome_peers (
                 pubkey TEXT PRIMARY KEY,
                 last_seen_at TEXT DEFAULT (datetime('now')),
                 reputation_score INTEGER NOT NULL DEFAULT 100
-            );"
-        ).execute(&self.pool).await
-        .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to create biome_peers: {}", e) })?;
+            );",
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|e| AiomeError::Infrastructure {
+            reason: format!("Failed to create biome_peers: {}", e),
+        })?;
 
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS biome_topics (
@@ -293,9 +340,13 @@ impl DbInitializer for SqliteJobQueue {
                 turn_count INTEGER NOT NULL DEFAULT 0,
                 cooldown_until TEXT,
                 updated_at TEXT DEFAULT (datetime('now'))
-            );"
-        ).execute(&self.pool).await
-        .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to create biome_topics: {}", e) })?;
+            );",
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|e| AiomeError::Infrastructure {
+            reason: format!("Failed to create biome_topics: {}", e),
+        })?;
 
         // Evolution Chronicle (The Record of Growth)
         sqlx::query(
@@ -309,23 +360,33 @@ impl DbInitializer for SqliteJobQueue {
                 prev_record_hash TEXT NOT NULL,
                 record_hash TEXT NOT NULL,
                 created_at TEXT DEFAULT (datetime('now'))
-            );"
-        ).execute(&self.pool).await
-        .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to create evolution_chronicle: {}", e) })?;
+            );",
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|e| AiomeError::Infrastructure {
+            reason: format!("Failed to create evolution_chronicle: {}", e),
+        })?;
 
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_biome_messages_recipient ON biome_messages(recipient_pubkey);").execute(&self.pool).await.ok();
-        
+
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS timeline_checkpoints (
                 id TEXT PRIMARY KEY,
                 automerge_blob BLOB NOT NULL,
                 last_seq INTEGER NOT NULL,
                 updated_at TEXT DEFAULT (datetime('now'))
-            );"
-        ).execute(&self.pool).await.ok();
+            );",
+        )
+        .execute(&self.pool)
+        .await
+        .ok();
 
         // Memory Evolution Sprint 2: Procedural Forgetting
-        sqlx::query("ALTER TABLE karma_logs ADD COLUMN is_archived INTEGER NOT NULL DEFAULT 0;").execute(&self.pool).await.ok();
+        sqlx::query("ALTER TABLE karma_logs ADD COLUMN is_archived INTEGER NOT NULL DEFAULT 0;")
+            .execute(&self.pool)
+            .await
+            .ok();
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_karma_logs_active ON karma_logs(is_archived) WHERE is_archived = 0;").execute(&self.pool).await.ok();
 
         // Sprint 3-A: FTS5 (High-speed Text Search Layer)
@@ -336,9 +397,20 @@ impl DbInitializer for SqliteJobQueue {
         sqlx::query("CREATE TRIGGER IF NOT EXISTS karma_fts_au AFTER UPDATE OF lesson ON karma_logs BEGIN INSERT INTO karma_fts(karma_fts, rowid, lesson) VALUES('delete', old.rowid, old.lesson); INSERT INTO karma_fts(rowid, lesson) VALUES(new.rowid, new.lesson); END;").execute(&self.pool).await.ok();
 
         // Sprint 3-B: Taxonomy (Hierarchical Classification)
-        sqlx::query("ALTER TABLE karma_logs ADD COLUMN domain TEXT DEFAULT 'general';").execute(&self.pool).await.ok();
-        sqlx::query("ALTER TABLE karma_logs ADD COLUMN subtopic TEXT;").execute(&self.pool).await.ok();
-        sqlx::query("CREATE INDEX IF NOT EXISTS idx_karma_taxonomy ON karma_logs(domain, related_skill);").execute(&self.pool).await.ok();
+        sqlx::query("ALTER TABLE karma_logs ADD COLUMN domain TEXT DEFAULT 'general';")
+            .execute(&self.pool)
+            .await
+            .ok();
+        sqlx::query("ALTER TABLE karma_logs ADD COLUMN subtopic TEXT;")
+            .execute(&self.pool)
+            .await
+            .ok();
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_karma_taxonomy ON karma_logs(domain, related_skill);",
+        )
+        .execute(&self.pool)
+        .await
+        .ok();
 
         // AI Artifacts Storage System
         sqlx::query(
@@ -355,16 +427,24 @@ impl DbInitializer for SqliteJobQueue {
                 soul_version_hash TEXT,
                 signature TEXT,
                 created_at TEXT DEFAULT (datetime('now'))
-            );"
+            );",
         )
         .execute(&self.pool)
         .await
-        .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to create ai_artifacts table: {}", e) })?;
+        .map_err(|e| AiomeError::Infrastructure {
+            reason: format!("Failed to create ai_artifacts table: {}", e),
+        })?;
 
         // Phase 1: Artifact Evolution (Memory Crystal)
-        sqlx::query("ALTER TABLE ai_artifacts ADD COLUMN embedding BLOB;").execute(&self.pool).await.ok();
-        sqlx::query("ALTER TABLE ai_artifacts ADD COLUMN text_content TEXT;").execute(&self.pool).await.ok();
-        
+        sqlx::query("ALTER TABLE ai_artifacts ADD COLUMN embedding BLOB;")
+            .execute(&self.pool)
+            .await
+            .ok();
+        sqlx::query("ALTER TABLE ai_artifacts ADD COLUMN text_content TEXT;")
+            .execute(&self.pool)
+            .await
+            .ok();
+
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS artifact_edges (
                 id TEXT PRIMARY KEY,
@@ -374,15 +454,23 @@ impl DbInitializer for SqliteJobQueue {
                 relation TEXT NOT NULL,    -- 'DerivedFrom', 'AssociatedWith'
                 metadata TEXT DEFAULT '{}',
                 created_at TEXT DEFAULT (datetime('now'))
-            );"
+            );",
         )
         .execute(&self.pool)
         .await
-        .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to create artifact_edges table: {}", e) })?;
+        .map_err(|e| AiomeError::Infrastructure {
+            reason: format!("Failed to create artifact_edges table: {}", e),
+        })?;
 
-        sqlx::query("CREATE INDEX IF NOT EXISTS idx_edge_source ON artifact_edges(source_id);").execute(&self.pool).await.ok();
-        sqlx::query("CREATE INDEX IF NOT EXISTS idx_edge_target ON artifact_edges(target_id);").execute(&self.pool).await.ok();
-        
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_edge_source ON artifact_edges(source_id);")
+            .execute(&self.pool)
+            .await
+            .ok();
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_edge_target ON artifact_edges(target_id);")
+            .execute(&self.pool)
+            .await
+            .ok();
+
         // Phase 5: System Settings (Dashboard Connectivity)
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS system_settings (
@@ -391,11 +479,13 @@ impl DbInitializer for SqliteJobQueue {
                 category TEXT NOT NULL DEFAULT 'system',
                 is_secret INTEGER NOT NULL DEFAULT 0,
                 updated_at TEXT DEFAULT (datetime('now'))
-            );"
+            );",
         )
         .execute(&self.pool)
         .await
-        .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to create system_settings table: {}", e) })?;
+        .map_err(|e| AiomeError::Infrastructure {
+            reason: format!("Failed to create system_settings table: {}", e),
+        })?;
 
         // v4: Expression Engine (Autonomous Expression)
         sqlx::query(
@@ -405,11 +495,13 @@ impl DbInitializer for SqliteJobQueue {
                 emotion TEXT NOT NULL,
                 karma_refs TEXT DEFAULT '[]',
                 created_at TEXT DEFAULT (datetime('now'))
-            );"
+            );",
         )
         .execute(&self.pool)
         .await
-        .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to create expressions table: {}", e) })?;
+        .map_err(|e| AiomeError::Infrastructure {
+            reason: format!("Failed to create expressions table: {}", e),
+        })?;
 
         info!("✅ [SqliteJobQueue] Database and migrations initialized successfully.");
         Ok(())

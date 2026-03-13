@@ -1,10 +1,10 @@
 /*
  * Aiome - The Autonomous AI Operating System
  * Copyright (C) 2026 motivationstudio, LLC
- * 
+ *
  * Licensed under the Elastic License 2.0 (ELv2).
- * You may not provide the software to third parties as a hosted or managed service, 
- * where the service provides users with access to any substantial set of the features 
+ * You may not provide the software to third parties as a hosted or managed service,
+ * where the service provides users with access to any substantial set of the features
  * or functionality of the software.
  */
 
@@ -17,18 +17,18 @@
 //! [The Absolute Silence Audit 通過済設計]
 
 use aiome_core::error::AiomeError;
+use async_recursion::async_recursion;
+use chrono::Utc;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tokio::fs;
-use tracing::{info, warn, error};
-use async_recursion::async_recursion;
-use chrono::Utc;
+use tracing::{error, info, warn};
 
 pub struct WorkspaceManager;
 
 impl WorkspaceManager {
     /// Safe Move Protocol v2: 完成品を安全に納品先に移動させる
-    /// 
+    ///
     /// 1. サイズ検証 (0バイト拒否)
     /// 2. バッファフラッシュ待ち (2s sleep)
     /// 3. 衝突回避 (UUID+Timestamp プレフィックス)
@@ -39,22 +39,28 @@ impl WorkspaceManager {
         export_dir: &str,
     ) -> Result<PathBuf, AiomeError> {
         let export_path = PathBuf::from(export_dir);
-        
+
         // 納品先ディレクトリの確保
         if !export_path.exists() {
-            fs::create_dir_all(&export_path).await.map_err(|e| AiomeError::Infrastructure {
-                reason: format!("Failed to create export dir: {}", e),
-            })?;
+            fs::create_dir_all(&export_path)
+                .await
+                .map_err(|e| AiomeError::Infrastructure {
+                    reason: format!("Failed to create export dir: {}", e),
+                })?;
         }
 
         // 1. サイズ検証 (Hollow Artifact 防止)
-        let metadata = fs::metadata(source_path).await.map_err(|e| AiomeError::Infrastructure {
-            reason: format!("Source file missing or inaccessible: {}", e),
-        })?;
+        let metadata = fs::metadata(source_path)
+            .await
+            .map_err(|e| AiomeError::Infrastructure {
+                reason: format!("Source file missing or inaccessible: {}", e),
+            })?;
 
         if metadata.len() == 0 {
             return Err(AiomeError::Infrastructure {
-                reason: "Safe Move Protocol: Source file size is 0 bytes (Hollow Artifact blocked).".into(),
+                reason:
+                    "Safe Move Protocol: Source file size is 0 bytes (Hollow Artifact blocked)."
+                        .into(),
             });
         }
 
@@ -65,9 +71,9 @@ impl WorkspaceManager {
         // 再度メタデータを確認し、書き込みが継続していないかチェック（オプショナルだが安全）
         let metadata_after = fs::metadata(source_path).await.unwrap_or(metadata);
         if metadata_after.len() == 0 {
-             return Err(AiomeError::Infrastructure {
-                reason: "Safe Move Protocol: File became 0 bytes after wait.".into()
-             });
+            return Err(AiomeError::Infrastructure {
+                reason: "Safe Move Protocol: File became 0 bytes after wait.".into(),
+            });
         }
 
         // 3. 衝突回避 (Unique Artifact Naming)
@@ -76,11 +82,14 @@ impl WorkspaceManager {
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("artifact");
-        
+
         let unique_filename = format!("{}_{}_{}", now_str, job_id, original_name);
         let dest_path = export_path.join(&unique_filename);
 
-        info!("🚚 The Delivery: Executing Safe Move -> {}", dest_path.display());
+        info!(
+            "🚚 The Delivery: Executing Safe Move -> {}",
+            dest_path.display()
+        );
 
         // 4. アトミック移動 (Rename with Fallback)
         match fs::rename(source_path, &dest_path).await {
@@ -91,10 +100,12 @@ impl WorkspaceManager {
             Err(e) => {
                 warn!("⚠️ Atomic Rename failed (likely cross-device EXDEV). Fallback to copy+remove: {}", e);
                 // フォールバック: コピーして削除
-                fs::copy(source_path, &dest_path).await.map_err(|ce| AiomeError::Infrastructure {
-                    reason: format!("Safe Move Fallback Copy Failed: {}", ce),
+                fs::copy(source_path, &dest_path).await.map_err(|ce| {
+                    AiomeError::Infrastructure {
+                        reason: format!("Safe Move Fallback Copy Failed: {}", ce),
+                    }
                 })?;
-                
+
                 // コピー後のサイズ等検証も可能だが、ここでは単純に元を消す
                 fs::remove_file(source_path).await.map_err(|re| {
                     error!("❌ Safe Move: Copied successfully, but failed to remove source. Orphan left behind: {}", re);
@@ -122,9 +133,16 @@ impl WorkspaceManager {
             return Ok(());
         }
 
-        info!("🧹 The Scavenger: Commencing Deep Cleansing in {}", root.display());
-        let (files_deleted, dirs_pruned) = Self::recursive_clean(&root, clean_after_hours, allowed_extensions, true).await?;
-        info!("🧹 The Scavenger: Cleansing complete. {} files deleted, {} directories pruned.", files_deleted, dirs_pruned);
+        info!(
+            "🧹 The Scavenger: Commencing Deep Cleansing in {}",
+            root.display()
+        );
+        let (files_deleted, dirs_pruned) =
+            Self::recursive_clean(&root, clean_after_hours, allowed_extensions, true).await?;
+        info!(
+            "🧹 The Scavenger: Cleansing complete. {} files deleted, {} directories pruned.",
+            files_deleted, dirs_pruned
+        );
 
         Ok(())
     }
@@ -137,9 +155,11 @@ impl WorkspaceManager {
         allowed_extensions: &[&str],
         is_root: bool,
     ) -> Result<(u64, u64), AiomeError> {
-        let mut read_dir = fs::read_dir(dir).await.map_err(|e| AiomeError::Infrastructure {
-            reason: format!("Failed to read dir {}: {}", dir.display(), e),
-        })?;
+        let mut read_dir = fs::read_dir(dir)
+            .await
+            .map_err(|e| AiomeError::Infrastructure {
+                reason: format!("Failed to read dir {}: {}", dir.display(), e),
+            })?;
 
         let mut files_deleted = 0;
         let mut dirs_pruned = 0;
@@ -157,13 +177,19 @@ impl WorkspaceManager {
 
             if metadata.is_dir() {
                 // Recursive step downward (Depth-First Search)
-                let (f_del, d_prune) = Box::pin(Self::recursive_clean(&path, clean_after_hours, allowed_extensions, false)).await?;
+                let (f_del, d_prune) = Box::pin(Self::recursive_clean(
+                    &path,
+                    clean_after_hours,
+                    allowed_extensions,
+                    false,
+                ))
+                .await?;
                 files_deleted += f_del;
                 dirs_pruned += d_prune;
-                
+
                 // If the child directory wasn't pruned, then this directory still has contents
                 if path.exists() {
-                     has_contents = true;
+                    has_contents = true;
                 }
             } else if metadata.is_file() {
                 // Validate file for deletion
@@ -180,10 +206,12 @@ impl WorkspaceManager {
 
                 let extension = path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
-                // Extension whitelist logic: 
+                // Extension whitelist logic:
                 // Either match purely the extension string ("dat") or with dot (".dat")
                 let ext_normalized = format!(".{}", extension);
-                let ext_matched = allowed_extensions.iter().any(|&ae| ae == ext_normalized || ae == extension);
+                let ext_matched = allowed_extensions
+                    .iter()
+                    .any(|&ae| ae == ext_normalized || ae == extension);
 
                 if is_expired && ext_matched {
                     match fs::remove_file(&path).await {
@@ -191,7 +219,11 @@ impl WorkspaceManager {
                             files_deleted += 1;
                         }
                         Err(e) => {
-                            error!("❌ The Scavenger: Failed to delete expired file {}: {}", path.display(), e);
+                            error!(
+                                "❌ The Scavenger: Failed to delete expired file {}: {}",
+                                path.display(),
+                                e
+                            );
                             has_contents = true;
                         }
                     }
@@ -214,7 +246,11 @@ impl WorkspaceManager {
                 }
                 Err(e) => {
                     // Could be recreating while we delete, just ignore
-                    warn!("⚠️ The Scavenger: Could not prune directory {}: {}", dir.display(), e);
+                    warn!(
+                        "⚠️ The Scavenger: Could not prune directory {}: {}",
+                        dir.display(),
+                        e
+                    );
                 }
             }
         }

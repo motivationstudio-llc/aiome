@@ -1,19 +1,19 @@
 /*
  * Aiome - The Autonomous AI Operating System
  * Copyright (C) 2026 motivationstudio, LLC
- * 
+ *
  * Licensed under the Elastic License 2.0 (ELv2).
- * You may not provide the software to third parties as a hosted or managed service, 
- * where the service provides users with access to any substantial set of the features 
+ * You may not provide the software to third parties as a hosted or managed service,
+ * where the service provides users with access to any substantial set of the features
  * or functionality of the software.
  */
 
-use serde::{Deserialize, Serialize};
 use anyhow::{bail, Result};
 use bastion::net_guard::ShieldClient;
+use serde::{Deserialize, Serialize};
 
 /// 工場のセキュリティポリシー
-/// 
+///
 /// 許可されたホスト、ツール、リソースへのアクセスを制御する。
 /// Bastion ShieldClient を使用して SSRF や DNS Rebinding を防止する。
 #[derive(Clone, Debug)]
@@ -30,7 +30,7 @@ impl Default for SecurityPolicy {
 
 impl SecurityPolicy {
     /// デフォルトのポリシーを作成
-    /// 
+    ///
     /// デフォルトでは以下を許可：
     /// - Localhost (127.0.0.1)
     /// - Test Node (8188)
@@ -67,7 +67,9 @@ impl SecurityPolicy {
 
     /// URLの安全性を検証する
     pub async fn validate_url(&self, url: &str) -> Result<()> {
-        self.network_shield.validate_url(url).await
+        self.network_shield
+            .validate_url(url)
+            .await
             .map_err(|e| anyhow::anyhow!("Security Violation: {}", e))
     }
 
@@ -76,7 +78,10 @@ impl SecurityPolicy {
         if self.allowed_tools.contains(&tool_name.to_string()) {
             Ok(())
         } else {
-            bail!("Access Denied: Tool '{}' is not in the allowed list", tool_name)
+            bail!(
+                "Access Denied: Tool '{}' is not in the allowed list",
+                tool_name
+            )
         }
     }
 
@@ -146,7 +151,10 @@ mod tests {
     async fn test_default_policy_blocks_external_hosts() -> Result<()> {
         let policy = SecurityPolicy::default();
         // Bastion ShieldClient はデフォルトで private IP 以外をブロック (Allowlistにない場合)
-        assert!(policy.validate_url("http://evil-server.com:443").await.is_err());
+        assert!(policy
+            .validate_url("http://evil-server.com:443")
+            .await
+            .is_err());
         assert!(policy.validate_url("http://1.2.3.4:9999").await.is_err());
         Ok(())
     }

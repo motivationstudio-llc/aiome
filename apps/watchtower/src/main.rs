@@ -3,14 +3,14 @@
  * Copyright (C) 2026 motivationstudio, LLC
  */
 
-use tracing::{info, warn, error};
-use infrastructure::channel_bridge::{DiscordBridge, TelegramBridge, ChannelBridge};
-use shared::watchtower::{CoreEvent, ControlCommand};
+use futures_util::{SinkExt, StreamExt};
+use infrastructure::channel_bridge::{ChannelBridge, DiscordBridge, TelegramBridge};
+use shared::watchtower::{ControlCommand, CoreEvent};
 use std::sync::Arc;
-use tokio_tungstenite::connect_async;
-use futures_util::{StreamExt, SinkExt};
 use tokio::sync::mpsc;
+use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
+use tracing::{error, info, warn};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -19,8 +19,10 @@ async fn main() -> anyhow::Result<()> {
 
     let discord_token = std::env::var("DISCORD_TOKEN").ok();
     let telegram_token = std::env::var("TELEGRAM_TOKEN").ok();
-    let api_secret = std::env::var("API_SERVER_SECRET").expect("🚨 API_SERVER_SECRET must be set for security!");
-    let api_ws_url = std::env::var("API_WS_URL").unwrap_or_else(|_| "ws://127.0.0.1:3015/api/v1/watchtower/ws".to_string());
+    let api_secret =
+        std::env::var("API_SERVER_SECRET").expect("🚨 API_SERVER_SECRET must be set for security!");
+    let api_ws_url = std::env::var("API_WS_URL")
+        .unwrap_or_else(|_| "ws://127.0.0.1:3015/api/v1/watchtower/ws".to_string());
 
     let (command_tx, mut command_rx) = mpsc::channel::<ControlCommand>(100);
 
@@ -57,17 +59,19 @@ async fn main() -> anyhow::Result<()> {
     // Connect to Core (api-server)
     loop {
         info!("🔗 Connecting to Aiome Core at {}...", api_ws_url);
-        
+
         let mut request = url::Url::parse(&api_ws_url)?.into_client_request()?;
         request.headers_mut().insert(
             "Authorization",
-            format!("Bearer {}", api_secret).parse().map_err(|e| anyhow::anyhow!("Failed to parse auth header: {}", e))?
+            format!("Bearer {}", api_secret)
+                .parse()
+                .map_err(|e| anyhow::anyhow!("Failed to parse auth header: {}", e))?,
         );
 
         match connect_async(request).await {
             Ok((mut ws_stream, _)) => {
                 info!("✅ Connected to Aiome Core.");
-                
+
                 loop {
                     tokio::select! {
                         msg = ws_stream.next() => {
@@ -103,20 +107,29 @@ async fn main() -> anyhow::Result<()> {
                 error!("❌ Failed to connect to Core: {:?}. Retrying in 10s...", e);
             }
         }
-        
+
         tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
     }
 }
 
 async fn handle_core_event(event: CoreEvent, bridges: &[Arc<dyn ChannelBridge>]) {
     match event {
-        CoreEvent::ChatResponse { response, channel_id, .. } => {
+        CoreEvent::ChatResponse {
+            response,
+            channel_id,
+            ..
+        } => {
             info!("📨 Relaying ChatResponse to channel {}", channel_id);
             for bridge in bridges {
-                let _ = bridge.send_message(&channel_id.to_string(), &response).await;
+                let _ = bridge
+                    .send_message(&channel_id.to_string(), &response)
+                    .await;
             }
         }
-        CoreEvent::ProactiveTalk { message, channel_id } => {
+        CoreEvent::ProactiveTalk {
+            message,
+            channel_id,
+        } => {
             info!("📨 Relaying ProactiveTalk to channel {}", channel_id);
             let target_channel = if channel_id == 0 {
                 std::env::var("DISCORD_CHAT_CHANNEL_ID").unwrap_or_else(|_| channel_id.to_string())

@@ -3,8 +3,8 @@
  * Copyright (C) 2026 motivationstudio, LLC
  */
 
-use async_trait::async_trait;
 use aiome_core::error::AiomeError;
+use async_trait::async_trait;
 
 #[async_trait]
 pub trait ChannelBridge: Send + Sync {
@@ -15,5 +15,8 @@ pub trait ChannelBridge: Send + Sync {
     async fn send_message(&self, channel_id: &str, content: &str) -> Result<(), AiomeError>;
 
     /// 接続を開始し、イベントループに入る
-    async fn run(&self, command_tx: tokio::sync::mpsc::Sender<shared::watchtower::ControlCommand>) -> Result<(), AiomeError>;
+    async fn run(
+        &self,
+        command_tx: tokio::sync::mpsc::Sender<shared::watchtower::ControlCommand>,
+    ) -> Result<(), AiomeError>;
 }

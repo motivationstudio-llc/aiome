@@ -1,13 +1,13 @@
-use std::process::{Stdio};
-use tokio::process::{Command};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::sync::{Mutex, oneshot};
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicI64, Ordering};
-use tracing::{info, warn};
-use anyhow::{anyhow, Result};
 use crate::mcp::types::{JsonRpcRequest, JsonRpcResponse};
+use anyhow::{anyhow, Result};
+use std::collections::HashMap;
+use std::process::Stdio;
+use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::Arc;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::process::Command;
+use tokio::sync::{oneshot, Mutex};
+use tracing::{info, warn};
 
 /// Phase 17-B: Zombie Defense - Managed child process.
 /// It uses a background task to handle JSON-RPC multiplexing.
@@ -20,8 +20,11 @@ pub struct McpClient {
 
 impl McpClient {
     pub fn spawn(id: String, cmd: &str, args: Vec<String>) -> Result<Arc<Self>> {
-        info!("🚀 [MCP] Spawning stdio server: {} for session: {}", cmd, id);
-        
+        info!(
+            "🚀 [MCP] Spawning stdio server: {} for session: {}",
+            cmd, id
+        );
+
         // Use tokio::process::Command for async I/O
         let mut child = Command::new(cmd)
             .args(args)
@@ -31,11 +34,22 @@ impl McpClient {
             .kill_on_drop(true) // Defense against zombie processes
             .spawn()?;
 
-        let stdin = child.stdin.take().ok_or_else(|| anyhow!("Failed to open stdin"))?;
-        let stdout = child.stdout.take().ok_or_else(|| anyhow!("Failed to open stdout"))?;
-        let mut stderr = child.stderr.take().ok_or_else(|| anyhow!("Failed to open stderr"))?;
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| anyhow!("Failed to open stdin"))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| anyhow!("Failed to open stdout"))?;
+        let mut stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| anyhow!("Failed to open stderr"))?;
 
-        let pending_requests = Arc::new(Mutex::new(HashMap::<i64, oneshot::Sender<JsonRpcResponse>>::new()));
+        let pending_requests = Arc::new(Mutex::new(
+            HashMap::<i64, oneshot::Sender<JsonRpcResponse>>::new(),
+        ));
         let pending_requests_clone = pending_requests.clone();
         let client_id = id.clone();
 
@@ -64,7 +78,10 @@ impl McpClient {
                     info!("📖 [MCP:{}] raw line: {}", client_id_for_stdout, line);
                 }
             }
-            info!("🔌 [MCP:{}] stdout task ended (connection closed)", client_id_for_stdout);
+            info!(
+                "🔌 [MCP:{}] stdout task ended (connection closed)",
+                client_id_for_stdout
+            );
         });
 
         Ok(Arc::new(Self {
@@ -75,7 +92,11 @@ impl McpClient {
         }))
     }
 
-    pub async fn call(&self, method: &str, params: Option<serde_json::Value>) -> Result<serde_json::Value> {
+    pub async fn call(
+        &self,
+        method: &str,
+        params: Option<serde_json::Value>,
+    ) -> Result<serde_json::Value> {
         let id = self.request_counter.fetch_add(1, Ordering::SeqCst);
         let request = JsonRpcRequest {
             jsonrpc: "2.0".to_string(),
@@ -96,13 +117,17 @@ impl McpClient {
         stdin.flush().await?;
 
         // Wait for response
-        let response = rx.await.map_err(|_| anyhow!("MCP connection closed before response"))?;
-        
+        let response = rx
+            .await
+            .map_err(|_| anyhow!("MCP connection closed before response"))?;
+
         if let Some(error) = response.error {
             return Err(anyhow!("MCP Error ({}): {}", error.code, error.message));
         }
 
-        response.result.ok_or_else(|| anyhow!("Empty result from MCP"))
+        response
+            .result
+            .ok_or_else(|| anyhow!("Empty result from MCP"))
     }
 
     // High level MCP methods
@@ -112,7 +137,11 @@ impl McpClient {
         Ok(list.tools)
     }
 
-    pub async fn call_tool(&self, name: &str, arguments: serde_json::Value) -> Result<crate::mcp::types::CallToolResult> {
+    pub async fn call_tool(
+        &self,
+        name: &str,
+        arguments: serde_json::Value,
+    ) -> Result<crate::mcp::types::CallToolResult> {
         let params = serde_json::json!({
             "name": name,
             "arguments": arguments
@@ -138,7 +167,12 @@ impl McpProcessManager {
         clients.get(id).cloned()
     }
 
-    pub async fn spawn_stdio_server(&self, id: String, cmd: &str, args: Vec<String>) -> Result<Arc<McpClient>> {
+    pub async fn spawn_stdio_server(
+        &self,
+        id: String,
+        cmd: &str,
+        args: Vec<String>,
+    ) -> Result<Arc<McpClient>> {
         let client = McpClient::spawn(id.clone(), cmd, args)?;
         let mut clients = self.clients.lock().await;
         clients.insert(id, client.clone());
@@ -153,6 +187,6 @@ impl McpProcessManager {
     pub async fn kill_all(&self) {
         let mut clients = self.clients.lock().await;
         info!("💥 [MCP] Evicting {} managed MCP clients", clients.len());
-        clients.clear(); 
+        clients.clear();
     }
 }

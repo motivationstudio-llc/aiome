@@ -1,17 +1,18 @@
 /*
  * Aiome - The Autonomous AI Operating System
  * Copyright (C) 2026 motivationstudio, LLC
- * 
+ *
  * Licensed under the Elastic License 2.0 (ELv2).
- * You may not provide the software to third parties as a hosted or managed service, 
- * where the service provides users with access to any substantial set of the features 
+ * You may not provide the software to third parties as a hosted or managed service,
+ * where the service provides users with access to any substantial set of the features
  * or functionality of the software.
  */
 
-use std::path::{Path, PathBuf};
-use tracing::{info, error, warn};
 use std::fs;
+use std::path::{Path, PathBuf};
+use tracing::{error, info, warn};
 
+#[derive(Clone)]
 pub struct SkillForge {
     template_dir: PathBuf,
     skills_output_dir: PathBuf,
@@ -29,7 +30,7 @@ impl SkillForge {
     pub fn ensure_forge_workspace(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         if !self.template_dir.exists() {
             fs::create_dir_all(&self.template_dir)?;
-            
+
             // Cargo.toml
             let cargo_toml = r#"[package]
 name = "skill_generator"
@@ -47,7 +48,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 "#;
             fs::write(self.template_dir.join("Cargo.toml"), cargo_toml)?;
-            
+
             // src/lib.rs
             let src_dir = self.template_dir.join("src");
             fs::create_dir_all(&src_dir)?;
@@ -58,8 +59,7 @@ serde_json = "1.0"
 
     /// macOS Seatbelt (sandbox-exec) 用のプロファイル生成
     pub(crate) fn generate_seatbelt_profile(&self, temp_dir: &Path) -> String {
-        let current_dir = std::env::current_dir()
-            .unwrap_or_else(|_| PathBuf::from("."));
+        let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         format!(
             r#"(version 1)
 (allow default)
@@ -84,14 +84,19 @@ serde_json = "1.0"
         let enabled = std::env::var("SKILL_FORGE_ENABLED")
             .map(|v| v.to_lowercase() == "true")
             .unwrap_or(false);
-        
+
         if !enabled {
             error!("🛑 [SkillForge] Forging is BLOCKED. Set SKILL_FORGE_ENABLED=true to allow.");
-            return Err("Security Violation: Real-time skill forging is disabled in this environment.".into());
+            return Err(
+                "Security Violation: Real-time skill forging is disabled in this environment."
+                    .into(),
+            );
         }
 
         // Phase 13-C: File-Based Saga — Use stable workspace for build caching
-        let forge_root = self.skills_output_dir.parent()
+        let forge_root = self
+            .skills_output_dir
+            .parent()
             .and_then(|p| p.parent())
             .unwrap_or(Path::new("workspace"))
             .join("forge_workspaces");
@@ -112,12 +117,18 @@ serde_json = "1.0"
         // 3. Compile Loop (G11 Support: Stderr results will be used for self-healing)
         let rust_code = initial_rust_code.to_string();
         for attempt in 0..=retry_count {
-            info!("🛠️ [SkillForge] Compiling {} (Attempt {}/{})", skill_name, attempt + 1, retry_count + 1);
-            
+            info!(
+                "🛠️ [SkillForge] Compiling {} (Attempt {}/{})",
+                skill_name,
+                attempt + 1,
+                retry_count + 1
+            );
+
             let lib_rs_path = workspace_dir.join("src/lib.rs");
             fs::write(&lib_rs_path, &rust_code)?;
 
-            let abs_workspace = std::fs::canonicalize(&workspace_dir).unwrap_or(workspace_dir.clone());
+            let abs_workspace =
+                std::fs::canonicalize(&workspace_dir).unwrap_or(workspace_dir.clone());
             let profile_content = self.generate_seatbelt_profile(&abs_workspace);
             let profile_path = workspace_dir.join("forge.sb");
             fs::write(&profile_path, profile_content)?;
@@ -140,23 +151,30 @@ serde_json = "1.0"
                 "sandbox-exec",
                 args,
                 std::time::Duration::from_secs(120),
-            ).await;
+            )
+            .await;
 
             match output {
                 Ok(output) => {
                     if output.status.success() {
-                        let wasm_file = workspace_dir.join(format!("target/wasm32-wasip1/release/{}.wasm", skill_name.replace('-', "_"))); 
-                        let final_path = self.skills_output_dir.join(format!("{}.wasm", skill_name));
-                        
+                        let wasm_file = workspace_dir.join(format!(
+                            "target/wasm32-wasip1/release/{}.wasm",
+                            skill_name.replace('-', "_")
+                        ));
+                        let final_path =
+                            self.skills_output_dir.join(format!("{}.wasm", skill_name));
+
                         if !self.skills_output_dir.exists() {
                             fs::create_dir_all(&self.skills_output_dir)?;
                         }
-                        
+
                         fs::copy(&wasm_file, &final_path)?;
                         info!("✅ [SkillForge] Successfully forged skill: {}", skill_name);
-                        
+
                         // 4. Save Metadata
-                        let meta_path = self.skills_output_dir.join(format!("{}.meta.json", skill_name));
+                        let meta_path = self
+                            .skills_output_dir
+                            .join(format!("{}.meta.json", skill_name));
                         #[derive(serde::Serialize)]
                         struct LocalSkillMetadata {
                             name: String,
@@ -179,18 +197,26 @@ serde_json = "1.0"
                         return Ok(final_path);
                     } else {
                         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-                        error!("❌ [SkillForge] Compilation failed for {}:\n{}", skill_name, stderr);
-                        
+                        error!(
+                            "❌ [SkillForge] Compilation failed for {}:\n{}",
+                            skill_name, stderr
+                        );
+
                         if attempt < retry_count {
                             warn!("🔄 [SkillForge] Compilation failed. Continuing retry loop...");
                             // In real-time self-healing, the agent would update rust_code here.
                             // For now, we just loop to fulfill the retry_count logic correctly (Discovery D).
                             continue;
                         } else {
-                            return Err(format!("Compilation failed after {} attempts. Stderr: {}", retry_count + 1, stderr).into());
+                            return Err(format!(
+                                "Compilation failed after {} attempts. Stderr: {}",
+                                retry_count + 1,
+                                stderr
+                            )
+                            .into());
                         }
                     }
-                },
+                }
                 Err(e) => {
                     error!("❌ [SkillForge] Command execution error: {}", e);
                     if attempt >= retry_count {

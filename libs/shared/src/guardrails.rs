@@ -1,10 +1,10 @@
 /*
  * Aiome - The Autonomous AI Operating System
  * Copyright (C) 2026 motivationstudio, LLC
- * 
+ *
  * Licensed under the Elastic License 2.0 (ELv2).
- * You may not provide the software to third parties as a hosted or managed service, 
- * where the service provides users with access to any substantial set of the features 
+ * You may not provide the software to third parties as a hosted or managed service,
+ * where the service provides users with access to any substantial set of the features
  * or functionality of the software.
  */
 
@@ -15,8 +15,8 @@
 //!
 //! Meta: Security Guardrails Policy
 
-use unicode_normalization::UnicodeNormalization;
 pub use bastion::text_guard::ValidationResult;
+use unicode_normalization::UnicodeNormalization;
 
 /// LLM の入力上限（文字数）
 const MAX_INPUT_LENGTH: usize = 4000;
@@ -56,16 +56,17 @@ pub fn sanitize_input(input: &str) -> String {
 pub fn sanitize_asset_name(name: &str) -> String {
     // 1. NFC正規化 (Macの濁点問題などへの対応)
     let nfc_name: String = name.nfc().collect();
-    
+
     // 2. 禁則文字の置換 (ファイル名として安全に)
-    let safe_name = nfc_name.chars()
+    let safe_name = nfc_name
+        .chars()
         .map(|c| match c {
             '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
             c if c.is_control() => '_',
             c => c,
         })
         .collect::<String>();
-    
+
     safe_name.trim().to_string()
 }
 

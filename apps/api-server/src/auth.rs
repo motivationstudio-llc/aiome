@@ -23,7 +23,10 @@ where
             .and_then(|h| h.to_str().ok())
             .unwrap_or_default();
 
-        let query_token = axum::extract::Query::<std::collections::HashMap<String, String>>::try_from_uri(&parts.uri)
+        let query_token =
+            axum::extract::Query::<std::collections::HashMap<String, String>>::try_from_uri(
+                &parts.uri,
+            )
             .ok()
             .and_then(|q| q.get("token").cloned());
 
@@ -49,10 +52,9 @@ where
         } else {
             let mut resp = (StatusCode::UNAUTHORIZED, "Unauthorized").into_response();
             if !auth_header.is_empty() && auth_header.starts_with("Bearer ") {
-                resp.headers_mut().insert(
-                    "X-Token-Expired",
-                    "true".parse().expect("Failed to parse boolean header string"),
-                );
+                use axum::http::HeaderValue;
+                resp.headers_mut()
+                    .insert("X-Token-Expired", HeaderValue::from_static("true"));
             }
             Err(resp)
         }

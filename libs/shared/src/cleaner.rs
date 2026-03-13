@@ -1,10 +1,10 @@
 /*
  * Aiome - The Autonomous AI Operating System
  * Copyright (C) 2026 motivationstudio, LLC
- * 
+ *
  * Licensed under the Elastic License 2.0 (ELv2).
- * You may not provide the software to third parties as a hosted or managed service, 
- * where the service provides users with access to any substantial set of the features 
+ * You may not provide the software to third parties as a hosted or managed service,
+ * where the service provides users with access to any substantial set of the features
  * or functionality of the software.
  */
 
@@ -55,7 +55,7 @@ impl StorageCleaner {
             if mount_point == Path::new("/") || mount_point.starts_with("/System/Volumes/Data") {
                 let used = disk.total_space() - disk.available_space();
                 let usage_percent = (used as f32 / disk.total_space() as f32) * 100.0;
-                
+
                 if usage_percent > self.threshold_percent {
                     tracing::warn!(
                         "⚠️ Disk usage high: {:.2}% on {} (Threshold: {:.2}%)",
@@ -78,7 +78,7 @@ impl StorageCleaner {
             }
 
             tracing::info!("🧹 Cleaning up directory: {}", target.path.display());
-            
+
             if target.recursive {
                 for entry in std::fs::read_dir(&target.path)? {
                     let entry = entry?;
@@ -112,7 +112,7 @@ mod tests {
     fn test_cleanup_files() {
         let temp_dir = std::env::temp_dir().join("aiome_core_test_cleanup");
         fs::create_dir_all(&temp_dir).unwrap();
-        
+
         let file_path = temp_dir.join("temp_file.txt");
         fs::write(&file_path, "trash").unwrap();
         assert!(file_path.exists());

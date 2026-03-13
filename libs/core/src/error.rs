@@ -1,10 +1,10 @@
 /*
  * Aiome - The Autonomous AI Operating System
  * Copyright (C) 2026 motivationstudio, LLC
- * 
+ *
  * Licensed under the Elastic License 2.0 (ELv2).
- * You may not provide the software to third parties as a hosted or managed service, 
- * where the service provides users with access to any substantial set of the features 
+ * You may not provide the software to third parties as a hosted or managed service,
+ * where the service provides users with access to any substantial set of the features
  * or functionality of the software.
  */
 
@@ -72,10 +72,7 @@ pub enum AiomeError {
 
     // === 運用・リソース管理 ===
     #[error("リソース不足: 必要 {required_mb}MB, 利用可能 {available_mb}MB")]
-    ResourceShortage {
-        required_mb: u64,
-        available_mb: u64,
-    },
+    ResourceShortage { required_mb: u64, available_mb: u64 },
 
     #[error("ストレージ不足: 使用率が閾値 {threshold}% を超過")]
     StorageFull { threshold: f32 },

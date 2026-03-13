@@ -1,35 +1,41 @@
 /*
  * Aiome - The Autonomous AI Operating System
  * Copyright (C) 2026 motivationstudio, LLC
- * 
+ *
  * Licensed under the Elastic License 2.0 (ELv2).
- * You may not provide the software to third parties as a hosted or managed service, 
- * where the service provides users with access to any substantial set of the features 
+ * You may not provide the software to third parties as a hosted or managed service,
+ * where the service provides users with access to any substantial set of the features
  * or functionality of the software.
  */
 
-use axum::{
-    extract::{State, ws::{WebSocket, WebSocketUpgrade, Message}, DefaultBodyLimit},
-    routing::{get, post},
-    response::{IntoResponse},
-    Router, Json,
-    http::{StatusCode, HeaderMap},
-    error_handling::HandleErrorLayer,
+use aiome_core::contracts::{
+    FederatedKarma, FederationPushRequest, FederationPushResponse, FederationSyncRequest,
+    FederationSyncResponse, HubMessage, ImmuneRule,
 };
-use tokio_util::sync::CancellationToken;
-use std::sync::Arc;
-use tokio::sync::broadcast;
-use sqlx::SqlitePool;
-use sqlx::Row;
-use aiome_core::contracts::{FederationSyncRequest, FederationSyncResponse, FederationPushRequest, FederationPushResponse, FederatedKarma, ImmuneRule, HubMessage};
-use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
-use std::str::FromStr;
-use tracing::{info, warn, error};
-use tower_http::cors::CorsLayer;
+use axum::{
+    error_handling::HandleErrorLayer,
+    extract::{
+        ws::{Message, WebSocket, WebSocketUpgrade},
+        DefaultBodyLimit, State,
+    },
+    http::{HeaderMap, StatusCode},
+    response::IntoResponse,
+    routing::{get, post},
+    Json, Router,
+};
 use secrecy::ExposeSecret;
-use tower::{ServiceBuilder, limit::RateLimitLayer, buffer::BufferLayer};
-use std::time::Duration;
 use serde::{Deserialize, Serialize};
+use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
+use sqlx::Row;
+use sqlx::SqlitePool;
+use std::str::FromStr;
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::sync::broadcast;
+use tokio_util::sync::CancellationToken;
+use tower::{buffer::BufferLayer, limit::RateLimitLayer, ServiceBuilder};
+use tower_http::cors::CorsLayer;
+use tracing::{error, info, warn};
 
 pub struct HubState {
     pool: SqlitePool,
@@ -64,15 +70,16 @@ struct ImmuneRuleRecord {
     created_at: String,
 }
 
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // Initialize tracing with JSON for easier aggregation in the hub
     tracing_subscriber::fmt().json().init();
-    
-    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite:samsara_hub.db?mode=rwc".to_string());
+
+    let db_url = std::env::var("DATABASE_URL")
+        .unwrap_or_else(|_| "sqlite:samsara_hub.db?mode=rwc".to_string());
     let secret = secrecy::SecretString::new(
-        std::env::var("FEDERATION_SECRET").expect("FEDERATION_SECRET must be set for Samsara Hub security")
+        std::env::var("FEDERATION_SECRET")
+            .expect("FEDERATION_SECRET must be set for Samsara Hub security"),
     );
     let port = std::env::var("PORT").unwrap_or_else(|_| "3016".to_string());
 
@@ -84,25 +91,24 @@ async fn main() -> anyhow::Result<()> {
 
     let pool = SqlitePoolOptions::new()
         .max_connections(50) // Scaling to handle multi-node load testing
-        .connect_with(options).await?;
+        .connect_with(options)
+        .await?;
 
     init_hub_db(&pool).await?;
 
     // Create broadcast channel for real-time rule/karma notification
     let (tx, _) = broadcast::channel(100);
-    let state = Arc::new(HubState { 
-        pool: pool.clone(), 
-        secret, 
+    let state = Arc::new(HubState {
+        pool: pool.clone(),
+        secret,
         tx,
         active_connections: std::sync::atomic::AtomicUsize::new(0),
     });
-    
+
     let token = CancellationToken::new();
 
     // Spawn the Approval Worker to process quarantine
     tokio::spawn(approval_worker(pool, token.clone()));
-
-
 
     let state_bg = state.clone();
     let token_bg = token.clone();
@@ -121,9 +127,9 @@ async fn main() -> anyhow::Result<()> {
 
     let app = build_app(state);
 
-    let addr = format!("127.0.0.1:{}", port); 
+    let addr = format!("127.0.0.1:{}", port);
     info!("🏔️ Samsara Hub (The Validator) listening on {}", addr);
-    
+
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal(token))
@@ -158,16 +164,16 @@ async fn shutdown_signal(token: CancellationToken) {
             info!("🔴 [samsara-hub] Received Terminate signal. Initiating graceful shutdown...");
         },
     }
-    
+
     token.cancel();
 }
 
 async fn init_hub_db(pool: &SqlitePool) -> anyhow::Result<()> {
     // Hub DB schema includes 'is_approved' or separate quarantine tables.
     // For this implementation, we use separate tables for Quarantined data.
-    
+
     let _now_rfc = chrono::Utc::now().to_rfc3339();
-    
+
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS approved_karma (
             id TEXT PRIMARY KEY,
@@ -181,8 +187,10 @@ async fn init_hub_db(pool: &SqlitePool) -> anyhow::Result<()> {
             signature TEXT,
             approved_at TEXT,
             created_at TEXT NOT NULL
-        );"
-    ).execute(pool).await?;
+        );",
+    )
+    .execute(pool)
+    .await?;
 
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS quarantined_karma (
@@ -197,8 +205,10 @@ async fn init_hub_db(pool: &SqlitePool) -> anyhow::Result<()> {
             signature TEXT,
             received_at TEXT,
             created_at TEXT NOT NULL
-        );"
-    ).execute(pool).await?;
+        );",
+    )
+    .execute(pool)
+    .await?;
 
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS approved_rules (
@@ -211,8 +221,10 @@ async fn init_hub_db(pool: &SqlitePool) -> anyhow::Result<()> {
             signature TEXT,
             approved_at TEXT,
             created_at TEXT NOT NULL
-        );"
-    ).execute(pool).await?;
+        );",
+    )
+    .execute(pool)
+    .await?;
 
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS quarantined_rules (
@@ -225,11 +237,17 @@ async fn init_hub_db(pool: &SqlitePool) -> anyhow::Result<()> {
             signature TEXT,
             received_at TEXT,
             created_at TEXT NOT NULL
-        );"
-    ).execute(pool).await?;
+        );",
+    )
+    .execute(pool)
+    .await?;
 
-    sqlx::query("CREATE INDEX IF NOT EXISTS idx_approved_karma_at ON approved_karma(approved_at);").execute(pool).await?;
-    sqlx::query("CREATE INDEX IF NOT EXISTS idx_approved_rules_at ON approved_rules(approved_at);").execute(pool).await?;
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_approved_karma_at ON approved_karma(approved_at);")
+        .execute(pool)
+        .await?;
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_approved_rules_at ON approved_rules(approved_at);")
+        .execute(pool)
+        .await?;
 
     // BFT: Composite indexes for O(1) Equivocation (Double-Signing) Detection
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_q_karma_node_clock ON quarantined_karma(node_id, lamport_clock);").execute(pool).await?;
@@ -245,8 +263,10 @@ async fn init_hub_db(pool: &SqlitePool) -> anyhow::Result<()> {
             reasoning TEXT,
             approved_at TEXT,
             created_at TEXT NOT NULL
-        );"
-    ).execute(pool).await?;
+        );",
+    )
+    .execute(pool)
+    .await?;
 
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS quarantined_arena_matches (
@@ -258,10 +278,16 @@ async fn init_hub_db(pool: &SqlitePool) -> anyhow::Result<()> {
             reasoning TEXT,
             received_at TEXT,
             created_at TEXT NOT NULL
-        );"
-    ).execute(pool).await?;
+        );",
+    )
+    .execute(pool)
+    .await?;
 
-    sqlx::query("CREATE INDEX IF NOT EXISTS idx_approved_arena_at ON approved_arena_matches(approved_at);").execute(pool).await?;
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_approved_arena_at ON approved_arena_matches(approved_at);",
+    )
+    .execute(pool)
+    .await?;
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_a_karma_node_clock ON approved_karma(node_id, lamport_clock);").execute(pool).await?;
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_a_rules_node_clock ON approved_rules(node_id, lamport_clock);").execute(pool).await?;
 
@@ -272,9 +298,26 @@ async fn init_hub_db(pool: &SqlitePool) -> anyhow::Result<()> {
             reputation_score INTEGER NOT NULL DEFAULT 100,
             is_banned INTEGER NOT NULL DEFAULT 0,
             last_seen_at TEXT NOT NULL
-        );"
-    ).execute(pool).await?;
-    
+        );",
+    )
+    .execute(pool)
+    .await?;
+
+    // Biome Topics (Phase 20)
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS biome_topics (
+            topic_id TEXT PRIMARY KEY,
+            peer_pubkey TEXT NOT NULL,
+            summary TEXT,
+            status TEXT NOT NULL DEFAULT 'Active',
+            turn_count INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now'))
+        );",
+    )
+    .execute(pool)
+    .await?;
+
     // Biome Relay Buffer (Phase 20)
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS biome_relay_queue (
@@ -283,26 +326,141 @@ async fn init_hub_db(pool: &SqlitePool) -> anyhow::Result<()> {
             payload TEXT NOT NULL,
             is_delivered INTEGER NOT NULL DEFAULT 0,
             created_at TEXT DEFAULT (datetime('now'))
-        );"
-    ).execute(pool).await?;
+        );",
+    )
+    .execute(pool)
+    .await?;
 
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_biome_relay_recipient ON biome_relay_queue(recipient_pubkey) WHERE is_delivered = 0;").execute(pool).await?;
-    
+
     // CRDT Timeline (Phase 20)
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS hub_timeline (
             id TEXT PRIMARY KEY,
             automerge_blob BLOB NOT NULL,
             updated_at TEXT DEFAULT (datetime('now'))
-        );"
-    ).execute(pool).await?;
+        );",
+    )
+    .execute(pool)
+    .await?;
 
     info!("✅ Hub Database initialized (Approved & Quarantine layers + BFT/Reputation & Biome).");
     Ok(())
 }
 
 async fn health_handler() -> (StatusCode, Json<serde_json::Value>) {
-    (StatusCode::OK, Json(serde_json::json!({"status": "healthy", "service": "samsara-hub"})))
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({"status": "healthy", "service": "samsara-hub"})),
+    )
+}
+
+#[derive(serde::Deserialize)]
+struct CreateTopicRequest {
+    topic_id: String,
+    peer_pubkey: String,
+    summary: Option<String>,
+}
+
+async fn list_topics_handler(
+    State(state): State<Arc<HubState>>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let rows = sqlx::query(
+        "SELECT * FROM biome_topics WHERE status = 'Active' ORDER BY updated_at DESC LIMIT 50",
+    )
+    .fetch_all(&state.pool)
+    .await
+    .unwrap_or_default();
+
+    let topics: Vec<serde_json::Value> = rows
+        .into_iter()
+        .map(|row| {
+            serde_json::json!({
+                "topic_id": row.get::<String, _>("topic_id"),
+                "peer_pubkey": row.get::<String, _>("peer_pubkey"),
+                "summary": row.get::<Option<String>, _>("summary"),
+                "turn_count": row.get::<i32, _>("turn_count"),
+                "created_at": row.get::<Option<String>, _>("created_at"),
+            })
+        })
+        .collect();
+
+    (StatusCode::OK, Json(serde_json::json!(topics)))
+}
+
+async fn create_topic_handler(
+    State(state): State<Arc<HubState>>,
+    headers: HeaderMap,
+    Json(req): Json<CreateTopicRequest>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    // 1. Auth Check (Same as relay/sync)
+    use subtle::ConstantTimeEq;
+    let auth = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("");
+    let expected = format!("Bearer {}", state.secret.expose_secret());
+    let is_auth_valid = if auth.len() == expected.len() {
+        bool::from(auth.as_bytes().ct_eq(expected.as_bytes()))
+    } else {
+        false
+    };
+    if !is_auth_valid {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"error": "Unauthorized"})),
+        );
+    }
+
+    // 2. Proof of Karma (PoK) Verification
+    // Requirement: Technical Karma weight sum >= 500
+    let karma_sum = sqlx::query_scalar::<_, i64>(
+        "SELECT COALESCE(SUM(weight), 0) FROM approved_karma WHERE node_id = ? AND karma_type = 'Technical'"
+    )
+    .bind(&req.peer_pubkey)
+    .fetch_one(&state.pool).await.unwrap_or(0);
+
+    info!(
+        "🛡️ [Hub] PoK Check for {}: Technical Karma = {}",
+        req.peer_pubkey, karma_sum
+    );
+
+    if karma_sum < 500 {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "error": "Insufficient Technical Karma to create a topic",
+                "required": 500,
+                "actual": karma_sum
+            })),
+        );
+    }
+
+    // 3. Insert Topic
+    let res =
+        sqlx::query("INSERT INTO biome_topics (topic_id, peer_pubkey, summary) VALUES (?, ?, ?)")
+            .bind(&req.topic_id)
+            .bind(&req.peer_pubkey)
+            .bind(&req.summary)
+            .execute(&state.pool)
+            .await;
+
+    match res {
+        Ok(_) => {
+            info!(
+                "🌟 [Hub] New Biome Topic created: {} by {}",
+                req.topic_id, req.peer_pubkey
+            );
+            (
+                StatusCode::CREATED,
+                Json(serde_json::json!({"status": "created", "topic_id": req.topic_id})),
+            )
+        }
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": format!("Topic creation failed: {}", e)})),
+        ),
+    }
 }
 
 async fn biome_relay_handler(
@@ -311,18 +469,57 @@ async fn biome_relay_handler(
     Json(msg): Json<aiome_core::biome::BiomeMessage>,
 ) -> (StatusCode, Json<serde_json::Value>) {
     // 1. Auth Check
-    let auth = headers.get(axum::http::header::AUTHORIZATION).and_then(|h| h.to_str().ok()).unwrap_or("");
-    if !auth.starts_with("Bearer ") || auth[7..] != *state.secret.expose_secret() {
-        return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"status": "error", "message": "Unauthorized"})));
+    use subtle::ConstantTimeEq;
+    let auth = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("");
+    let expected = format!("Bearer {}", state.secret.expose_secret());
+    let is_auth_valid = if auth.len() == expected.len() {
+        bool::from(auth.as_bytes().ct_eq(expected.as_bytes()))
+    } else {
+        false
+    };
+    if !is_auth_valid {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"error": "Unauthorized"})),
+        );
+    }
+
+    // 1.5 Topic Existence / Status Check
+    let topic_exists = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM biome_topics WHERE topic_id = ? AND status = 'Active'",
+    )
+    .bind(&msg.topic_id)
+    .fetch_one(&state.pool)
+    .await
+    .unwrap_or(0)
+        > 0;
+
+    if !topic_exists {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "Topic not found or inactive"})),
+        );
     }
 
     // 2. Verification (Signature)
-    use ed25519_dalek::{VerifyingKey, Signature, Verifier};
     use base64::prelude::*;
+    use ed25519_dalek::{Signature, Verifier, VerifyingKey};
     let mut valid = false;
-    let payload = format!("{}:{}:{}", msg.sender_pubkey, msg.topic_id, msg.lamport_clock);
-    if let (Ok(pubkey_bytes), Ok(sig_bytes)) = (BASE64_STANDARD.decode(&msg.sender_pubkey), BASE64_STANDARD.decode(&msg.signature)) {
-        if let (Ok(pubkey), Ok(sig)) = (VerifyingKey::from_bytes(&pubkey_bytes.try_into().unwrap_or([0; 32])), Signature::from_slice(&sig_bytes)) {
+    let payload = format!(
+        "{}:{}:{}",
+        msg.sender_pubkey, msg.topic_id, msg.lamport_clock
+    );
+    if let (Ok(pubkey_bytes), Ok(sig_bytes)) = (
+        BASE64_STANDARD.decode(&msg.sender_pubkey),
+        BASE64_STANDARD.decode(&msg.signature),
+    ) {
+        if let (Ok(pubkey), Ok(sig)) = (
+            VerifyingKey::from_bytes(&pubkey_bytes.try_into().unwrap_or([0; 32])),
+            Signature::from_slice(&sig_bytes),
+        ) {
             if pubkey.verify(payload.as_bytes(), &sig).is_ok() {
                 valid = true;
             }
@@ -330,23 +527,38 @@ async fn biome_relay_handler(
     }
 
     if !valid {
-         return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"status": "error", "message": "Invalid Signature"})));
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"status": "error", "message": "Invalid Signature"})),
+        );
     }
 
     // 3. Relay Logic
-    info!("📫 [Hub] Relaying Biome Message from {} to topic {}", msg.sender_pubkey, msg.topic_id);
-    
+    info!(
+        "📫 [Hub] Relaying Biome Message from {} to topic {}",
+        msg.sender_pubkey, msg.topic_id
+    );
+
     // Buffer in DB
     let payload_json = serde_json::to_string(&msg).unwrap_or_default();
     let _ = sqlx::query("INSERT INTO biome_relay_queue (recipient_pubkey, payload) VALUES (?, ?)")
         .bind(&msg.recipient_pubkey)
         .bind(&payload_json)
+        .execute(&state.pool)
+        .await;
+
+    // Update Turn Count in Topic (State Channel)
+    let _ = sqlx::query("UPDATE biome_topics SET turn_count = turn_count + 1, updated_at = datetime('now') WHERE topic_id = ?")
+        .bind(&msg.topic_id)
         .execute(&state.pool).await;
 
     // Broadcast to real-time subscribers
     let _ = state.tx.send(HubMessage::BiomeRelay(msg));
 
-    (StatusCode::ACCEPTED, Json(serde_json::json!({"status": "accepted"})))
+    (
+        StatusCode::ACCEPTED,
+        Json(serde_json::json!({"status": "accepted"})),
+    )
 }
 
 async fn biome_ws_handler(
@@ -354,8 +566,18 @@ async fn biome_ws_handler(
     headers: HeaderMap,
     State(state): State<Arc<HubState>>,
 ) -> impl IntoResponse {
-    let auth = headers.get(axum::http::header::AUTHORIZATION).and_then(|h| h.to_str().ok()).unwrap_or("");
-    if !auth.starts_with("Bearer ") || auth[7..] != *state.secret.expose_secret() {
+    use subtle::ConstantTimeEq;
+    let auth = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("");
+    let expected = format!("Bearer {}", state.secret.expose_secret());
+    let is_auth_valid = if auth.len() == expected.len() {
+        bool::from(auth.as_bytes().ct_eq(expected.as_bytes()))
+    } else {
+        false
+    };
+    if !is_auth_valid {
         return (StatusCode::UNAUTHORIZED, "Unauthorized").into_response();
     }
 
@@ -366,10 +588,10 @@ async fn biome_ws_handler(
 
 async fn handle_biome_ws(mut socket: WebSocket, state: Arc<HubState>) {
     let mut rx = state.tx.subscribe();
-    
+
     // Initial fetch of buffered messages for this node (would need node_id to be provided during handshake)
     // For MVP, just relay new messages in real-time.
-    
+
     loop {
         tokio::select! {
             Ok(msg) = rx.recv() => {
@@ -397,9 +619,12 @@ async fn sync_handler(
     Json(payload): Json<FederationSyncRequest>,
 ) -> impl IntoResponse {
     use subtle::ConstantTimeEq;
-    let auth = headers.get(axum::http::header::AUTHORIZATION).and_then(|h| h.to_str().ok()).unwrap_or("");
+    let auth = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("");
     let expected = format!("Bearer {}", state.secret.expose_secret());
-    
+
     let is_auth_valid = if auth.len() == expected.len() {
         bool::from(auth.as_bytes().ct_eq(expected.as_bytes()))
     } else {
@@ -409,20 +634,44 @@ async fn sync_handler(
     };
 
     if !is_auth_valid {
-        warn!("🔒 Unauthorized sync attempt from node: {}", payload.node_id);
-        return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Unauthorized"}))).into_response();
+        warn!(
+            "🔒 Unauthorized sync attempt from node: {}",
+            payload.node_id
+        );
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"error": "Unauthorized"})),
+        )
+            .into_response();
     }
 
     // BFT: BAN Check
-    if let Ok(1) = sqlx::query_scalar::<sqlx::Sqlite, i64>("SELECT is_banned FROM node_reputation WHERE node_id = ?")
-        .bind(&payload.node_id).fetch_one(&state.pool).await {
-            warn!("🛡️ [BFT] Rejecting sync from BANNED node: {}", payload.node_id);
-            return (StatusCode::FORBIDDEN, Json(serde_json::json!({"error": "Node is banned"}))).into_response();
-        }
+    if let Ok(1) = sqlx::query_scalar::<sqlx::Sqlite, i64>(
+        "SELECT is_banned FROM node_reputation WHERE node_id = ?",
+    )
+    .bind(&payload.node_id)
+    .fetch_one(&state.pool)
+    .await
+    {
+        warn!(
+            "🛡️ [BFT] Rejecting sync from BANNED node: {}",
+            payload.node_id
+        );
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({"error": "Node is banned"})),
+        )
+            .into_response();
+    }
 
-    info!("🌐 Node {} pulling approved updates since {:?}", payload.node_id, payload.since);
+    info!(
+        "🌐 Node {} pulling approved updates since {:?}",
+        payload.node_id, payload.since
+    );
 
-    let since = payload.since.unwrap_or_else(|| "1970-01-01T00:00:00".to_string());
+    let since = payload
+        .since
+        .unwrap_or_else(|| "1970-01-01T00:00:00".to_string());
 
     // Fetch ONLY approved data with Pagination (Flaw 2: OOM Defense)
     let karmas = sqlx::query_as::<_, FederatedKarmaRecord>(
@@ -452,40 +701,49 @@ async fn sync_handler(
         .unwrap_or_default();
 
     let response = FederationSyncResponse {
-        new_karmas: karmas.into_iter().map(|k| FederatedKarma {
-            id: k.id,
-            job_id: None,
-            karma_type: k.karma_type,
-            related_skill: k.related_skill,
-            lesson: k.lesson,
-            weight: k.weight as i32,
-            created_at: k.created_at,
-            soul_version_hash: k.soul_version_hash,
-            lamport_clock: k.lamport_clock as u64,
-            node_id: k.node_id,
-            signature: k.signature,
-        }).collect(),
-        new_immune_rules: rules.into_iter().map(|r| ImmuneRule {
-            id: r.id,
-            pattern: r.pattern,
-            severity: r.severity as u8,
-            action: r.action,
-            created_at: r.created_at,
-            lamport_clock: r.lamport_clock as u64,
-            node_id: r.node_id,
-            signature: r.signature,
-        }).collect(),
-        new_arena_matches: arena_rows.into_iter().map(|a| aiome_core::contracts::ArenaMatch {
-            id: a.get("id"),
-            skill_a: a.get("skill_a"),
-            skill_b: a.get("skill_b"),
-            topic: a.get("topic"),
-            winner: a.get("winner"),
-            reasoning: a.get("reasoning"),
-            created_at: a.get("created_at"),
-        }).collect(),
+        new_karmas: karmas
+            .into_iter()
+            .map(|k| FederatedKarma {
+                id: k.id,
+                job_id: None,
+                karma_type: k.karma_type,
+                related_skill: k.related_skill,
+                lesson: k.lesson,
+                weight: k.weight as i32,
+                created_at: k.created_at,
+                soul_version_hash: k.soul_version_hash,
+                lamport_clock: k.lamport_clock as u64,
+                node_id: k.node_id,
+                signature: k.signature,
+            })
+            .collect(),
+        new_immune_rules: rules
+            .into_iter()
+            .map(|r| ImmuneRule {
+                id: r.id,
+                pattern: r.pattern,
+                severity: r.severity as u8,
+                action: r.action,
+                created_at: r.created_at,
+                lamport_clock: r.lamport_clock as u64,
+                node_id: r.node_id,
+                signature: r.signature,
+            })
+            .collect(),
+        new_arena_matches: arena_rows
+            .into_iter()
+            .map(|a| aiome_core::contracts::ArenaMatch {
+                id: a.get("id"),
+                skill_a: a.get("skill_a"),
+                skill_b: a.get("skill_b"),
+                topic: a.get("topic"),
+                winner: a.get("winner"),
+                reasoning: a.get("reasoning"),
+                created_at: a.get("created_at"),
+            })
+            .collect(),
         server_time: chrono::Utc::now().to_rfc3339(),
-        next_cursor: None, 
+        next_cursor: None,
         has_more,
     };
 
@@ -499,9 +757,12 @@ async fn push_handler(
 ) -> impl IntoResponse {
     // Auth Wall
     use subtle::ConstantTimeEq;
-    let auth = headers.get(axum::http::header::AUTHORIZATION).and_then(|h| h.to_str().ok()).unwrap_or("");
+    let auth = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("");
     let expected = format!("Bearer {}", state.secret.expose_secret());
-    
+
     let is_auth_valid = if auth.len() == expected.len() {
         bool::from(auth.as_bytes().ct_eq(expected.as_bytes()))
     } else {
@@ -509,24 +770,52 @@ async fn push_handler(
     };
 
     if !is_auth_valid {
-        warn!("🔒 Unauthorized push attempt from node: {}", payload.node_id);
-        return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Unauthorized"}))).into_response();
+        warn!(
+            "🔒 Unauthorized push attempt from node: {}",
+            payload.node_id
+        );
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"error": "Unauthorized"})),
+        )
+            .into_response();
     }
 
     // BFT: BAN Check
-    if let Ok(1) = sqlx::query_scalar::<sqlx::Sqlite, i64>("SELECT is_banned FROM node_reputation WHERE node_id = ?")
-        .bind(&payload.node_id).fetch_one(&state.pool).await {
-            warn!("🛡️ [BFT] Rejecting push from BANNED node: {}", payload.node_id);
-            return (StatusCode::FORBIDDEN, Json(serde_json::json!({"error": "Node is banned"}))).into_response();
-        }
+    if let Ok(1) = sqlx::query_scalar::<sqlx::Sqlite, i64>(
+        "SELECT is_banned FROM node_reputation WHERE node_id = ?",
+    )
+    .bind(&payload.node_id)
+    .fetch_one(&state.pool)
+    .await
+    {
+        warn!(
+            "🛡️ [BFT] Rejecting push from BANNED node: {}",
+            payload.node_id
+        );
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({"error": "Node is banned"})),
+        )
+            .into_response();
+    }
 
     let karma_count = payload.karmas.len();
     let rule_count = payload.rules.len();
-    info!("📥 Received push from node {}: {} Karmas, {} Rules. Sending to Quarantine.", payload.node_id, karma_count, rule_count);
+    info!(
+        "📥 Received push from node {}: {} Karmas, {} Rules. Sending to Quarantine.",
+        payload.node_id, karma_count, rule_count
+    );
 
     let mut tx = match state.pool.begin().await {
         Ok(t) => t,
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": e.to_string()}))).into_response(),
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": e.to_string()})),
+            )
+                .into_response()
+        }
     };
 
     let received_at = chrono::Utc::now().to_rfc3339();
@@ -545,10 +834,17 @@ async fn push_handler(
         .fetch_one(&state.pool).await.unwrap_or(0);
 
         if exists > 0 {
-            warn!("🛡️ [BFT] EQUIVOCATION detected from node: {}. Slashing node.", k.node_id);
+            warn!(
+                "🛡️ [BFT] EQUIVOCATION detected from node: {}. Slashing node.",
+                k.node_id
+            );
             let _ = sqlx::query("UPDATE node_reputation SET is_banned = 1, reputation_score = -1000 WHERE node_id = ?")
                 .bind(&k.node_id).execute(&state.pool).await;
-            return (StatusCode::FORBIDDEN, Json(serde_json::json!({"error": "Equivocation detected"}))).into_response();
+            return (
+                StatusCode::FORBIDDEN,
+                Json(serde_json::json!({"error": "Equivocation detected"})),
+            )
+                .into_response();
         }
 
         let _ = sqlx::query(
@@ -576,10 +872,17 @@ async fn push_handler(
         .fetch_one(&state.pool).await.unwrap_or(0);
 
         if exists > 0 {
-            warn!("🛡️ [BFT] EQUIVOCATION detected in RULE from node: {}. Slashing node.", r.node_id);
+            warn!(
+                "🛡️ [BFT] EQUIVOCATION detected in RULE from node: {}. Slashing node.",
+                r.node_id
+            );
             let _ = sqlx::query("UPDATE node_reputation SET is_banned = 1, reputation_score = -1000 WHERE node_id = ?")
                 .bind(&r.node_id).execute(&state.pool).await;
-            return (StatusCode::FORBIDDEN, Json(serde_json::json!({"error": "Equivocation detected"}))).into_response();
+            return (
+                StatusCode::FORBIDDEN,
+                Json(serde_json::json!({"error": "Equivocation detected"})),
+            )
+                .into_response();
         }
 
         let _ = sqlx::query(
@@ -605,7 +908,11 @@ async fn push_handler(
 
     if let Err(e) = tx.commit().await {
         error!("❌ Push commit failed: {}", e);
-        return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": e.to_string()}))).into_response();
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": e.to_string()})),
+        )
+            .into_response();
     }
 
     let arenas_count = payload.arena_matches.len();
@@ -624,10 +931,14 @@ async fn push_handler(
         let _ = state.tx.send(HubMessage::NewKarma(k.clone()));
     }
 
-    (StatusCode::OK, Json(FederationPushResponse {
-        accepted_count: karma_count + rule_count + arenas_count,
-        message: "Data received and placed in quarantine for validation.".to_string(),
-    })).into_response()
+    (
+        StatusCode::OK,
+        Json(FederationPushResponse {
+            accepted_count: karma_count + rule_count + arenas_count,
+            message: "Data received and placed in quarantine for validation.".to_string(),
+        }),
+    )
+        .into_response()
 }
 
 async fn ws_handler(
@@ -636,9 +947,12 @@ async fn ws_handler(
     State(state): State<Arc<HubState>>,
 ) -> impl IntoResponse {
     use subtle::ConstantTimeEq;
-    let auth = headers.get(axum::http::header::AUTHORIZATION).and_then(|h| h.to_str().ok()).unwrap_or("");
+    let auth = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("");
     let expected = format!("Bearer {}", state.secret.expose_secret());
-    
+
     let is_auth_valid = if auth.len() == expected.len() {
         bool::from(auth.as_bytes().ct_eq(expected.as_bytes()))
     } else {
@@ -655,18 +969,25 @@ async fn ws_handler(
 
 async fn handle_socket(mut socket: WebSocket, state: Arc<HubState>) {
     use aiome_core::contracts::HubMessage;
-    
+
     // TCP Exhaustion Defense (Max Connections)
-    let current_conn = state.active_connections.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    let current_conn = state
+        .active_connections
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     if current_conn >= 1000 {
         warn!("🛡️ [BFT] Hub reached max WebSocket connections (1000). Rejecting new node.");
-        state.active_connections.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+        state
+            .active_connections
+            .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
         let _ = socket.send(Message::Close(None)).await;
         return;
     }
 
-    info!("🔌 Authorized node connected via WebSocket (Total: {})", current_conn + 1);
-    
+    info!(
+        "🔌 Authorized node connected via WebSocket (Total: {})",
+        current_conn + 1
+    );
+
     let mut rx = state.tx.subscribe();
     let mut keepalive_timer = tokio::time::interval(Duration::from_secs(30));
 
@@ -707,8 +1028,8 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<HubState>) {
                     }
                     Err(broadcast::error::RecvError::Lagged(n)) => {
                         warn!("⚠️ WS Client lagged by {} messages. Triggering Catch-up Sync.", n);
-                        let hub_msg = HubMessage::LaggedForceSync { 
-                            server_time: chrono::Utc::now().to_rfc3339() 
+                        let hub_msg = HubMessage::LaggedForceSync {
+                            server_time: chrono::Utc::now().to_rfc3339()
                         };
                         if let Ok(text) = serde_json::to_string(&hub_msg) {
                             let _ = socket.send(Message::Text(text)).await;
@@ -720,28 +1041,41 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<HubState>) {
             }
         }
     }
-    state.active_connections.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    state
+        .active_connections
+        .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
 }
 
 async fn approval_worker(pool: SqlitePool, token: CancellationToken) {
-    use ed25519_dalek::{VerifyingKey, Signature, Verifier};
     use base64::{prelude::BASE64_STANDARD, Engine};
+    use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 
     info!("⚙️ [ApprovalWorker] Starting quarantine validation thread.");
 
     loop {
-        if token.is_cancelled() { break; }
+        if token.is_cancelled() {
+            break;
+        }
 
         // 1. Process Quarantined Karma
-        let karmas = sqlx::query_as::<_, FederatedKarmaRecord>("SELECT * FROM quarantined_karma LIMIT 50")
-            .fetch_all(&pool).await.unwrap_or_default();
+        let karmas =
+            sqlx::query_as::<_, FederatedKarmaRecord>("SELECT * FROM quarantined_karma LIMIT 50")
+                .fetch_all(&pool)
+                .await
+                .unwrap_or_default();
 
         for k in &karmas {
             let mut valid = false;
             if let Some(ref sig_b64) = k.signature {
                 let payload = format!("{}:{}:{}", k.id, k.lesson, k.lamport_clock);
-                if let (Ok(pubkey_bytes), Ok(sig_bytes)) = (BASE64_STANDARD.decode(&k.node_id), BASE64_STANDARD.decode(sig_b64)) {
-                    if let (Ok(pubkey), Ok(sig)) = (VerifyingKey::from_bytes(&pubkey_bytes.try_into().unwrap_or([0; 32])), Signature::from_slice(&sig_bytes)) {
+                if let (Ok(pubkey_bytes), Ok(sig_bytes)) = (
+                    BASE64_STANDARD.decode(&k.node_id),
+                    BASE64_STANDARD.decode(sig_b64),
+                ) {
+                    if let (Ok(pubkey), Ok(sig)) = (
+                        VerifyingKey::from_bytes(&pubkey_bytes.try_into().unwrap_or([0; 32])),
+                        Signature::from_slice(&sig_bytes),
+                    ) {
                         if pubkey.verify(payload.as_bytes(), &sig).is_ok() {
                             valid = true;
                         }
@@ -757,7 +1091,10 @@ async fn approval_worker(pool: SqlitePool, token: CancellationToken) {
                             .bind(&k.id).bind(&k.node_id).bind(&k.karma_type).bind(&k.related_skill).bind(&k.lesson)
                             .bind(k.weight).bind(&k.soul_version_hash).bind(k.lamport_clock).bind(&k.signature).bind(&k.created_at).bind(&approved_at)
                             .execute(&mut *tx).await;
-                        let _ = sqlx::query("DELETE FROM quarantined_karma WHERE id = ?").bind(&k.id).execute(&mut *tx).await;
+                        let _ = sqlx::query("DELETE FROM quarantined_karma WHERE id = ?")
+                            .bind(&k.id)
+                            .execute(&mut *tx)
+                            .await;
                         if tx.commit().await.is_ok() {
                             info!("✅ [ApprovalWorker] Approved Karma: {}", k.id);
                         }
@@ -765,23 +1102,39 @@ async fn approval_worker(pool: SqlitePool, token: CancellationToken) {
                     Err(e) => error!("❌ [ApprovalWorker] Failed to start transaction: {:?}", e),
                 }
             } else {
-                warn!("🛡️ [ApprovalWorker] Rejecting invalid Karma (Signature Mismatch): {}", k.id);
+                warn!(
+                    "🛡️ [ApprovalWorker] Rejecting invalid Karma (Signature Mismatch): {}",
+                    k.id
+                );
                 // BFT Slashing: Penalize node reputation for invalid signatures
                 let _ = sqlx::query("UPDATE node_reputation SET reputation_score = reputation_score - 10 WHERE node_id = ?").bind(&k.node_id).execute(&pool).await;
-                sqlx::query("DELETE FROM quarantined_karma WHERE id = ?").bind(&k.id).execute(&pool).await.ok();
+                sqlx::query("DELETE FROM quarantined_karma WHERE id = ?")
+                    .bind(&k.id)
+                    .execute(&pool)
+                    .await
+                    .ok();
             }
         }
 
         // 2. Process Quarantined Rules
-        let rules = sqlx::query_as::<_, ImmuneRuleRecord>("SELECT * FROM quarantined_rules LIMIT 50")
-            .fetch_all(&pool).await.unwrap_or_default();
+        let rules =
+            sqlx::query_as::<_, ImmuneRuleRecord>("SELECT * FROM quarantined_rules LIMIT 50")
+                .fetch_all(&pool)
+                .await
+                .unwrap_or_default();
 
         for r in &rules {
             let mut valid = false;
             if let Some(ref sig_b64) = r.signature {
                 let payload = format!("{}:{}:{}", r.id, r.pattern, r.lamport_clock);
-                if let (Ok(pubkey_bytes), Ok(sig_bytes)) = (BASE64_STANDARD.decode(&r.node_id), BASE64_STANDARD.decode(sig_b64)) {
-                    if let (Ok(pubkey), Ok(sig)) = (VerifyingKey::from_bytes(&pubkey_bytes.try_into().unwrap_or([0; 32])), Signature::from_slice(&sig_bytes)) {
+                if let (Ok(pubkey_bytes), Ok(sig_bytes)) = (
+                    BASE64_STANDARD.decode(&r.node_id),
+                    BASE64_STANDARD.decode(sig_b64),
+                ) {
+                    if let (Ok(pubkey), Ok(sig)) = (
+                        VerifyingKey::from_bytes(&pubkey_bytes.try_into().unwrap_or([0; 32])),
+                        Signature::from_slice(&sig_bytes),
+                    ) {
                         if pubkey.verify(payload.as_bytes(), &sig).is_ok() {
                             valid = true;
                         }
@@ -796,7 +1149,10 @@ async fn approval_worker(pool: SqlitePool, token: CancellationToken) {
                         let _ = sqlx::query("INSERT INTO approved_rules (id, pattern, severity, action, node_id, lamport_clock, signature, created_at, approved_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING")
                             .bind(&r.id).bind(&r.pattern).bind(r.severity).bind(&r.action).bind(&r.node_id).bind(r.lamport_clock).bind(&r.signature).bind(&r.created_at).bind(&approved_at)
                             .execute(&mut *tx).await;
-                        let _ = sqlx::query("DELETE FROM quarantined_rules WHERE id = ?").bind(&r.id).execute(&mut *tx).await;
+                        let _ = sqlx::query("DELETE FROM quarantined_rules WHERE id = ?")
+                            .bind(&r.id)
+                            .execute(&mut *tx)
+                            .await;
                         if tx.commit().await.is_ok() {
                             info!("✅ [ApprovalWorker] Approved Rule: {}", r.id);
                         }
@@ -804,10 +1160,17 @@ async fn approval_worker(pool: SqlitePool, token: CancellationToken) {
                     Err(e) => error!("❌ [ApprovalWorker] Failed to start transaction: {:?}", e),
                 }
             } else {
-                warn!("🛡️ [ApprovalWorker] Rejecting invalid Rule (Signature Mismatch): {}", r.id);
+                warn!(
+                    "🛡️ [ApprovalWorker] Rejecting invalid Rule (Signature Mismatch): {}",
+                    r.id
+                );
                 // BFT Slashing: Penalize node reputation for invalid signatures
                 let _ = sqlx::query("UPDATE node_reputation SET reputation_score = reputation_score - 10 WHERE node_id = ?").bind(&r.node_id).execute(&pool).await;
-                sqlx::query("DELETE FROM quarantined_rules WHERE id = ?").bind(&r.id).execute(&pool).await.ok();
+                sqlx::query("DELETE FROM quarantined_rules WHERE id = ?")
+                    .bind(&r.id)
+                    .execute(&pool)
+                    .await
+                    .ok();
             }
         }
 
@@ -842,7 +1205,10 @@ async fn timeline_sync_handler(
 ) -> impl IntoResponse {
     use subtle::ConstantTimeEq;
 
-    let auth = headers.get(axum::http::header::AUTHORIZATION).and_then(|h| h.to_str().ok()).unwrap_or("");
+    let auth = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("");
     let expected = format!("Bearer {}", state.secret.expose_secret());
     let is_auth_valid = if auth.len() == expected.len() {
         bool::from(auth.as_bytes().ct_eq(expected.as_bytes()))
@@ -855,11 +1221,16 @@ async fn timeline_sync_handler(
     }
 
     // Load or Init Hub Master Doc
-    let mut hub_doc = match sqlx::query_scalar::<sqlx::Sqlite, Vec<u8>>("SELECT automerge_blob FROM hub_timeline WHERE id = ?")
-        .bind(&payload.hub_id).fetch_optional(&state.pool).await {
-            Ok(Some(blob)) => AutoCommit::load(&blob).unwrap_or_else(|_| AutoCommit::new()),
-            _ => AutoCommit::new(),
-        };
+    let mut hub_doc = match sqlx::query_scalar::<sqlx::Sqlite, Vec<u8>>(
+        "SELECT automerge_blob FROM hub_timeline WHERE id = ?",
+    )
+    .bind(&payload.hub_id)
+    .fetch_optional(&state.pool)
+    .await
+    {
+        Ok(Some(blob)) => AutoCommit::load(&blob).unwrap_or_else(|_| AutoCommit::new()),
+        _ => AutoCommit::new(),
+    };
 
     // Load and Merge Node's Doc
     if let Ok(mut node_doc) = AutoCommit::load(&payload.automerge_blob) {
@@ -872,30 +1243,48 @@ async fn timeline_sync_handler(
     let _ = sqlx::query("INSERT INTO hub_timeline (id, automerge_blob) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET automerge_blob = ?, updated_at = datetime('now')")
         .bind(&payload.hub_id).bind(&finalized_blob).bind(&finalized_blob).execute(&state.pool).await;
 
-    (StatusCode::OK, Json(serde_json::json!({
-        "status": "synchronized",
-        "automerge_blob": finalized_blob
-    }))).into_response()
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "status": "synchronized",
+            "automerge_blob": finalized_blob
+        })),
+    )
+        .into_response()
 }
 
 pub fn build_app(state: Arc<HubState>) -> Router {
     let origins_env = std::env::var("ALLOWED_ORIGINS").unwrap_or_default();
-    let mut allowed_origins = vec![
-        "http://localhost:3000".parse().unwrap(),
-        "http://127.0.0.1:3000".parse().unwrap(),
-        "http://localhost:3015".parse().unwrap(), // Management Console
-        "http://localhost:3016".parse().unwrap(),
+    let mut allowed_origins = vec![];
+
+    // Add defaults
+    let defaults = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:3015",
+        "http://localhost:3016",
     ];
-    for extra in origins_env.split(',') {
-        if let Ok(parsed) = extra.trim().parse() {
+    for d in defaults {
+        if let Ok(parsed) = d.parse() {
             allowed_origins.push(parsed);
         }
     }
 
+    if !origins_env.is_empty() {
+        for extra in origins_env.split(',') {
+            if let Ok(parsed) = extra.trim().parse() {
+                allowed_origins.push(parsed);
+            }
+        }
+    }
+
     let cors = CorsLayer::new()
-        .allow_origin(allowed_origins) 
+        .allow_origin(allowed_origins)
         .allow_methods([axum::http::Method::GET, axum::http::Method::POST])
-        .allow_headers([axum::http::header::CONTENT_TYPE, axum::http::header::AUTHORIZATION]);
+        .allow_headers([
+            axum::http::header::CONTENT_TYPE,
+            axum::http::header::AUTHORIZATION,
+        ]);
 
     Router::new()
         .route("/api/v1/federation/sync", post(sync_handler))
@@ -903,6 +1292,10 @@ pub fn build_app(state: Arc<HubState>) -> Router {
         .route("/api/v1/federation/ws", get(ws_handler))
         .route("/api/v1/health", get(health_handler))
         // Biome Routes (Phase 20)
+        .route(
+            "/api/v1/biome/topics",
+            get(list_topics_handler).post(create_topic_handler),
+        )
         .route("/api/v1/biome/relay", post(biome_relay_handler))
         .route("/api/v1/biome/ws", get(biome_ws_handler))
         // CRDT Timeline Relay
@@ -912,14 +1305,16 @@ pub fn build_app(state: Arc<HubState>) -> Router {
         .layer(
             ServiceBuilder::new()
                 .layer(HandleErrorLayer::new(|err| async move {
-                    (StatusCode::INTERNAL_SERVER_ERROR, format!("Unhandled internal error: {}", err))
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("Unhandled internal error: {}", err),
+                    )
                 }))
                 .layer(BufferLayer::new(2048))
-                .layer(RateLimitLayer::new(600, Duration::from_secs(60))) // High frequency for Biome
+                .layer(RateLimitLayer::new(600, Duration::from_secs(60))), // High frequency for Biome
         )
         .with_state(state)
 }
 
 #[cfg(test)]
 mod hub_ws_tests;
-

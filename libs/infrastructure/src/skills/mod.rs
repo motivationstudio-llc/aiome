@@ -1,25 +1,25 @@
 /*
  * Aiome - The Autonomous AI Operating System
  * Copyright (C) 2026 motivationstudio, LLC
- * 
+ *
  * Licensed under the Elastic License 2.0 (ELv2).
- * You may not provide the software to third parties as a hosted or managed service, 
- * where the service provides users with access to any substantial set of the features 
+ * You may not provide the software to third parties as a hosted or managed service,
+ * where the service provides users with access to any substantial set of the features
  * or functionality of the software.
  */
 
-use std::path::{Path, PathBuf};
-use std::collections::HashMap;
-use std::time::Duration;
-use tracing::{info, error};
-use extism::{Manifest, Plugin, Function, Val, ValType, UserData};
-use jsonschema::JSONSchema;
 use crate::security::BastionGuard;
+use extism::{Function, Manifest, Plugin, UserData, Val, ValType};
+use jsonschema::JSONSchema;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+use tracing::{error, info};
+pub mod actions_importer;
+pub mod cleanroom;
 pub mod forge;
 pub mod importer;
-pub mod cleanroom;
 pub mod skill_arena;
-pub mod actions_importer;
 use contracts::requires;
 
 /// 状態: 未検証の外部Skill (TypeState Pattern)
@@ -51,16 +51,24 @@ impl UnverifiedSkill {
     /// 契約プログラミングにより、検証を通過したものだけが型を昇格できる
     #[requires(self.input_test_payload.len() < 50_000, "Payload limits exceeded")]
     // #[ensures] is removed here because verification failure (Err) is a valid, expected state machine outcome for malicious skills.
-    pub async fn verify(self, manager: &WasmSkillManager) -> Result<VerifiedSkill, Box<dyn std::error::Error + Send + Sync>> {
-        let is_safe = manager.dry_run_skill(&self.name, &self.input_test_payload).await?;
+    pub async fn verify(
+        self,
+        manager: &WasmSkillManager,
+    ) -> Result<VerifiedSkill, Box<dyn std::error::Error + Send + Sync>> {
+        let is_safe = manager
+            .dry_run_skill(&self.name, &self.input_test_payload)
+            .await?;
         if is_safe {
             Ok(VerifiedSkill::promote(self.name))
         } else {
-            Err(format!("Skill {} failed the deterministic dry-run quarantine", self.name).into())
+            Err(format!(
+                "Skill {} failed the deterministic dry-run quarantine",
+                self.name
+            )
+            .into())
         }
     }
 }
-
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SkillMetadata {
@@ -84,14 +92,17 @@ pub struct WasmSkillManager {
 }
 
 impl WasmSkillManager {
-    pub fn new<P: AsRef<Path>>(skills_dir: P, allowed_root: P) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+    pub fn new<P: AsRef<Path>>(
+        skills_dir: P,
+        allowed_root: P,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let skills_dir = skills_dir.as_ref().to_path_buf();
         let allowed_root = allowed_root.as_ref().to_path_buf();
         if !skills_dir.exists() {
             std::fs::create_dir_all(&skills_dir)?;
         }
-        Ok(Self { 
-            skills_dir, 
+        Ok(Self {
+            skills_dir,
             allowed_root,
             memory_limit_bytes: 10 * 1024 * 1024, // 10MB default
             timeout: Duration::from_millis(5000), // 5s default
@@ -110,11 +121,14 @@ impl WasmSkillManager {
         let skills = self.list_skills();
         // Discovery C: Fix RwLock poisoning crash
         let mut cache = self.wasm_cache.write().unwrap_or_else(|e| e.into_inner());
-        
+
         // 存在しないスキルのキャッシュを削除
         cache.retain(|name, _| skills.contains(name));
-        
-        info!("🔄 [WasmSkillManager] Hot-reloaded {} skills and cleared stale cache.", skills.len());
+
+        info!(
+            "🔄 [WasmSkillManager] Hot-reloaded {} skills and cleared stale cache.",
+            skills.len()
+        );
         skills
     }
 
@@ -123,7 +137,10 @@ impl WasmSkillManager {
         // Discovery C: Fix RwLock poisoning crash
         let mut cache = self.wasm_cache.write().unwrap_or_else(|e| e.into_inner());
         if cache.remove(skill_name).is_some() {
-            info!("🧹 [WasmSkillManager] Invalidated cache for skill: {}", skill_name);
+            info!(
+                "🧹 [WasmSkillManager] Invalidated cache for skill: {}",
+                skill_name
+            );
         }
     }
 
@@ -133,7 +150,9 @@ impl WasmSkillManager {
         if let Ok(entries) = std::fs::read_dir(&self.skills_dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
-                if path.extension().map_or(false, |ext| ext == "json") && path.to_string_lossy().ends_with(".meta.json") {
+                if path.extension().map_or(false, |ext| ext == "json")
+                    && path.to_string_lossy().ends_with(".meta.json")
+                {
                     if let Ok(data) = std::fs::read_to_string(&path) {
                         if let Ok(meta) = serde_json::from_str::<SkillMetadata>(&data) {
                             list.push(meta);
@@ -142,7 +161,7 @@ impl WasmSkillManager {
                 }
             }
         }
-        
+
         // メタデータがないスキルについては、ファイル名から最小限のものを生成
         let all_wasm = self.list_skills();
         for name in all_wasm {
@@ -181,11 +200,11 @@ impl WasmSkillManager {
     /// 🛡️ 第4層 (Formal Verification): &str ではなく VerifiedSkill 型を要求することで、
     /// 事前の隔離検証を通過していないSkillの実行をコンパイルレベルで阻止する。
     pub async fn call_skill(
-        &self, 
-        skill: &VerifiedSkill, 
-        func_name: &str, 
+        &self,
+        skill: &VerifiedSkill,
+        func_name: &str,
         input: &str,
-        configs: Option<HashMap<String, String>>
+        configs: Option<HashMap<String, String>>,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         let skill_name = skill.name();
         let wasm_path = self.skills_dir.join(format!("{}.wasm", skill_name));
@@ -204,7 +223,8 @@ impl WasmSkillManager {
         let wasm_data = match wasm_bytes {
             Some(data) => data,
             None => {
-                let data = std::fs::read(&wasm_path).map_err(|e| format!("Failed to read WASM {}: {}", skill_name, e))?;
+                let data = std::fs::read(&wasm_path)
+                    .map_err(|e| format!("Failed to read WASM {}: {}", skill_name, e))?;
                 let mut cache = self.wasm_cache.write().unwrap_or_else(|e| e.into_inner());
                 cache.insert(skill_name.to_string(), data.clone());
                 data
@@ -234,7 +254,7 @@ impl WasmSkillManager {
 
             let mut manifest = Manifest::new([wasm])
                 .with_timeout(timeout);
-            
+
             // Apply Sandbox Roots
             if let Some(parent) = skills_dir_parent {
                 if let Ok(jail_root) = std::fs::canonicalize(parent) {
@@ -299,7 +319,7 @@ impl WasmSkillManager {
                     let json_ptr = inputs.get(0).and_then(|v| v.i64()).ok_or_else(|| extism::Error::msg("Missing input parameter"))? as u64;
                     let handle = plugin.memory_handle(json_ptr).ok_or_else(|| extism::Error::msg("Invalid memory handle for host_write"))?;
                     let req_str = plugin.memory_str(handle).map_err(|e: extism::Error| e)?;
-                    
+
                     if !host_write_permissions.allow_filesystem_write {
                         let res_json = serde_json::json!({ "success": false, "path": "", "error": "Security Violation: Field writing is not permitted for this skill." }).to_string();
                         let mem = plugin.memory_alloc(res_json.len() as u64)?;
@@ -351,7 +371,7 @@ impl WasmSkillManager {
             let functions = vec![host_exec_fn, host_write_fn];
             let mut plugin = Plugin::new(&manifest, functions, true)
                 .map_err(|e| format!("Failed to initialize WASM plugin {}: {}", skill_name_str, e))?;
-            
+
             plugin.call::<&str, String>(&func_name_str, &input_str)
                 .map_err(|e| {
                     if e.to_string().to_lowercase().contains("timeout") {
@@ -361,9 +381,13 @@ impl WasmSkillManager {
                     }
                 })
         }).await.map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { format!("Task execution failed/panicked: {}", e).into() });
-        let result = result?.map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { e.into() })?;
+        let result =
+            result?.map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { e.into() })?;
 
-        info!("✅ [WasmSkillManager] Skill execution successful: {}", skill_name);
+        info!(
+            "✅ [WasmSkillManager] Skill execution successful: {}",
+            skill_name
+        );
         Ok(result)
     }
 
@@ -389,11 +413,15 @@ impl WasmSkillManager {
             return Err(format!("Skill {} not found for dry-run", skill_name).into());
         }
 
-        let func_name = self.get_metadata(skill_name)
+        let func_name = self
+            .get_metadata(skill_name)
             .and_then(|m| m.capabilities.first().cloned())
             .unwrap_or_else(|| "execute".to_string());
 
-        info!("🛡️  [Layer 3 Deterministic Tracer] Starting dry-run for skill: {} (func: {})", skill_name, func_name);
+        info!(
+            "🛡️  [Layer 3 Deterministic Tracer] Starting dry-run for skill: {} (func: {})",
+            skill_name, func_name
+        );
 
         // Phase 13-A: Wrap EVERYTHING in ONE spawn_blocking
         let func_name_str = func_name.to_string();
@@ -458,31 +486,49 @@ impl WasmSkillManager {
     /// ドライラン（Dry-Run）による論理検証。
     /// 指定されたテスト入力に対して、期待されるスキーマに合致するかチェックする。
     pub async fn validate_skill_logic(
-        &self, 
-        skill_name: &str, 
+        &self,
+        skill_name: &str,
         test_input: &str,
-        expected_schema_json: &str
+        expected_schema_json: &str,
     ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
-        info!("🧪 [WasmSkillManager] Validating skill logic for: {}", skill_name);
-        
+        info!(
+            "🧪 [WasmSkillManager] Validating skill logic for: {}",
+            skill_name
+        );
+
         // 内部的に VerifiedSkill を作成 (※validate_skill_logic は管理者のみが呼ぶため信頼済み)
         let verified = VerifiedSkill::promote(skill_name.to_string());
-        let output = self.call_skill(&verified, "execute", test_input, None).await?;
-        
+        let output = self
+            .call_skill(&verified, "execute", test_input, None)
+            .await?;
+
         // JSON Schema validation
         let schema_val: serde_json::Value = serde_json::from_str(expected_schema_json)?;
         let instance: serde_json::Value = serde_json::from_str(&output)?;
-        
-        let compiled = JSONSchema::compile(&schema_val)
-            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, format!("Schema compilation failed: {}", e))) as Box<dyn std::error::Error + Send + Sync>)?;
+
+        let compiled = JSONSchema::compile(&schema_val).map_err(|e| {
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("Schema compilation failed: {}", e),
+            )) as Box<dyn std::error::Error + Send + Sync>
+        })?;
 
         if let Err(mut errors) = compiled.validate(&instance) {
-            let first_error = errors.next().map(|e| e.to_string()).unwrap_or_else(|| "Unknown validation error".to_string());
-            error!("❌ [WasmSkillManager] Logic validation failed for {}: {}", skill_name, first_error);
+            let first_error = errors
+                .next()
+                .map(|e| e.to_string())
+                .unwrap_or_else(|| "Unknown validation error".to_string());
+            error!(
+                "❌ [WasmSkillManager] Logic validation failed for {}: {}",
+                skill_name, first_error
+            );
             return Ok(false);
         }
 
-        info!("✅ [WasmSkillManager] Logic validation successful: {}", skill_name);
+        info!(
+            "✅ [WasmSkillManager] Logic validation successful: {}",
+            skill_name
+        );
         Ok(true)
     }
 
@@ -499,13 +545,18 @@ impl WasmSkillManager {
         }
 
         // Karmaから類似したレッスンを検索 (Top 5)
-        let result = jq.fetch_relevant_karma(query, "global", 5, "current").await?;
-        
+        let result = jq
+            .fetch_relevant_karma(query, "global", 5, "current")
+            .await?;
+
         for entry in result.entries {
             // エントリ内にスキル名が含まれているか、あるいはスキル名そのものが関連しているかチェック
             for skill in &available_skills {
                 if entry.lesson.to_lowercase().contains(&skill.to_lowercase()) {
-                    info!("🧠 [Self-Wiring] Found relevant skill '{}' via knowledge: {}", skill, entry.lesson);
+                    info!(
+                        "🧠 [Self-Wiring] Found relevant skill '{}' via knowledge: {}",
+                        skill, entry.lesson
+                    );
                     return Ok(Some(skill.clone()));
                 }
             }

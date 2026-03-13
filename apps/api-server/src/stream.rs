@@ -1,28 +1,29 @@
+use aiome_core::llm_provider::LlmProvider;
+use aiome_core::traits::JobQueue;
 use axum::{
-    extract::{State, Json},
+    extract::{Json, State},
     response::sse::{Event, KeepAlive, Sse},
     response::IntoResponse,
 };
-use futures::stream::Stream;
 use core::convert::Infallible;
-use aiome_core::llm_provider::LlmProvider;
-use aiome_core::traits::JobQueue;
+use futures::stream::Stream;
 // use infrastructure::skills::UnverifiedSkill;
-use std::sync::Arc;
-use tokio::time::{timeout, Duration, interval};
-use futures::StreamExt;
-use tracing::info;
 use crate::skill_handler;
+use futures::StreamExt;
+use std::sync::Arc;
+use tokio::time::{interval, timeout, Duration};
+use tracing::info;
 
+use crate::routes::agent::{
+    build_system_instructions, parse_tool_calls, read_workspace_file, AgentChatRequest,
+};
 use crate::AppState;
-use crate::routes::agent::{AgentChatRequest, build_system_instructions, parse_tool_calls, read_workspace_file};
 
 pub async fn trigger_agent_chat_stream(
     State(state): State<AppState>,
     _auth: crate::auth::Authenticated,
     Json(payload): Json<AgentChatRequest>,
 ) -> impl axum::response::IntoResponse {
-
     let provider = state.provider.clone();
 
     let stream = async_stream::stream! {
@@ -37,10 +38,10 @@ pub async fn trigger_agent_chat_stream(
         if let Ok(Some(rule)) = immune_system.verify_intent(&payload.prompt, state.job_queue.as_ref()).await {
             let stats = state.job_queue.get_agent_stats().await.unwrap_or_default();
             let _ = state.job_queue.record_evolution_event(
-                stats.level, 
-                "ImmuneAlert", 
+                stats.level,
+                "ImmuneAlert",
                 &format!("Block: {} (Pattern: {})", rule.action, rule.pattern),
-                None, 
+                None,
                 None
             ).await;
             yield Ok::<Event, Infallible>(Event::default().event("security_block").data(format!("🚨 [SENTINEL BLOCK] {}\nPattern: {}", rule.action, rule.pattern)));
@@ -58,7 +59,7 @@ pub async fn trigger_agent_chat_stream(
 
         // Sprint 1-A: Fetch relevant karma using proper search
         let karma_result = state.job_queue.fetch_relevant_karma(&payload.prompt, "global", 5, &soul_hash).await.unwrap_or_else(|_| aiome_core::traits::KarmaSearchResult::empty());
-        
+
         let mut karma_str = karma_result.entries.iter()
             .map(|e| format!("- {}", e.lesson))
             .collect::<Vec<_>>()
@@ -70,7 +71,7 @@ pub async fn trigger_agent_chat_stream(
 
         // Notify client about relevant karma being used (Sprint 4-A)
         yield Ok::<Event, Infallible>(Event::default().event("karma").data(&karma_str));
-        
+
         // Also send structured data for feedback mechanisms
         let karma_json = serde_json::json!({
             "is_ood": karma_result.is_ood,
@@ -80,8 +81,8 @@ pub async fn trigger_agent_chat_stream(
 
         // God Mode (Phase 21): Fetch relevant project knowledge
         let knowledge_result = state.artifact_store.search_artifacts_semantic(
-            &payload.prompt, 
-            Some(aiome_core::traits::ArtifactCategory::Knowledge), 
+            &payload.prompt,
+            Some(aiome_core::traits::ArtifactCategory::Knowledge),
             2
         ).await.unwrap_or_default();
         let knowledge_str = if knowledge_result.is_empty() {
@@ -100,7 +101,7 @@ pub async fn trigger_agent_chat_stream(
         }
 
         let channel_id = payload.channel_id.unwrap_or_else(|| "default_console".to_string());
-        
+
         // Phase 3-B: Persist user message
         let _ = state.job_queue.insert_chat_message(&channel_id, "user", &payload.prompt).await;
 
@@ -127,8 +128,8 @@ pub async fn trigger_agent_chat_stream(
 
         while turn < max_turns {
             let full_prompt = format!(
-                "{}\n{}\nUSER: {}\nAI: ", 
-                system_instructions, 
+                "{}\n{}\nUSER: {}\nAI: ",
+                system_instructions,
                 current_history.join("\n"),
                 original_prompt
             );
@@ -138,7 +139,7 @@ pub async fn trigger_agent_chat_stream(
             // Front-end requests bypass semaphore for immediate Ollama access
 
             if let Ok(Ok(mut llm_stream)) = timeout(Duration::from_secs(300), provider.stream_complete(&full_prompt, None)).await {
-                
+
                 let mut buffer = String::new();
                 let mut full_reply = String::new();
                 let mut is_tool_call_mode = false;
@@ -171,13 +172,13 @@ pub async fn trigger_agent_chat_stream(
                         }
                     }
                 }
-                
+
                 if !is_tool_call_mode && !buffer.is_empty() {
                     yield Ok(Event::default().event("text").data(&buffer));
                 }
 
                 let calls = parse_tool_calls(&full_reply);
-                
+
                 if calls.is_empty() {
                     yield Ok(Event::default().event("turn_end").data("done"));
                     break;
@@ -219,7 +220,7 @@ pub async fn trigger_agent_chat_stream(
                             yield Ok(Event::default().event("tool_result").data(format!("{}: metadata returned", skill_name)));
                         } else {
                             let out = skill_handler::execute_wasm_skill(&skill_name, &skill_input, &state).await;
-                            
+
                             // Phase 2B: Record skill execution
                             let stats = state.job_queue.get_agent_stats().await.unwrap_or_default();
                             let status = if out.contains("Error:") { "failed" } else { "success" };
@@ -256,7 +257,9 @@ pub async fn trigger_agent_chat_stream(
         yield Ok(Event::default().event("done").data("stream finished"));
     };
 
-    Sse::new(stream).keep_alive(KeepAlive::default()).into_response()
+    Sse::new(stream)
+        .keep_alive(KeepAlive::default())
+        .into_response()
 }
 
 pub async fn trigger_system_vitality_stream(
@@ -302,10 +305,10 @@ pub async fn trigger_system_vitality_stream(
                     if let Ok(stats) = state.job_queue.get_agent_stats().await {
                         // 0. Continuous Stats Update
                         let stats_changed = if let Some(ref last) = last_stats {
-                            last.level != stats.level || 
-                            last.exp != stats.exp || 
-                            last.resonance != stats.resonance || 
-                            last.creativity != stats.creativity || 
+                            last.level != stats.level ||
+                            last.exp != stats.exp ||
+                            last.resonance != stats.resonance ||
+                            last.creativity != stats.creativity ||
                             last.fatigue != stats.fatigue
                         } else {
                             true

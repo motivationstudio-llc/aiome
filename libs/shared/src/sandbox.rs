@@ -1,10 +1,10 @@
 /*
  * Aiome - The Autonomous AI Operating System
  * Copyright (C) 2026 motivationstudio, LLC
- * 
+ *
  * Licensed under the Elastic License 2.0 (ELv2).
- * You may not provide the software to third parties as a hosted or managed service, 
- * where the service provides users with access to any substantial set of the features 
+ * You may not provide the software to third parties as a hosted or managed service,
+ * where the service provides users with access to any substantial set of the features
  * or functionality of the software.
  */
 
@@ -13,8 +13,8 @@
 //! 全てのファイル操作を許可されたディレクトリ内に閉じ込める「牢獄」。
 //! Bastion Jail を使用して、TOCTOU 攻撃やシンボリックリンク攻撃を防止する。
 
-use std::path::{Path, PathBuf};
 use bastion::fs_guard::Jail;
+use std::path::{Path, PathBuf};
 
 /// 許可されたディレクトリ内でのみファイル操作を許可するサンドボックス
 pub struct PathSandbox {
@@ -61,12 +61,10 @@ impl PathSandbox {
                     }
                     Ok(parent_canonical.join(base_path.file_name().unwrap_or_default()))
                 }
-                _ => {
-                    Err(std::io::Error::new(
-                        std::io::ErrorKind::NotFound,
-                        "Path or parent directory does not exist",
-                    ))
-                }
+                _ => Err(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "Path or parent directory does not exist",
+                )),
             }
         }
     }
@@ -88,9 +86,9 @@ mod tests {
         let dir = tempdir().unwrap();
         let workspace = dir.path().join("workspace");
         fs::create_dir(&workspace).unwrap();
-        
+
         let sandbox = PathSandbox::new(&workspace).unwrap();
-        
+
         // 正常系
         let safe_file = workspace.join("test.txt");
         fs::write(&safe_file, "data").unwrap();

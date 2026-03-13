@@ -24,10 +24,10 @@ struct ExecResponse {
 #[plugin_fn]
 pub fn call(input: String) -> FnResult<String> {
     let req: ExecRequest = serde_json::from_str(&input)?;
-    
+
     // Call the host function (Aiome OS Sentinel)
     let result = unsafe { host_exec(req.cmd)? };
-    
+
     let res = ExecResponse {
         stdout: result,
         stderr: None,

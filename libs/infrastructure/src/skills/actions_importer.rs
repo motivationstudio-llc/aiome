@@ -3,9 +3,9 @@
  * Copyright (C) 2026 motivationstudio, LLC
  */
 
+use crate::skills::importer::{L1Metadata, L2Metadata, L3Metadata, SkillManifest};
 use serde::Deserialize;
 use tracing::{info, warn};
-use crate::skills::importer::{SkillManifest, L1Metadata, L2Metadata, L3Metadata};
 
 #[derive(Deserialize, Debug)]
 struct GitHubActionYaml {
@@ -36,7 +36,10 @@ impl ActionsImporter {
             }
         };
 
-        info!("🐙 [ActionsImporter] Absorbing GitHub Action: {}", parsed.name);
+        info!(
+            "🐙 [ActionsImporter] Absorbing GitHub Action: {}",
+            parsed.name
+        );
 
         let engine_type = if parsed.runs.using.starts_with("node") {
             "node" // E.g., node20
@@ -53,7 +56,8 @@ impl ActionsImporter {
             },
             l2: L2Metadata {
                 extended_description: parsed.description,
-                inputs_schema: serde_json::to_value(&parsed.inputs).unwrap_or(serde_json::json!({})),
+                inputs_schema: serde_json::to_value(&parsed.inputs)
+                    .unwrap_or(serde_json::json!({})),
                 examples: vec![],
             },
             l3: L3Metadata {

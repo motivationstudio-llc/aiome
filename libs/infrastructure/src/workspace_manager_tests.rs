@@ -1,10 +1,10 @@
 /*
  * Aiome - The Autonomous AI Operating System
  * Copyright (C) 2026 motivationstudio, LLC
- * 
+ *
  * Licensed under the Elastic License 2.0 (ELv2).
- * You may not provide the software to third parties as a hosted or managed service, 
- * where the service provides users with access to any substantial set of the features 
+ * You may not provide the software to third parties as a hosted or managed service,
+ * where the service provides users with access to any substantial set of the features
  * or functionality of the software.
  */
 
@@ -18,7 +18,7 @@
 #[cfg(test)]
 mod tests {
     use crate::workspace_manager::WorkspaceManager;
-    use std::time::{SystemTime, Duration};
+    use std::time::{Duration, SystemTime};
     use tokio::fs;
 
     #[tokio::test]
@@ -39,10 +39,13 @@ mod tests {
         filetime::set_file_mtime(
             &file_path,
             filetime::FileTime::from_system_time(forty_eight_hours_ago),
-        ).unwrap();
+        )
+        .unwrap();
 
         let allowed = [".dat"];
-        WorkspaceManager::cleanup_expired_files(root.to_str().unwrap(), 24, &allowed).await.unwrap();
+        WorkspaceManager::cleanup_expired_files(root.to_str().unwrap(), 24, &allowed)
+            .await
+            .unwrap();
 
         // 期待: target.dat が消え、a/b が空になり消沈、a も空になり消沈
         assert!(!file_path.exists(), "target.dat should be deleted");
@@ -65,16 +68,32 @@ mod tests {
         fs::write(&safe_time, "just created").await.unwrap();
 
         let forty_eight_hours_ago = SystemTime::now() - Duration::from_secs(48 * 3600);
-        
-        filetime::set_file_mtime(&target_ext, filetime::FileTime::from_system_time(forty_eight_hours_ago)).unwrap();
-        filetime::set_file_mtime(&safe_ext, filetime::FileTime::from_system_time(forty_eight_hours_ago)).unwrap();
+
+        filetime::set_file_mtime(
+            &target_ext,
+            filetime::FileTime::from_system_time(forty_eight_hours_ago),
+        )
+        .unwrap();
+        filetime::set_file_mtime(
+            &safe_ext,
+            filetime::FileTime::from_system_time(forty_eight_hours_ago),
+        )
+        .unwrap();
 
         let allowed = [".dat"];
-        WorkspaceManager::cleanup_expired_files(root.to_str().unwrap(), 24, &allowed).await.unwrap();
+        WorkspaceManager::cleanup_expired_files(root.to_str().unwrap(), 24, &allowed)
+            .await
+            .unwrap();
 
         assert!(!target_ext.exists(), "old.dat should be deleted");
-        assert!(safe_ext.exists(), "important.txt should NOT be deleted (not in whitelist)");
-        assert!(safe_time.exists(), "new.dat should NOT be deleted (not expired)");
+        assert!(
+            safe_ext.exists(),
+            "important.txt should NOT be deleted (not in whitelist)"
+        );
+        assert!(
+            safe_time.exists(),
+            "new.dat should NOT be deleted (not expired)"
+        );
     }
 
     #[tokio::test]
@@ -82,23 +101,33 @@ mod tests {
         let tmp_dir = tempfile::TempDir::new().unwrap();
         let source_dir = tmp_dir.path().join("source");
         let export_dir = tmp_dir.path().join("export");
-        
+
         fs::create_dir_all(&source_dir).await.unwrap();
-        
+
         // 0 byte file - should fail
         let empty_file = source_dir.join("empty.dat");
         fs::write(&empty_file, "").await.unwrap();
-        let result = WorkspaceManager::deliver_output("job1", &empty_file, export_dir.to_str().unwrap()).await;
+        let result =
+            WorkspaceManager::deliver_output("job1", &empty_file, export_dir.to_str().unwrap())
+                .await;
         assert!(result.is_err(), "Should reject 0 byte files");
 
         // Valid file
         let valid_file = source_dir.join("valid.dat");
         fs::write(&valid_file, "data").await.unwrap();
-        
-        let dest_path = WorkspaceManager::deliver_output("job2", &valid_file, export_dir.to_str().unwrap()).await.unwrap();
-        
+
+        let dest_path =
+            WorkspaceManager::deliver_output("job2", &valid_file, export_dir.to_str().unwrap())
+                .await
+                .unwrap();
+
         assert!(!valid_file.exists(), "Source should be removed");
         assert!(dest_path.exists(), "Destination should exist");
-        assert!(dest_path.file_name().unwrap().to_str().unwrap().contains("_job2_valid.dat"));
+        assert!(dest_path
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .contains("_job2_valid.dat"));
     }
 }

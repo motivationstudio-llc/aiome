@@ -3,12 +3,12 @@
  * Copyright (C) 2026 motivationstudio, LLC
  */
 
-use async_trait::async_trait;
-use aiome_core::error::AiomeError;
 use super::bridge_trait::ChannelBridge;
-use tracing::{info, error};
-use teloxide::prelude::*;
+use aiome_core::error::AiomeError;
+use async_trait::async_trait;
 use shared::watchtower::ControlCommand;
+use teloxide::prelude::*;
+use tracing::{error, info};
 
 pub struct TelegramBridge {
     token: String,
@@ -29,20 +29,31 @@ impl ChannelBridge for TelegramBridge {
     }
 
     async fn send_message(&self, _channel_id: &str, content: &str) -> Result<(), AiomeError> {
-        let chat_id: i64 = _channel_id.parse().map_err(|_| AiomeError::Infrastructure { reason: "Invalid Telegram Chat ID".to_string() })?;
-        
-        self.bot.send_message(ChatId(chat_id), content).await
-            .map_err(|e| AiomeError::Infrastructure { reason: format!("Telegram send failed: {}", e) })?;
-        
+        let chat_id: i64 = _channel_id
+            .parse()
+            .map_err(|_| AiomeError::Infrastructure {
+                reason: "Invalid Telegram Chat ID".to_string(),
+            })?;
+
+        self.bot
+            .send_message(ChatId(chat_id), content)
+            .await
+            .map_err(|e| AiomeError::Infrastructure {
+                reason: format!("Telegram send failed: {}", e),
+            })?;
+
         Ok(())
     }
 
-    async fn run(&self, command_tx: tokio::sync::mpsc::Sender<ControlCommand>) -> Result<(), AiomeError> {
+    async fn run(
+        &self,
+        command_tx: tokio::sync::mpsc::Sender<ControlCommand>,
+    ) -> Result<(), AiomeError> {
         info!("🚀 [Telegram] Starting teloxide poller...");
-        
+
         let tx = command_tx.clone();
-        let handler = dptree::entry().branch(
-            Update::filter_message().endpoint(move |_bot: Bot, msg: Message| {
+        let handler = dptree::entry().branch(Update::filter_message().endpoint(
+            move |_bot: Bot, msg: Message| {
                 let tx = tx.clone();
                 async move {
                     if let Some(text) = msg.text() {
@@ -55,8 +66,8 @@ impl ChannelBridge for TelegramBridge {
                     }
                     respond(())
                 }
-            })
-        );
+            },
+        ));
 
         Dispatcher::builder(self.bot.clone(), handler)
             .enable_ctrlc_handler()

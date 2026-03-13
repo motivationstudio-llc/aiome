@@ -3,17 +3,17 @@
  * Copyright (C) 2026 motivationstudio, LLC
  */
 
-use crate::error::AiomeError;
-use crate::traits::JobQueue;
-use crate::llm_provider::LlmProvider;
-use crate::biome::protocol::BiomeMessage;
 use crate::biome::dialogue::DialogueManager;
-use std::sync::Arc;
-use tokio::sync::Semaphore;
-use tracing::{info, warn, error};
+use crate::biome::protocol::BiomeMessage;
+use crate::error::AiomeError;
+use crate::llm_provider::LlmProvider;
+use crate::traits::JobQueue;
+use chrono;
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
-use chrono;
+use std::sync::Arc;
+use tokio::sync::Semaphore;
+use tracing::{error, info, warn};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AutonomousConfig {
@@ -33,23 +33,39 @@ impl AutonomousBiomeEngine {
         running: Arc<AtomicBool>,
         llm_semaphore: Arc<Semaphore>,
     ) {
-        info!("🤖 [AutonomousBiome] Starting dialogue loop for topic: {}", config.topic_id);
+        info!(
+            "🤖 [AutonomousBiome] Starting dialogue loop for topic: {}",
+            config.topic_id
+        );
         let mut rounds = 0;
 
         while running.load(Ordering::SeqCst) && rounds < config.max_rounds {
             rounds += 1;
-            info!("🔄 [AutonomousBiome] Round {}/{} for topic {}", rounds, config.max_rounds, config.topic_id);
+            info!(
+                "🔄 [AutonomousBiome] Round {}/{} for topic {}",
+                rounds, config.max_rounds, config.topic_id
+            );
 
             // 1. Check if it's our turn
-            if let Err(e) = DialogueManager::check_and_advance_turn(&*queue, &config.topic_id).await {
-                warn!("⏳ [AutonomousBiome] Loop paused/blocked for topic {}: {}", config.topic_id, e);
-                // Even if blocked, we wait and try again or exit based on error type
-                tokio::time::sleep(std::time::Duration::from_secs(config.interval_secs)).await;
-                continue;
-            }
+            let current_turn =
+                match DialogueManager::check_and_advance_turn(&*queue, &config.topic_id).await {
+                    Ok(t) => t,
+                    Err(e) => {
+                        warn!(
+                            "⏳ [AutonomousBiome] Loop paused/blocked for topic {}: {}",
+                            config.topic_id, e
+                        );
+                        tokio::time::sleep(std::time::Duration::from_secs(config.interval_secs))
+                            .await;
+                        continue;
+                    }
+                };
 
             // 2. Fetch context (latest messages + latest karma)
-            let messages = queue.fetch_biome_messages(&config.topic_id, 5).await.unwrap_or_default();
+            let messages = queue
+                .fetch_biome_messages(&config.topic_id, 5)
+                .await
+                .unwrap_or_default();
             let karma = queue.fetch_all_karma(5).await.unwrap_or_default();
 
             // 3. Generate Response
@@ -61,7 +77,20 @@ impl AutonomousBiomeEngine {
                 Ok(content) => {
                     // 4. Send Message (via standard route logic)
                     if let Err(e) = Self::send_autonomous_message(&config, content, &*queue).await {
-                        error!("❌ [AutonomousBiome] Failed to send autonomous message: {}", e);
+                        error!(
+                            "❌ [AutonomousBiome] Failed to send autonomous message: {}",
+                            e
+                        );
+                    }
+
+                    // 4.5. If this was the last turn, perform distillation
+                    if current_turn >= crate::biome::dialogue::MAX_DIALOGUE_TURNS {
+                        info!("🔮 [AutonomousBiome] Final turn reached for topic {}. Initiating distillation...", config.topic_id);
+                        let _ =
+                            DialogueManager::distill_conversation(&*queue, &*llm, &config.topic_id)
+                                .await;
+                        // End the loop for this topic
+                        break;
                     }
                 }
                 Err(e) => {
@@ -75,7 +104,10 @@ impl AutonomousBiomeEngine {
             }
         }
 
-        info!("🏁 [AutonomousBiome] Dialogue loop finished for topic: {}", config.topic_id);
+        info!(
+            "🏁 [AutonomousBiome] Dialogue loop finished for topic: {}",
+            config.topic_id
+        );
         running.store(false, Ordering::SeqCst);
     }
 
@@ -86,11 +118,19 @@ impl AutonomousBiomeEngine {
         llm: &dyn LlmProvider,
     ) -> Result<String, AiomeError> {
         let mut context = String::new();
-        
+
         context.push_str("### RECENT DIALOGUE HISTORY\n");
         for msg in history.iter().rev() {
-            let role = if msg["sender_pubkey"].as_str() == Some("self") { "Me" } else { "Peer" };
-            context.push_str(&format!("{}: {}\n", role, msg["content"].as_str().unwrap_or("")));
+            let role = if msg["sender_pubkey"].as_str() == Some("self") {
+                "Me"
+            } else {
+                "Peer"
+            };
+            context.push_str(&format!(
+                "{}: {}\n",
+                role,
+                msg["content"].as_str().unwrap_or("")
+            ));
         }
 
         context.push_str("\n### INTERNAL INSIGHTS (KARMA)\n");
@@ -107,7 +147,7 @@ impl AutonomousBiomeEngine {
         );
 
         let user_prompt = format!("Context:\n{}\n\nYour reply:", context);
-        
+
         llm.complete(&user_prompt, Some(&system_prompt)).await
     }
 
@@ -118,7 +158,7 @@ impl AutonomousBiomeEngine {
     ) -> Result<(), AiomeError> {
         let sender_pubkey = queue.get_node_id().await?;
         let clock = queue.tick_local_clock().await?;
-        
+
         // MVP: Simple signature same as in routes/biome.rs
         let payload_to_sign = format!("{}:{}:{}", sender_pubkey, config.topic_id, clock);
         let signature = queue.sign_swarm_payload(&payload_to_sign).await?;
@@ -136,21 +176,32 @@ impl AutonomousBiomeEngine {
         };
 
         // Try Hub relay, fallback to local if Hub fails (or if configured to bypass)
-        let hub_url = std::env::var("SAMSARA_HUB_REST").unwrap_or_else(|_| "http://127.0.0.1:3016".to_string());
-        let hub_secret = std::env::var("FEDERATION_SECRET").expect("🚨 FEDERATION_SECRET must be set for autonomous biome communication!");
+        let hub_url = std::env::var("SAMSARA_HUB_REST")
+            .unwrap_or_else(|_| "http://127.0.0.1:3016".to_string());
+        let hub_secret =
+            std::env::var("FEDERATION_SECRET").map_err(|_| AiomeError::Infrastructure {
+                reason: "FEDERATION_SECRET missing for autonomous biome communication".to_string(),
+            })?;
         let client = reqwest::Client::new();
 
-        let res = client.post(format!("{}/api/v1/biome/relay", hub_url))
+        let res = client
+            .post(format!("{}/api/v1/biome/relay", hub_url))
             .header("Authorization", format!("Bearer {}", hub_secret))
             .json(&msg)
-            .send().await;
+            .send()
+            .await;
 
         match res {
             Ok(r) if r.status().is_success() => {
-                info!("🚀 [AutonomousBiome] Message relayed via Hub to {}", config.peer_pubkey);
+                info!(
+                    "🚀 [AutonomousBiome] Message relayed via Hub to {}",
+                    config.peer_pubkey
+                );
             }
             _ => {
-                warn!("⚠️ [AutonomousBiome] Hub relay failed or unavailable. Saving message locally.");
+                warn!(
+                    "⚠️ [AutonomousBiome] Hub relay failed or unavailable. Saving message locally."
+                );
             }
         }
 

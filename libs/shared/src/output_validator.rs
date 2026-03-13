@@ -1,10 +1,10 @@
 /*
  * Aiome - The Autonomous AI Operating System
  * Copyright (C) 2026 motivationstudio, LLC
- * 
+ *
  * Licensed under the Elastic License 2.0 (ELv2).
- * You may not provide the software to third parties as a hosted or managed service, 
- * where the service provides users with access to any substantial set of the features 
+ * You may not provide the software to third parties as a hosted or managed service,
+ * where the service provides users with access to any substantial set of the features
  * or functionality of the software.
  */
 
@@ -38,9 +38,7 @@ pub enum ValidationResult<T> {
 /// 3. 失敗した場合、エラー内容を含む「修正指示プロンプト」を生成
 ///
 /// 呼び出し側はこの修正プロンプトを LLM に再送し、リトライできる。
-pub fn validate_json_output<T: DeserializeOwned>(
-    raw_output: &str,
-) -> ValidationResult<T> {
+pub fn validate_json_output<T: DeserializeOwned>(raw_output: &str) -> ValidationResult<T> {
     // Step 1: JSON ブロックを抽出（```json ... ``` や 生の JSON に対応）
     let json_str = extract_json_block(raw_output);
 
@@ -113,7 +111,7 @@ fn build_repair_prompt(invalid_json: &str, error: &str) -> String {
     // 注入されたバックティックによってプロンプトの構造が破壊されるのを防ぐため、
     // バックティックをエスケープまたは置換する。
     let safe_json = invalid_json.replace("```", "'''");
-    
+
     format!(
         "あなたの前回の出力は JSON パースに失敗しました。以下の情報を元に、正しい JSON を再生成してください。
 

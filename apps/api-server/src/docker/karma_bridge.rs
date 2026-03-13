@@ -48,7 +48,9 @@ impl KarmaBridge {
 
         warn!(
             "🧪 [KarmaBridge] Failure detected. Penalty: {} (base: {}). Category: {:?}",
-            final_penalty, base_penalty, result.failure_category()
+            final_penalty,
+            base_penalty,
+            result.failure_category()
         );
 
         (final_penalty, "Technical".to_string(), lesson)

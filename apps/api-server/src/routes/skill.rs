@@ -3,14 +3,10 @@
  * Copyright (C) 2026 motivationstudio, LLC
  */
 
-use axum::{
-    response::Json,
-    extract::State,
-    http::StatusCode,
-};
-use serde::{Deserialize, Serialize};
 use crate::AppState;
-use tracing::info;
+use axum::{extract::State, http::StatusCode, response::Json};
+use serde::{Deserialize, Serialize};
+use tracing::{error, info, warn};
 
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct SkillSummary {
@@ -36,9 +32,7 @@ pub struct ImportSkillRequest {
     ),
     security(("api_key" = []))
 )]
-pub async fn list_skills(
-    State(state): State<AppState>,
-) -> Json<Vec<SkillSummary>> {
+pub async fn list_skills(State(state): State<AppState>) -> Json<Vec<SkillSummary>> {
     let mut skills = Vec::new();
 
     // 1. Wasm Skills
@@ -142,46 +136,113 @@ pub async fn import_skill(
     State(state): State<AppState>,
     Json(payload): Json<ImportRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    info!("👹 [Vampire Attack] Attempting to import skill from: {}", payload.url);
+    info!(
+        "👹 [Vampire Attack] Attempting to import skill from: {}",
+        payload.url
+    );
 
     // 1. SSRF Validation
-    state.security_policy.validate_url(&payload.url).await
-        .map_err(|e| (StatusCode::FORBIDDEN, Json(serde_json::json!({"error": e.to_string()}))))?;
-    
+    state
+        .security_policy
+        .validate_url(&payload.url)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::FORBIDDEN,
+                Json(serde_json::json!({"error": e.to_string()})),
+            )
+        })?;
+
     // 2. Fetch the content
-    let resp = state.http_client.get(&payload.url)
+    let resp = state
+        .http_client
+        .get(&payload.url)
         .send()
         .await
-        .map_err(|e| (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": format!("Failed to fetch URL: {}", e)}))))?;
+        .map_err(|e| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": format!("Failed to fetch URL: {}", e)})),
+            )
+        })?;
 
-    let content = resp.text()
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": format!("Failed to read body: {}", e)}))))?;
+    let content = resp.text().await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("Failed to read body: {}", e)})),
+        )
+    })?;
 
     // 2. Parse using SkillImporter (Infrastructure)
+    use infrastructure::skills::cleanroom::Cleanroom;
     use infrastructure::skills::importer::SkillImporter;
-    
+
     let manifests = if payload.url.ends_with(".yaml") || payload.url.ends_with(".yml") {
-        SkillImporter::parse_agency_yaml(&content).into_iter().collect::<Vec<_>>()
+        SkillImporter::parse_agency_yaml(&content)
+            .into_iter()
+            .collect::<Vec<_>>()
     } else if payload.url.ends_with(".json") {
         SkillImporter::parse_openapi(&content)
     } else {
-        SkillImporter::parse_skill_md(&content).into_iter().collect::<Vec<_>>()
+        SkillImporter::parse_skill_md(&content)
+            .into_iter()
+            .collect::<Vec<_>>()
     };
 
     if manifests.is_empty() {
-        return Err((StatusCode::UNPROCESSABLE_ENTITY, Json(serde_json::json!({"error": "No valid skills found in the content."}))));
+        return Err((
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(serde_json::json!({"error": "No valid skills found in the content."})),
+        ));
     }
 
-    // Phase 20 MVP: For now, we just return the count and details of what WOULD be imported.
-    // In future, this would be injected into WasmSkillManager or similar.
-    info!("✅ [Vampire Attack] Successfully parsed {} skills from {}", manifests.len(), payload.url);
+    // 3. Process via Cleanroom (N2)
+    // Instantiate a temporary cleanroom with the existing forge and a workspace
+    let cleanroom = Cleanroom::new(
+        (*state.skill_forge).clone(),
+        std::path::PathBuf::from("workspace/cleanroom"),
+    );
+
+    let mut imported_skills = Vec::new();
+    let mut errors = Vec::new();
+
+    for manifest in manifests {
+        let skill_name = manifest.l1.name.clone();
+        match cleanroom.process_import(manifest).await {
+            Ok(_) => {
+                info!(
+                    "✅ [Vampire Attack] Successfully imported and forged skill: {}",
+                    skill_name
+                );
+                imported_skills.push(skill_name);
+            }
+            Err(e) => {
+                error!(
+                    "❌ [Vampire Attack] Failed to import skill '{}': {}",
+                    skill_name, e
+                );
+                errors.push(format!("{}: {}", skill_name, e));
+            }
+        }
+    }
+
+    if imported_skills.is_empty() && !errors.is_empty() {
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({
+                "status": "error",
+                "error": "All skill imports failed.",
+                "details": errors
+            })),
+        ));
+    }
 
     Ok(Json(serde_json::json!({
         "status": "success",
-        "imported_count": manifests.len(),
-        "skills": manifests.iter().map(|m| &m.l1.name).collect::<Vec<_>>(),
-        "message": "Skills parsed and queued for cleanroom validation."
+        "imported_count": imported_skills.len(),
+        "skills": imported_skills,
+        "errors": if errors.is_empty() { None } else { Some(errors) },
+        "message": "Skills successfully imported and forged in cleanroom."
     })))
 }
 
@@ -189,8 +250,17 @@ pub async fn spawn_mcp_server(
     State(state): State<AppState>,
     Json(payload): Json<McpSpawnRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    match state.mcp_manager.spawn_stdio_server(payload.id.clone(), &payload.command, payload.args).await {
-        Ok(_) => Ok(Json(serde_json::json!({"status": "success", "id": payload.id}))),
-        Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": e.to_string()}))))
+    match state
+        .mcp_manager
+        .spawn_stdio_server(payload.id.clone(), &payload.command, payload.args)
+        .await
+    {
+        Ok(_) => Ok(Json(
+            serde_json::json!({"status": "success", "id": payload.id}),
+        )),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": e.to_string()})),
+        )),
     }
 }

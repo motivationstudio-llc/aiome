@@ -3,19 +3,16 @@
  * Copyright (C) 2026 motivationstudio, LLC
  */
 
-use async_trait::async_trait;
-use aiome_core::error::AiomeError;
 use super::bridge_trait::ChannelBridge;
-use tracing::{info, error};
+use aiome_core::error::AiomeError;
+use async_trait::async_trait;
 use serenity::{
-    prelude::*,
-    model::channel::Message as DiscordMessage,
-    model::gateway::Ready,
-    all::GatewayIntents,
-    all::Http,
+    all::GatewayIntents, all::Http, model::channel::Message as DiscordMessage,
+    model::gateway::Ready, prelude::*,
 };
-use std::sync::Arc;
 use shared::watchtower::ControlCommand;
+use std::sync::Arc;
+use tracing::{error, info};
 
 pub struct DiscordBridge {
     token: String,
@@ -40,8 +37,11 @@ impl EventHandler for Handler {
             return;
         }
 
-        info!("📩 [Discord] Received message from {}: {}", msg.author.name, msg.content);
-        
+        info!(
+            "📩 [Discord] Received message from {}: {}",
+            msg.author.name, msg.content
+        );
+
         let cmd = ControlCommand::Chat {
             message: msg.content.clone(),
             channel_id: msg.channel_id.get(),
@@ -64,19 +64,28 @@ impl ChannelBridge for DiscordBridge {
     }
 
     async fn send_message(&self, channel_id: &str, content: &str) -> Result<(), AiomeError> {
-        let channel_id_u64: u64 = channel_id.parse().map_err(|_| AiomeError::Infrastructure { reason: "Invalid Discord Channel ID".to_string() })?;
+        let channel_id_u64: u64 = channel_id.parse().map_err(|_| AiomeError::Infrastructure {
+            reason: "Invalid Discord Channel ID".to_string(),
+        })?;
         let channel = serenity::model::id::ChannelId::new(channel_id_u64);
-        
+
         // Help inference by explicitly specifying the error type or using a temporary variable
-        let _ = channel.say(&self.http, content).await
-            .map_err(|e| AiomeError::Infrastructure { reason: format!("Discord send failed: {}", e) })?;
-        
+        let _ = channel
+            .say(&self.http, content)
+            .await
+            .map_err(|e| AiomeError::Infrastructure {
+                reason: format!("Discord send failed: {}", e),
+            })?;
+
         Ok(())
     }
 
-    async fn run(&self, command_tx: tokio::sync::mpsc::Sender<ControlCommand>) -> Result<(), AiomeError> {
-        let intents = GatewayIntents::GUILD_MESSAGES 
-            | GatewayIntents::DIRECT_MESSAGES 
+    async fn run(
+        &self,
+        command_tx: tokio::sync::mpsc::Sender<ControlCommand>,
+    ) -> Result<(), AiomeError> {
+        let intents = GatewayIntents::GUILD_MESSAGES
+            | GatewayIntents::DIRECT_MESSAGES
             | GatewayIntents::MESSAGE_CONTENT;
 
         let handler = Handler { command_tx };
@@ -84,11 +93,17 @@ impl ChannelBridge for DiscordBridge {
         let mut client = Client::builder(&self.token, intents)
             .event_handler(handler)
             .await
-            .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to create Discord client: {}", e) })?;
+            .map_err(|e| AiomeError::Infrastructure {
+                reason: format!("Failed to create Discord client: {}", e),
+            })?;
 
         info!("🚀 [Discord] Starting serenity gateway...");
-        client.start().await
-            .map_err(|e| AiomeError::Infrastructure { reason: format!("Discord client error: {}", e) })?;
+        client
+            .start()
+            .await
+            .map_err(|e| AiomeError::Infrastructure {
+                reason: format!("Discord client error: {}", e),
+            })?;
 
         Ok(())
     }

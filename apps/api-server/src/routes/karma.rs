@@ -1,38 +1,66 @@
+use crate::error::AppError;
+use crate::AppState;
+use aiome_core::contracts::ImmuneRule;
+use aiome_core::traits::JobQueue;
 use axum::{
-    response::{Json, IntoResponse},
-    extract::{State, Path},
+    extract::{Path, State},
     http::StatusCode,
+    response::{IntoResponse, Json},
 };
 use tracing::{info, warn};
-use crate::AppState;
-use aiome_core::traits::JobQueue;
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/karma",
+    responses(
+        (status = 200, description = "List recent karma", body = [serde_json::Value])
+    )
+)]
 pub async fn get_karma_stream(
     State(state): State<AppState>,
-) -> Json<Vec<serde_json::Value>> {
-    let karmas = state.job_queue.fetch_all_karma(10).await.unwrap_or_default();
-    Json(karmas)
+) -> Result<Json<Vec<serde_json::Value>>, AppError> {
+    let karmas = state.job_queue.fetch_all_karma(10).await?;
+    Ok(Json(karmas))
 }
 
-pub async fn trigger_failure_demo(
-    State(state): State<AppState>,
-) -> Json<serde_json::Value> {
+#[utoipa::path(
+    post,
+    path = "/api/v1/karma/demo/failure",
+    responses(
+        (status = 200, description = "Demo failure triggered", body = serde_json::Value)
+    )
+)]
+pub async fn trigger_failure_demo(State(state): State<AppState>) -> Json<serde_json::Value> {
     info!("🧪 [DemoHandler] Triggering failure demo and storing karma...");
-    
-    let _ = state.job_queue.enqueue("Demo", "WASM Bridge Failure", "Standard", None).await;
-    let job_id = "demo-job-123";
-    let real_job_id = state.job_queue.enqueue("Demo", "WASM Bridge Failure", "Standard", None).await.unwrap_or_else(|_| job_id.to_string());
 
-    match state.job_queue.store_karma(
-        &real_job_id,
-        "wasm_bridge_skill",
-        "Inconsistency during external binary calls (Buffer Overflow risk)",
-        "Technical",
-        "genesis_soul",
-        None, 
-        None
-    ).await {
-        Ok(_) => info!("✅ [DemoHandler] Karma stored successfully in local DB (Job: {}).", real_job_id),
+    let _ = state
+        .job_queue
+        .enqueue("Demo", "WASM Bridge Failure", "Standard", None)
+        .await;
+    let job_id = "demo-job-123";
+    let real_job_id = state
+        .job_queue
+        .enqueue("Demo", "WASM Bridge Failure", "Standard", None)
+        .await
+        .unwrap_or_else(|_| job_id.to_string());
+
+    match state
+        .job_queue
+        .store_karma(
+            &real_job_id,
+            "wasm_bridge_skill",
+            "Inconsistency during external binary calls (Buffer Overflow risk)",
+            "Technical",
+            "genesis_soul",
+            None,
+            None,
+        )
+        .await
+    {
+        Ok(_) => info!(
+            "✅ [DemoHandler] Karma stored successfully in local DB (Job: {}).",
+            real_job_id
+        ),
         Err(e) => warn!("❌ [DemoHandler] Failed to store karma: {:?}", e),
     }
 
@@ -49,6 +77,13 @@ pub async fn trigger_failure_demo(
     }))
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/karma/demo/security",
+    responses(
+        (status = 200, description = "Demo security triggered", body = serde_json::Value)
+    )
+)]
 pub async fn trigger_security_demo() -> Json<serde_json::Value> {
     Json(serde_json::json!({
         "status": "success",
@@ -62,6 +97,13 @@ pub async fn trigger_security_demo() -> Json<serde_json::Value> {
     }))
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/karma/demo/federation",
+    responses(
+        (status = 200, description = "Demo federation triggered", body = serde_json::Value)
+    )
+)]
 pub async fn trigger_federation_demo() -> Json<serde_json::Value> {
     Json(serde_json::json!({
         "status": "success",
@@ -75,44 +117,63 @@ pub async fn trigger_federation_demo() -> Json<serde_json::Value> {
     }))
 }
 
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, utoipa::ToSchema)]
 pub struct GraphNode {
     pub id: String,
     pub label: String,
     pub group: String,
 }
 
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, utoipa::ToSchema)]
 pub struct GraphEdge {
     pub from: String,
     pub to: String,
 }
 
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, utoipa::ToSchema)]
 pub struct GraphData {
     pub nodes: Vec<GraphNode>,
     pub edges: Vec<GraphEdge>,
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/synergy-graph",
+    responses(
+        (status = 200, description = "Synergy graph data", body = GraphData)
+    )
+)]
 pub async fn synergy_graph_handler(
     State(state): State<AppState>,
-) -> impl IntoResponse {
+) -> Result<Json<GraphData>, AppError> {
     let local_node_id = state.job_queue.get_node_id().await.unwrap_or_default();
-    let karmas: Vec<serde_json::Value> = state.job_queue.fetch_all_karma(250).await.unwrap_or_default();
-    let mut rules: Vec<aiome_core::contracts::ImmuneRule> = state.job_queue.get_immune_rules().await.unwrap_or_default();
-    
+    let karmas: Vec<serde_json::Value> = state.job_queue.fetch_all_karma(250).await?;
+    let mut rules: Vec<ImmuneRule> = state.job_queue.get_immune_rules().await?;
+
     rules.truncate(250);
 
     let mut nodes = Vec::new();
     let mut edges = Vec::new();
 
-    nodes.push(GraphNode { id: "aiome-core".to_string(), label: "Aiome Core".to_string(), group: "core".to_string() });
+    nodes.push(GraphNode {
+        id: "aiome-core".to_string(),
+        label: "Aiome Core".to_string(),
+        group: "core".to_string(),
+    });
 
     for k in karmas {
-        let kid = format!("karma-{}", k.get("id").and_then(|v: &serde_json::Value| v.as_str()).unwrap_or("unknown"));
-        let lesson = k.get("lesson").and_then(|v: &serde_json::Value| v.as_str()).unwrap_or("Lesson");
+        let kid = format!(
+            "karma-{}",
+            k.get("id")
+                .and_then(|v: &serde_json::Value| v.as_str())
+                .unwrap_or("unknown")
+        );
+        let lesson = k
+            .get("lesson")
+            .and_then(|v: &serde_json::Value| v.as_str())
+            .unwrap_or("Lesson");
         let node_id = k.get("node_id").and_then(|v| v.as_str()).unwrap_or("");
-        
+
         let group = if node_id == local_node_id || node_id.is_empty() {
             "karma_local"
         } else {
@@ -125,7 +186,10 @@ pub async fn synergy_graph_handler(
             group: group.to_string(),
         });
 
-        edges.push(GraphEdge { from: "aiome-core".to_string(), to: kid });
+        edges.push(GraphEdge {
+            from: "aiome-core".to_string(),
+            to: kid,
+        });
     }
 
     for rule in rules {
@@ -135,23 +199,41 @@ pub async fn synergy_graph_handler(
             label: format!("[RULE] {}", rule.pattern),
             group: "immune".to_string(),
         });
-        edges.push(GraphEdge { from: "aiome-core".to_string(), to: rid });
+        edges.push(GraphEdge {
+            from: "aiome-core".to_string(),
+            to: rid,
+        });
     }
 
-    Json(GraphData { nodes, edges })
+    Ok(Json(GraphData { nodes, edges }))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/immune-rules",
+    responses(
+        (status = 200, description = "List immune rules", body = [serde_json::Value])
+    )
+)]
 pub async fn get_immune_rules_handler(
     State(state): State<AppState>,
-) -> Json<Vec<aiome_core::contracts::ImmuneRule>> {
-    let rules = state.job_queue.get_immune_rules().await.unwrap_or_default();
-    Json(rules)
+) -> Result<Json<Vec<aiome_core::contracts::ImmuneRule>>, AppError> {
+    let rules = state.job_queue.get_immune_rules().await?;
+    Ok(Json(rules))
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/immune-rules",
+    request_body = ImmuneRule,
+    responses(
+        (status = 200, description = "Rule added", body = serde_json::Value)
+    )
+)]
 pub async fn add_immune_rule_handler(
     State(state): State<AppState>,
-    Json(mut rule): Json<aiome_core::contracts::ImmuneRule>,
-) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    Json(mut rule): Json<ImmuneRule>,
+) -> Result<Json<serde_json::Value>, AppError> {
     // Phase 20 MVP: Generate ID and timestamp if empty
     if rule.id.is_empty() {
         rule.id = uuid::Uuid::new_v4().to_string();
@@ -160,25 +242,42 @@ pub async fn add_immune_rule_handler(
         rule.created_at = chrono::Utc::now().to_rfc3339();
     }
 
-    state.job_queue.store_immune_rule(&rule).await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": e.to_string()}))))?;
-    
-    Ok(Json(serde_json::json!({"status": "success", "id": rule.id})))
+    state.job_queue.store_immune_rule(&rule).await?;
+
+    Ok(Json(
+        serde_json::json!({"status": "success", "id": rule.id}),
+    ))
 }
 
+#[utoipa::path(
+    delete,
+    path = "/api/v1/immune-rules/{id}",
+    params(
+        ("id" = String, Path, description = "Rule ID")
+    ),
+    responses(
+        (status = 200, description = "Rule deleted", body = serde_json::Value)
+    )
+)]
 pub async fn delete_immune_rule_handler(
     State(state): State<AppState>,
     Path(id): Path<String>,
-) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    state.job_queue.delete_immune_rule(&id).await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": e.to_string()}))))?;
-    
+) -> Result<Json<serde_json::Value>, AppError> {
+    state.job_queue.delete_immune_rule(&id).await?;
+
     Ok(Json(serde_json::json!({"status": "success"})))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/evolution",
+    responses(
+        (status = 200, description = "Evolution history", body = [serde_json::Value])
+    )
+)]
 pub async fn get_evolution_history_handler(
     State(state): State<AppState>,
-) -> Json<Vec<serde_json::Value>> {
-    let history = state.job_queue.fetch_evolution_history(50).await.unwrap_or_default();
-    Json(history)
+) -> Result<Json<Vec<serde_json::Value>>, AppError> {
+    let history = state.job_queue.fetch_evolution_history(50).await?;
+    Ok(Json(history))
 }

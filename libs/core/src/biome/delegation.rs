@@ -30,7 +30,10 @@ impl DelegationResult {
         // Common exit codes and stderr patterns
         if self.exit_code == 124 || self.stderr.contains("timeout") {
             FailureCategory::Timeout
-        } else if self.exit_code == 137 || self.stderr.contains("OOM") || self.stderr.contains("Out of memory") {
+        } else if self.exit_code == 137
+            || self.stderr.contains("OOM")
+            || self.stderr.contains("Out of memory")
+        {
             FailureCategory::Oom
         } else if self.stderr.contains("Module not found") || self.stderr.contains("ImportError") {
             FailureCategory::DependencyMissing

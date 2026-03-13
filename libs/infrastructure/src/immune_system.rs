@@ -1,21 +1,21 @@
 /*
  * Aiome - The Autonomous AI Operating System
  * Copyright (C) 2026 motivationstudio, LLC
- * 
+ *
  * Licensed under the Elastic License 2.0 (ELv2).
- * You may not provide the software to third parties as a hosted or managed service, 
- * where the service provides users with access to any substantial set of the features 
+ * You may not provide the software to third parties as a hosted or managed service,
+ * where the service provides users with access to any substantial set of the features
  * or functionality of the software.
  */
 
-use aiome_core::error::AiomeError;
 use aiome_core::contracts::ImmuneRule;
-use aiome_core::traits::JobQueue;
+use aiome_core::error::AiomeError;
 use aiome_core::llm_provider::LlmProvider;
+use aiome_core::traits::JobQueue;
+use chrono::Utc;
 use std::sync::Arc;
 use tracing::{info, warn};
 use uuid::Uuid;
-use chrono::Utc;
 
 pub struct AdaptiveImmuneSystem {
     provider: Arc<dyn LlmProvider>,
@@ -28,21 +28,33 @@ impl AdaptiveImmuneSystem {
 
     /// 失敗ログやセキュリティインシデントを分析し、新しい免疫ルールを生成する
     pub async fn analyze_threats(&self, jq: &impl JobQueue) -> Result<u32, AiomeError> {
-        info!("防御システム: 脅威分析を開始中 (using {})...", self.provider.name());
-        
-        let result = jq.fetch_relevant_karma("security threat injection error", "global", 10, "current").await?;
+        info!(
+            "防御システム: 脅威分析を開始中 (using {})...",
+            self.provider.name()
+        );
+
+        let result = jq
+            .fetch_relevant_karma("security threat injection error", "global", 10, "current")
+            .await?;
         if result.entries.is_empty() {
             return Ok(0);
         }
 
-        let logs_concat = result.entries.iter().map(|e| e.lesson.as_str()).collect::<Vec<_>>().join("\n---\n");
+        let logs_concat = result
+            .entries
+            .iter()
+            .map(|e| e.lesson.as_str())
+            .collect::<Vec<_>>()
+            .join("\n---\n");
         let preamble = "あなたはシステムの自己防衛エンジンです。以下のログから攻撃パターンを特定し、防御ルールを1つ JSON 形式で作成してください。\nFormat: {\"pattern\": \"攻撃的な単語や正規表現\", \"severity\": 0-100, \"action\": \"Block/Alert\"}";
 
         let response = self.provider.complete(&logs_concat, Some(preamble)).await?;
 
         let json_str = crate::concept_manager::extract_json(&response)?;
-        let v: serde_json::Value = serde_json::from_str(json_str.as_str())
-            .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to parse immune rule JSON: {}", e) })?;
+        let v: serde_json::Value =
+            serde_json::from_str(json_str.as_str()).map_err(|e| AiomeError::Infrastructure {
+                reason: format!("Failed to parse immune rule JSON: {}", e),
+            })?;
 
         let rule = ImmuneRule {
             id: Uuid::new_v4().to_string(),
@@ -55,34 +67,45 @@ impl AdaptiveImmuneSystem {
             signature: None,
         };
 
-        info!("🛡️ 新しい免疫ルールを生成しました: [{}] {}", rule.action, rule.pattern);
+        info!(
+            "🛡️ 新しい免疫ルールを生成しました: [{}] {}",
+            rule.action, rule.pattern
+        );
         jq.store_immune_rule(&rule).await?;
 
         Ok(1)
     }
 
     /// 入力内容が既存の免疫ルールに抵触するか検証する (Regex & Baseline)
-    pub async fn verify_intent(&self, input: &str, jq: &impl JobQueue) -> Result<Option<ImmuneRule>, AiomeError> {
+    pub async fn verify_intent(
+        &self,
+        input: &str,
+        jq: &impl JobQueue,
+    ) -> Result<Option<ImmuneRule>, AiomeError> {
         use once_cell::sync::Lazy;
         use regex::Regex;
 
         // 1. 静的ベースライン・フィルタ (第1段階: 明白な危険の排除)
         static BASELINE_REGEXES: Lazy<Vec<Regex>> = Lazy::new(|| {
             [
-                r"rm -rf\s+/", 
-                r"curl\s+.*\|.*sh", 
+                r"rm -rf\s+/",
+                r"curl\s+.*\|.*sh",
                 r"wget\s+.*\|.*sh",
                 r"cat\s+~/\.ssh/id_rsa",
                 r"chmod\s+777",
                 r"hidden-backdoor\.com",
-            ].iter()
+            ]
+            .iter()
             .map(|p| Regex::new(p).expect("Invalid baseline regex"))
             .collect()
         });
 
         for re in BASELINE_REGEXES.iter() {
             if re.is_match(input) {
-                warn!("🚨 第1層(Sentinel): 明白な危険を検知しました: {}", re.as_str());
+                warn!(
+                    "🚨 第1層(Sentinel): 明白な危険を検知しました: {}",
+                    re.as_str()
+                );
                 return Ok(Some(ImmuneRule {
                     id: "sentinel-baseline".to_string(),
                     pattern: re.as_str().to_string(),
@@ -102,15 +125,21 @@ impl AdaptiveImmuneSystem {
             // Gap 3 Mitigation: Quarantined rules are not used for verification until approved
             // (Note: This logic is partially handled by SQL in fetch_active_immune_rules below,
             // but we keep it here as a defense-in-depth)
-            
+
             // パターンが有効な正規表現か試行
             if let Ok(re) = regex::Regex::new(&rule.pattern) {
                 if re.is_match(input) {
-                    warn!("🚨 免疫システム(Regex): 脅威を検知しました: {}", rule.pattern);
+                    warn!(
+                        "🚨 免疫システム(Regex): 脅威を検知しました: {}",
+                        rule.pattern
+                    );
                     return Ok(Some(rule));
                 }
             } else if input.to_lowercase().contains(&rule.pattern.to_lowercase()) {
-                warn!("🚨 免疫システム(Contains): 脅威を検知しました: {}", rule.pattern);
+                warn!(
+                    "🚨 免疫システム(Contains): 脅威を検知しました: {}",
+                    rule.pattern
+                );
                 return Ok(Some(rule));
             }
         }

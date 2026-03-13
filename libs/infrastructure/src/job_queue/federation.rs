@@ -1,31 +1,52 @@
 /*
  * Aiome - The Autonomous AI Operating System
  * Copyright (C) 2026 motivationstudio, LLC
- * 
+ *
  * Licensed under the Elastic License 2.0 (ELv2).
  */
 
-use async_trait::async_trait;
-use aiome_core::error::AiomeError;
-use aiome_core::contracts::{FederatedKarma, ImmuneRule, ArenaMatch};
-use aiome_core::traits::JobQueue;
-use sqlx::Row;
-use super::SqliteJobQueue;
 use super::try_get_optional_string;
+use super::SqliteJobQueue;
+use aiome_core::contracts::{ArenaMatch, FederatedKarma, ImmuneRule};
+use aiome_core::error::AiomeError;
+use aiome_core::traits::JobQueue;
+use async_trait::async_trait;
+use sqlx::Row;
 
 #[async_trait]
 pub trait FederationOps {
-    async fn do_export_federated_data(&self, since: Option<&str>) -> Result<(Vec<FederatedKarma>, Vec<ImmuneRule>, Vec<ArenaMatch>), AiomeError>;
-    async fn do_import_federated_data(&self, karmas: Vec<FederatedKarma>, rules: Vec<ImmuneRule>, matches: Vec<ArenaMatch>) -> Result<(), AiomeError>;
+    async fn do_export_federated_data(
+        &self,
+        since: Option<&str>,
+    ) -> Result<(Vec<FederatedKarma>, Vec<ImmuneRule>, Vec<ArenaMatch>), AiomeError>;
+    async fn do_import_federated_data(
+        &self,
+        karmas: Vec<FederatedKarma>,
+        rules: Vec<ImmuneRule>,
+        matches: Vec<ArenaMatch>,
+    ) -> Result<(), AiomeError>;
     async fn do_get_peer_sync_time(&self, peer_url: &str) -> Result<Option<String>, AiomeError>;
-    async fn do_update_peer_sync_time(&self, peer_url: &str, sync_time: &str) -> Result<(), AiomeError>;
-    async fn do_fetch_unfederated_data(&self) -> Result<(Vec<FederatedKarma>, Vec<ImmuneRule>), AiomeError>;
-    async fn do_mark_as_federated(&self, karma_ids: Vec<String>, rule_ids: Vec<String>) -> Result<(), AiomeError>;
+    async fn do_update_peer_sync_time(
+        &self,
+        peer_url: &str,
+        sync_time: &str,
+    ) -> Result<(), AiomeError>;
+    async fn do_fetch_unfederated_data(
+        &self,
+    ) -> Result<(Vec<FederatedKarma>, Vec<ImmuneRule>), AiomeError>;
+    async fn do_mark_as_federated(
+        &self,
+        karma_ids: Vec<String>,
+        rule_ids: Vec<String>,
+    ) -> Result<(), AiomeError>;
 }
 
 #[async_trait]
 impl FederationOps for SqliteJobQueue {
-    async fn do_export_federated_data(&self, since: Option<&str>) -> Result<(Vec<FederatedKarma>, Vec<ImmuneRule>, Vec<ArenaMatch>), AiomeError> {
+    async fn do_export_federated_data(
+        &self,
+        since: Option<&str>,
+    ) -> Result<(Vec<FederatedKarma>, Vec<ImmuneRule>, Vec<ArenaMatch>), AiomeError> {
         let since_ts = since.unwrap_or("1970-01-01T00:00:00");
 
         let karmas = sqlx::query("SELECT id, job_id, karma_type, related_skill, lesson, weight, soul_version_hash, created_at, lamport_clock, node_id, signature FROM karma_logs WHERE created_at > ?")
@@ -93,40 +114,70 @@ impl FederationOps for SqliteJobQueue {
         Ok((fed_karmas, fed_rules, fed_matches))
     }
 
-    async fn do_import_federated_data(&self, karmas: Vec<FederatedKarma>, rules: Vec<ImmuneRule>, matches: Vec<ArenaMatch>) -> Result<(), AiomeError> {
+    async fn do_import_federated_data(
+        &self,
+        karmas: Vec<FederatedKarma>,
+        rules: Vec<ImmuneRule>,
+        matches: Vec<ArenaMatch>,
+    ) -> Result<(), AiomeError> {
         if !karmas.is_empty() || !rules.is_empty() || !matches.is_empty() {
-            info!("📥 [Federation] Importing {} karmas, {} rules, {} matches.", karmas.len(), rules.len(), matches.len());
+            info!(
+                "📥 [Federation] Importing {} karmas, {} rules, {} matches.",
+                karmas.len(),
+                rules.len(),
+                matches.len()
+            );
         }
-        let mut tx = self.pool.begin().await
-            .map_err(|e| AiomeError::Infrastructure { reason: format!("Import Tx start failed: {}", e) })?;
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| AiomeError::Infrastructure {
+                reason: format!("Import Tx start failed: {}", e),
+            })?;
 
-        use ed25519_dalek::{VerifyingKey, Signature, Verifier};
         use base64::{prelude::BASE64_STANDARD, Engine};
-        use tracing::{warn, info};
+        use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+        use tracing::{info, warn};
 
         for k in karmas {
             // Verify Ed25519 Signature
             let mut valid = false;
             if let Some(ref sig_b64) = k.signature {
                 let payload = format!("{}:{}:{}", k.id, k.lesson, k.lamport_clock);
-                if let (Ok(pubkey_bytes), Ok(sig_bytes)) = (BASE64_STANDARD.decode(&k.node_id), BASE64_STANDARD.decode(sig_b64)) {
-                    if let (Ok(pubkey), Ok(sig)) = (VerifyingKey::from_bytes(&pubkey_bytes.try_into().unwrap_or([0; 32])), Signature::from_slice(&sig_bytes)) {
+                if let (Ok(pubkey_bytes), Ok(sig_bytes)) = (
+                    BASE64_STANDARD.decode(&k.node_id),
+                    BASE64_STANDARD.decode(sig_b64),
+                ) {
+                    if let (Ok(pubkey), Ok(sig)) = (
+                        VerifyingKey::from_bytes(&pubkey_bytes.try_into().unwrap_or([0; 32])),
+                        Signature::from_slice(&sig_bytes),
+                    ) {
                         if pubkey.verify(payload.as_bytes(), &sig).is_ok() {
                             valid = true;
                         } else {
-                            warn!("🛡️ [Federation] Signature verification failed for Karma {}.", k.id);
+                            warn!(
+                                "🛡️ [Federation] Signature verification failed for Karma {}.",
+                                k.id
+                            );
                         }
                     }
                 }
             }
 
             if !valid {
-                warn!("🛡️ [Federation] Skipping Karma {} due to invalid/missing signature.", k.id);
+                warn!(
+                    "🛡️ [Federation] Skipping Karma {} due to invalid/missing signature.",
+                    k.id
+                );
                 continue;
             }
 
             let clean_lesson = if k.lesson.len() > 2000 {
-                format!("{}... [Truncated for Swarm Safety]", k.lesson.chars().take(2000).collect::<String>())
+                format!(
+                    "{}... [Truncated for Swarm Safety]",
+                    k.lesson.chars().take(2000).collect::<String>()
+                )
             } else {
                 k.lesson.clone()
             };
@@ -158,8 +209,14 @@ impl FederationOps for SqliteJobQueue {
             let mut valid = false;
             if let Some(ref sig_b64) = r.signature {
                 let payload = format!("{}:{}:{}", r.id, r.pattern, r.lamport_clock);
-                if let (Ok(pubkey_bytes), Ok(sig_bytes)) = (BASE64_STANDARD.decode(&r.node_id), BASE64_STANDARD.decode(sig_b64)) {
-                    if let (Ok(pubkey), Ok(sig)) = (VerifyingKey::from_bytes(&pubkey_bytes.try_into().unwrap_or([0; 32])), Signature::from_slice(&sig_bytes)) {
+                if let (Ok(pubkey_bytes), Ok(sig_bytes)) = (
+                    BASE64_STANDARD.decode(&r.node_id),
+                    BASE64_STANDARD.decode(sig_b64),
+                ) {
+                    if let (Ok(pubkey), Ok(sig)) = (
+                        VerifyingKey::from_bytes(&pubkey_bytes.try_into().unwrap_or([0; 32])),
+                        Signature::from_slice(&sig_bytes),
+                    ) {
                         if pubkey.verify(payload.as_bytes(), &sig).is_ok() {
                             valid = true;
                         }
@@ -168,7 +225,10 @@ impl FederationOps for SqliteJobQueue {
             }
 
             if !valid {
-                warn!("🛡️ [Federation] Skipping Rule {} due to invalid signature.", r.id);
+                warn!(
+                    "🛡️ [Federation] Skipping Rule {} due to invalid signature.",
+                    r.id
+                );
                 continue;
             }
 
@@ -197,7 +257,9 @@ impl FederationOps for SqliteJobQueue {
                 .execute(&mut *tx).await.ok();
         }
 
-        tx.commit().await.map_err(|e| AiomeError::Infrastructure { reason: format!("Import Tx commit failed: {}", e) })?;
+        tx.commit().await.map_err(|e| AiomeError::Infrastructure {
+            reason: format!("Import Tx commit failed: {}", e),
+        })?;
         Ok(())
     }
 
@@ -206,12 +268,18 @@ impl FederationOps for SqliteJobQueue {
             .bind(peer_url)
             .fetch_optional(&self.pool)
             .await
-            .map_err(|e| AiomeError::Infrastructure { reason: format!("Get Peer sync time failed: {}", e) })?;
-        
+            .map_err(|e| AiomeError::Infrastructure {
+                reason: format!("Get Peer sync time failed: {}", e),
+            })?;
+
         Ok(row.map(|r| r.get("last_sync_at")))
     }
 
-    async fn do_update_peer_sync_time(&self, peer_url: &str, sync_time: &str) -> Result<(), AiomeError> {
+    async fn do_update_peer_sync_time(
+        &self,
+        peer_url: &str,
+        sync_time: &str,
+    ) -> Result<(), AiomeError> {
         sqlx::query("INSERT INTO federation_peers (peer_url, last_sync_at) VALUES (?, ?) ON CONFLICT(peer_url) DO UPDATE SET last_sync_at = excluded.last_sync_at")
             .bind(peer_url)
             .bind(sync_time)
@@ -221,7 +289,9 @@ impl FederationOps for SqliteJobQueue {
         Ok(())
     }
 
-    async fn do_fetch_unfederated_data(&self) -> Result<(Vec<FederatedKarma>, Vec<ImmuneRule>), AiomeError> {
+    async fn do_fetch_unfederated_data(
+        &self,
+    ) -> Result<(Vec<FederatedKarma>, Vec<ImmuneRule>), AiomeError> {
         let karmas = sqlx::query("SELECT id, job_id, karma_type, related_skill, lesson, weight, soul_version_hash, created_at, lamport_clock, node_id, signature FROM karma_logs WHERE is_federated = 0")
             .fetch_all(&self.pool)
             .await
@@ -266,18 +336,37 @@ impl FederationOps for SqliteJobQueue {
         Ok((fed_karmas, fed_rules))
     }
 
-    async fn do_mark_as_federated(&self, karma_ids: Vec<String>, rule_ids: Vec<String>) -> Result<(), AiomeError> {
-        let mut tx = self.pool.begin().await
-            .map_err(|e| AiomeError::Infrastructure { reason: format!("Mark federated Tx failed: {}", e) })?;
+    async fn do_mark_as_federated(
+        &self,
+        karma_ids: Vec<String>,
+        rule_ids: Vec<String>,
+    ) -> Result<(), AiomeError> {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| AiomeError::Infrastructure {
+                reason: format!("Mark federated Tx failed: {}", e),
+            })?;
 
         for id in karma_ids {
-            sqlx::query("UPDATE karma_logs SET is_federated = 1 WHERE id = ?").bind(id).execute(&mut *tx).await.ok();
+            sqlx::query("UPDATE karma_logs SET is_federated = 1 WHERE id = ?")
+                .bind(id)
+                .execute(&mut *tx)
+                .await
+                .ok();
         }
         for id in rule_ids {
-            sqlx::query("UPDATE immune_rules SET is_federated = 1 WHERE id = ?").bind(id).execute(&mut *tx).await.ok();
+            sqlx::query("UPDATE immune_rules SET is_federated = 1 WHERE id = ?")
+                .bind(id)
+                .execute(&mut *tx)
+                .await
+                .ok();
         }
 
-        tx.commit().await.map_err(|e| AiomeError::Infrastructure { reason: format!("Mark federated commit failed: {}", e) })?;
+        tx.commit().await.map_err(|e| AiomeError::Infrastructure {
+            reason: format!("Mark federated commit failed: {}", e),
+        })?;
         Ok(())
     }
 }

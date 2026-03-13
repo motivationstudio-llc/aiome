@@ -1,21 +1,21 @@
 /*
  * Aiome - The Autonomous AI Operating System
  * Copyright (C) 2026 motivationstudio, LLC
- * 
+ *
  * Licensed under the Elastic License 2.0 (ELv2).
- * You may not provide the software to third parties as a hosted or managed service, 
- * where the service provides users with access to any substantial set of the features 
+ * You may not provide the software to third parties as a hosted or managed service,
+ * where the service provides users with access to any substantial set of the features
  * or functionality of the software.
  */
 
-use aiome_core::error::AiomeError;
 use aiome_core::contracts::ArenaMatch;
-use aiome_core::traits::JobQueue;
+use aiome_core::error::AiomeError;
 use aiome_core::llm_provider::LlmProvider;
+use aiome_core::traits::JobQueue;
+use chrono::Utc;
 use std::sync::Arc;
 use tracing::{info, warn};
 use uuid::Uuid;
-use chrono::Utc;
 
 pub struct SkillArena {
     provider: Arc<dyn LlmProvider>,
@@ -27,10 +27,21 @@ impl SkillArena {
     }
 
     /// 二つの異なるスキル（WASM）の出力を比較し、勝利スキルを決定する
-    pub async fn match_skill(&self, skill_a: &str, skill_b: &str, input: &str, jq: &impl JobQueue, 
-        sm: &crate::skills::WasmSkillManager) -> Result<Option<String>, AiomeError> {
-        
-        info!("⚔️  Arena Match: {} vs {} (topic: {}) using {}", skill_a, skill_b, input, self.provider.name());
+    pub async fn match_skill(
+        &self,
+        skill_a: &str,
+        skill_b: &str,
+        input: &str,
+        jq: &impl JobQueue,
+        sm: &crate::skills::WasmSkillManager,
+    ) -> Result<Option<String>, AiomeError> {
+        info!(
+            "⚔️  Arena Match: {} vs {} (topic: {}) using {}",
+            skill_a,
+            skill_b,
+            input,
+            self.provider.name()
+        );
 
         // 両方のスキルを実行
         let skill_a_v = crate::skills::VerifiedSkill::promote(skill_a.to_string());
@@ -43,7 +54,7 @@ impl SkillArena {
             (Err(e), _) => {
                 warn!("❌ Skill A ({}) failed: {}", skill_a, e);
                 return Ok(Some(skill_b.to_string())); // Aが落ちたのでBの勝利
-            },
+            }
             (_, Err(e)) => {
                 warn!("❌ Skill B ({}) failed: {}", skill_b, e);
                 return Ok(Some(skill_a.to_string())); // Bが落ちたのでAの勝利
@@ -66,15 +77,20 @@ impl SkillArena {
 }";
 
         let judge_prompt = format!(
-            "input: {}\n\n--- OUTPUT A ({}): ---\n{}\n\n--- OUTPUT B ({}): ---\n{}", 
+            "input: {}\n\n--- OUTPUT A ({}): ---\n{}\n\n--- OUTPUT B ({}): ---\n{}",
             input, skill_a, out_a, skill_b, out_b
         );
 
-        let judge_res = self.provider.complete(&judge_prompt, Some(judge_preamble)).await?;
+        let judge_res = self
+            .provider
+            .complete(&judge_prompt, Some(judge_preamble))
+            .await?;
 
         let json_str = crate::concept_manager::extract_json(&judge_res)?;
-        let v: serde_json::Value = serde_json::from_str(json_str.as_str())
-            .map_err(|e| AiomeError::Infrastructure { reason: format!("Judge JSON error: {}", e) })?;
+        let v: serde_json::Value =
+            serde_json::from_str(json_str.as_str()).map_err(|e| AiomeError::Infrastructure {
+                reason: format!("Judge JSON error: {}", e),
+            })?;
 
         let winner_raw = v["winner"].as_str().unwrap_or("");
         let final_winner = if winner_raw.contains(skill_a) {
@@ -91,12 +107,18 @@ impl SkillArena {
             skill_b: skill_b.to_string(),
             topic: input.to_string(),
             winner: final_winner.clone(),
-            reasoning: v["reasoning"].as_str().unwrap_or("Decision made by autonomous judge.").to_string(),
+            reasoning: v["reasoning"]
+                .as_str()
+                .unwrap_or("Decision made by autonomous judge.")
+                .to_string(),
             created_at: Utc::now().to_rfc3339(),
         };
 
         if let Some(ref w) = final_winner {
-            info!("🏆 Match Winner: {} (Reason: {})", w, match_record.reasoning);
+            info!(
+                "🏆 Match Winner: {} (Reason: {})",
+                w, match_record.reasoning
+            );
         } else {
             warn!("🤝 Match result: Draw");
         }
@@ -107,8 +129,12 @@ impl SkillArena {
     }
 
     /// アリーナの歴史から統計的に弱いスキルを特定し、淘汰（アンインストール）の準備をする
-    pub async fn analyze_and_cull(&self, _jq: &impl JobQueue, _sm: &crate::skills::WasmSkillManager) -> Result<Vec<String>, AiomeError> {
+    pub async fn analyze_and_cull(
+        &self,
+        _jq: &impl JobQueue,
+        _sm: &crate::skills::WasmSkillManager,
+    ) -> Result<Vec<String>, AiomeError> {
         info!("🧬 淘汰アルゴリズム（淘汰プロセス）を実行中...");
-        Ok(Vec::new()) 
+        Ok(Vec::new())
     }
 }

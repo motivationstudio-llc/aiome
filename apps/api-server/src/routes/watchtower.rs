@@ -3,16 +3,19 @@
  * Copyright (C) 2026 motivationstudio, LLC
  */
 
+use crate::routes::agent::AgentChatRequest;
+use crate::AppState;
+use aiome_core::traits::JobQueue;
 use axum::{
-    extract::{ws::{Message, WebSocket, WebSocketUpgrade}, State},
+    extract::{
+        ws::{Message, WebSocket, WebSocketUpgrade},
+        State,
+    },
     response::IntoResponse,
 };
-use tracing::{info, warn, error};
 use futures_util::{sink::SinkExt, stream::StreamExt};
-use crate::AppState;
-use shared::watchtower::{CoreEvent, ControlCommand};
-use aiome_core::traits::JobQueue;
-use crate::routes::agent::{AgentChatRequest};
+use shared::watchtower::{ControlCommand, CoreEvent};
+use tracing::{error, info, warn};
 
 pub async fn ws_handler(
     ws: WebSocketUpgrade,
@@ -45,7 +48,10 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
             if let Ok(command) = serde_json::from_str::<ControlCommand>(&text) {
                 info!("🎮 [WatchtowerWS] Received command: {:?}", command);
                 match command {
-                    ControlCommand::Chat { message, channel_id } => {
+                    ControlCommand::Chat {
+                        message,
+                        channel_id,
+                    } => {
                         let state_clone = state.clone();
                         tokio::spawn(async move {
                             let payload = AgentChatRequest {
@@ -53,19 +59,24 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                                 history: vec![],
                                 channel_id: Some(channel_id.to_string()),
                             };
-                            
+
                             if let Err(e) = handle_chat_command(state_clone, payload).await {
                                 error!("❌ [WatchtowerWS] Chat processing failed: {:?}", e);
                             }
                         });
-                    },
+                    }
                     ControlCommand::GetAgentStats => {
                         if let Ok(stats) = state.job_queue.get_agent_stats().await {
-                            let _ = state.event_sender.send(CoreEvent::AgentStatsResponse(stats));
+                            let _ = state
+                                .event_sender
+                                .send(CoreEvent::AgentStatsResponse(stats));
                         }
-                    },
+                    }
                     _ => {
-                        warn!("⚠️ [WatchtowerWS] Command not implemented yet: {:?}", command);
+                        warn!(
+                            "⚠️ [WatchtowerWS] Command not implemented yet: {:?}",
+                            command
+                        );
                     }
                 }
             }
@@ -84,16 +95,18 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
 }
 
 async fn handle_chat_command(state: AppState, payload: AgentChatRequest) -> anyhow::Result<()> {
-    use crate::routes::agent::{read_workspace_file, build_system_instructions};
+    use crate::routes::agent::{build_system_instructions, read_workspace_file};
     use aiome_core::traits::JobQueue;
-    use tokio::time::timeout;
     use std::time::Duration;
+    use tokio::time::timeout;
 
     let channel_id = payload.channel_id.unwrap_or_else(|| "0".to_string());
     let channel_id_u64: u64 = channel_id.parse().unwrap_or(0);
 
     // 1. Guardrails
-    if let shared::guardrails::ValidationResult::Blocked(reason) = shared::guardrails::validate_input(&payload.prompt) {
+    if let shared::guardrails::ValidationResult::Blocked(reason) =
+        shared::guardrails::validate_input(&payload.prompt)
+    {
         let _ = state.event_sender.send(CoreEvent::ChatResponse {
             response: format!("🚨 [GUARDRAIL BLOCK] {}", reason),
             channel_id: channel_id_u64,
@@ -103,26 +116,38 @@ async fn handle_chat_command(state: AppState, payload: AgentChatRequest) -> anyh
     }
 
     // 2. Persist
-    let _ = state.job_queue.insert_chat_message(&channel_id, "user", &payload.prompt).await;
+    let _ = state
+        .job_queue
+        .insert_chat_message(&channel_id, "user", &payload.prompt)
+        .await;
 
     // 3. Build Prompt (minimal version for now)
     let summary = None; // simplified
     let karma_str = "Watchtower context active.";
 
-    let ai_name = state.job_queue.get_setting_value("ai_name").await.ok().flatten();
+    let ai_name = state
+        .job_queue
+        .get_setting_value("ai_name")
+        .await
+        .ok()
+        .flatten();
     let system_instructions = build_system_instructions(&state, karma_str, summary, ai_name, None);
-    let full_prompt = format!(
-        "{}\nUSER: {}\nAI: ", 
-        system_instructions, 
-        payload.prompt
-    );
+    let full_prompt = format!("{}\nUSER: {}\nAI: ", system_instructions, payload.prompt);
 
     // 4. LLM Call
     let _llm_permit = state.llm_semaphore.acquire().await.ok();
-    match timeout(Duration::from_secs(120), state.provider.complete(&full_prompt, None)).await {
+    match timeout(
+        Duration::from_secs(120),
+        state.provider.complete(&full_prompt, None),
+    )
+    .await
+    {
         Ok(Ok(reply)) => {
             let reply = reply.trim().to_string();
-            let _ = state.job_queue.insert_chat_message(&channel_id, "assistant", &reply).await;
+            let _ = state
+                .job_queue
+                .insert_chat_message(&channel_id, "assistant", &reply)
+                .await;
             let _ = state.event_sender.send(CoreEvent::ChatResponse {
                 response: reply,
                 channel_id: channel_id_u64,

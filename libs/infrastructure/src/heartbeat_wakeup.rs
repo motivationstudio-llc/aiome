@@ -3,8 +3,8 @@
  * Copyright (C) 2026 motivationstudio, LLC
  */
 
-use std::fs;
 use aiome_core::llm_provider::LlmProvider;
+use std::fs;
 use std::sync::Arc;
 use tokio::sync::Semaphore;
 use tracing::{info, warn};
@@ -16,7 +16,10 @@ pub struct HeartbeatWakeupService {
 
 impl HeartbeatWakeupService {
     pub fn new(provider: Arc<dyn LlmProvider + Send + Sync>, semaphore: Arc<Semaphore>) -> Self {
-        Self { provider, semaphore }
+        Self {
+            provider,
+            semaphore,
+        }
     }
 
     pub async fn run_wakeup_ping(&self) -> Option<String> {
@@ -36,7 +39,7 @@ impl HeartbeatWakeupService {
         // Phase 1 Flaw 4 Defense: Use try_acquire to avoid blocking background worker if busy
         if let Ok(_permit) = self.semaphore.try_acquire() {
             info!("💓 [Heartbeat] Triggering Wakeup Ping...");
-            
+
             // Phase 1 Flaw 7 Defense: Strict instructions & Last Run context (simulated in prompt for now)
             let prompt = format!(
                 "[System: Wakeup Ping]\n\
@@ -81,12 +84,22 @@ impl HeartbeatWakeupService {
             // Skip markdown header lines (# followed by space or EOL, ## etc)
             if trimmed.starts_with('#') {
                 let after_hash = &trimmed[1..];
-                if after_hash.is_empty() || after_hash.chars().next().map(|c| c.is_whitespace()).unwrap_or(false) {
+                if after_hash.is_empty()
+                    || after_hash
+                        .chars()
+                        .next()
+                        .map(|c| c.is_whitespace())
+                        .unwrap_or(false)
+                {
                     continue;
                 }
             }
             // Skip empty markdown list items like "- [ ]" or "* [ ]" or just "- "
-            if (trimmed.starts_with("- [ ]") || trimmed.starts_with("* [ ]") || trimmed.starts_with("+ [ ]")) && trimmed.len() <= 5 {
+            if (trimmed.starts_with("- [ ]")
+                || trimmed.starts_with("* [ ]")
+                || trimmed.starts_with("+ [ ]"))
+                && trimmed.len() <= 5
+            {
                 continue;
             }
             if trimmed == "- " || trimmed == "* " || trimmed == "+ " {

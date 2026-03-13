@@ -1,16 +1,16 @@
 /*
  * Aiome - The Autonomous AI Operating System
  * Copyright (C) 2026 motivationstudio, LLC
- * 
+ *
  * Licensed under the Elastic License 2.0 (ELv2).
- * You may not provide the software to third parties as a hosted or managed service, 
- * where the service provides users with access to any substantial set of the features 
+ * You may not provide the software to third parties as a hosted or managed service,
+ * where the service provides users with access to any substantial set of the features
  * or functionality of the software.
  */
 
-use sysinfo::{System, Pid};
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use sysinfo::{Pid, System};
 
 /// 秘密情報をログ出力から保護するためのラッパー
 #[derive(Clone, Deserialize, Serialize)]
@@ -84,22 +84,30 @@ impl HealthMonitor {
     pub fn check(&mut self) -> ResourceStatus {
         // 全体のメモリと特定のプロセスをリフレッシュ
         self.sys.refresh_memory();
-        self.sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[self.pid]), true);
+        self.sys
+            .refresh_processes(sysinfo::ProcessesToUpdate::Some(&[self.pid]), true);
         self.disks.refresh(true);
-        
+
         let mut memory_usage_mb = 0;
         let mut cpu_usage_percent = 0.0;
         let total_memory_mb = self.sys.total_memory() / 1024 / 1024;
-        
+
         if let Some(process) = self.sys.process(self.pid) {
             memory_usage_mb = process.memory() / 1024 / 1024;
             cpu_usage_percent = process.cpu_usage();
         }
 
         // ルートディレクトリの空き容量を取得
-        let disk_info = self.disks.iter()
+        let disk_info = self
+            .disks
+            .iter()
             .find(|d| d.mount_point() == std::path::Path::new("/"))
-            .map(|d| (d.available_space() / 1024 / 1024 / 1024, d.total_space() / 1024 / 1024 / 1024))
+            .map(|d| {
+                (
+                    d.available_space() / 1024 / 1024 / 1024,
+                    d.total_space() / 1024 / 1024 / 1024,
+                )
+            })
             .unwrap_or((0, 0));
 
         let mut vram_usage_mb = None;
@@ -108,10 +116,11 @@ impl HealthMonitor {
             // Simple heuristic for macOS VRAM usage using ioreg
             if let Ok(output) = std::process::Command::new("ioreg")
                 .args(["-l", "-d0", "-w0", "-r", "-c", "IOAccelerator"])
-                .output() {
+                .output()
+            {
                 let out_str = String::from_utf8_lossy(&output.stdout);
                 if let Some(idx) = out_str.find("\"vram-free-bytes\"=") {
-                    let remainder = &out_str[idx+18..];
+                    let remainder = &out_str[idx + 18..];
                     if let Some(end) = remainder.find(',') {
                         if let Ok(free_bytes) = remainder[..end].trim().parse::<u64>() {
                             // Total VRAM is hard to get reliably via ioreg, so we just return what we find

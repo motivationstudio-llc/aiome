@@ -1,10 +1,10 @@
 /*
  * Aiome - The Autonomous AI Operating System
  * Copyright (C) 2026 motivationstudio, LLC
- * 
+ *
  * Licensed under the Elastic License 2.0 (ELv2).
- * You may not provide the software to third parties as a hosted or managed service, 
- * where the service provides users with access to any substantial set of the features 
+ * You may not provide the software to third parties as a hosted or managed service,
+ * where the service provides users with access to any substantial set of the features
  * or functionality of the software.
  */
 
@@ -29,7 +29,7 @@ impl JobBudget {
     /// 費用を計上する。上限を超えた場合は Error を返す。
     pub fn charge(&self, cost_usd: f64) -> Result<(), BudgetExhaustedError> {
         let cost_micro = (cost_usd * 1_000_000.0) as u64;
-        
+
         let mut current = self.current_cost_microusds.load(Ordering::SeqCst);
         loop {
             if current + cost_micro > self.max_cost_microusds {
@@ -38,7 +38,7 @@ impl JobBudget {
                     actual: (current + cost_micro) as f64 / 1_000_000.0,
                 });
             }
-            
+
             match self.current_cost_microusds.compare_exchange_weak(
                 current,
                 current + cost_micro,

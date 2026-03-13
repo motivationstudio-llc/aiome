@@ -1,10 +1,10 @@
 /*
  * Aiome - The Autonomous AI Operating System
  * Copyright (C) 2026 motivationstudio, LLC
- * 
+ *
  * Licensed under the Elastic License 2.0 (ELv2).
- * You may not provide the software to third parties as a hosted or managed service, 
- * where the service provides users with access to any substantial set of the features 
+ * You may not provide the software to third parties as a hosted or managed service,
+ * where the service provides users with access to any substantial set of the features
  * or functionality of the software.
  */
 
@@ -12,8 +12,8 @@
 //!
 //! 憲法第2条に基づき、アクター間のやり取りを型安全に定義する。
 
-use serde::{Deserialize, Serialize};
 use crate::traits::TrendItem;
+use serde::{Deserialize, Serialize};
 
 /// 監査用メタデータ
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -50,7 +50,7 @@ pub struct ConceptRequest {
     pub trend_items: Vec<TrendItem>,
     /// 利用可能な演出スタイルの一覧
     pub available_styles: Vec<String>,
-    
+
     // --- Phase 12-B: Karmic Supervision ---
     /// 過去の教訓 (Karma) のリスト
     #[serde(default)]
@@ -95,14 +95,14 @@ pub struct ConceptResponse {
     /// 結末 (backward compatibility)
     #[serde(default)]
     pub script_outro: String,
-    
+
     #[serde(default)]
     pub style_intro: String,
     #[serde(default)]
     pub style_body: String,
     #[serde(default)]
     pub style_outro: String,
-    
+
     /// 多言語化された台本リスト
     #[serde(default)]
     pub scripts: Vec<LocalizedScript>,
@@ -177,7 +177,7 @@ pub struct CustomStyle {
     // --- 視覚演出 (Cameraman) ---
     pub zoom_speed: Option<f64>,
     pub pan_intensity: Option<f64>,
-    
+
     // --- 音響演出 (SoundMixer) ---
     pub bgm_volume: Option<f32>,
     pub ducking_threshold: Option<f32>,
@@ -199,7 +199,7 @@ pub struct WorkflowRequest {
     pub remix_id: Option<String>,
     /// スキップ先のステップ (None の場合はフル実行)
     pub skip_to_step: Option<String>,
-    
+
     // --- Phase 8.5 Remix Lab Extensions ---
     /// 適用するスタイル名 (styles.toml のキー)
     #[serde(default)]
@@ -268,7 +268,8 @@ pub struct KarmaDirectives {
     /// 構造: { "NodeTitle": { "parameter_name": value } }
     /// 例: { "[API_SAMPLER]": { "cfg": 8.0, "denoise": 0.65 } }
     #[serde(default)]
-    pub parameter_overrides: std::collections::HashMap<String, std::collections::HashMap<String, serde_json::Value>>,
+    pub parameter_overrides:
+        std::collections::HashMap<String, std::collections::HashMap<String, serde_json::Value>>,
 
     /// 過去のKarmaから導き出された、全体的な注意事項
     #[serde(default)]
@@ -323,7 +324,7 @@ pub struct KarmaClassification {
 // --- Phase 12-C: Adaptive Immune System & Skill Arena ---
 
 /// 自己防衛のための免疫ルール
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct ImmuneRule {
     pub id: String,
     /// 検知パターンの記述 (自然言語または正規表現)
@@ -430,9 +431,15 @@ pub struct FederationHandshake {
 pub enum HubMessage {
     NewImmuneRule(ImmuneRule),
     NewKarma(FederatedKarma),
-    LaggedForceSync { server_time: String },
-    Ping { client_time: String },
-    Pong { server_time: String },
+    LaggedForceSync {
+        server_time: String,
+    },
+    Ping {
+        client_time: String,
+    },
+    Pong {
+        server_time: String,
+    },
     /// Biome プロトコルメッセージの転送
     BiomeRelay(crate::biome::BiomeMessage),
 }
@@ -452,10 +459,7 @@ pub struct SystemSetting {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SamsaraEvent {
     /// レベルアップイベント
-    LevelUp {
-        old_level: i32,
-        new_level: i32,
-    },
+    LevelUp { old_level: i32, new_level: i32 },
 }
 
 #[cfg(test)]
@@ -472,9 +476,13 @@ mod tests {
         let json = serde_json::to_string(&event).expect("Failed to serialize SamsaraEvent");
         assert!(json.contains("LevelUp"));
 
-        let deserialized: SamsaraEvent = serde_json::from_str(&json).expect("Failed to deserialize");
+        let deserialized: SamsaraEvent =
+            serde_json::from_str(&json).expect("Failed to deserialize");
         match deserialized {
-            SamsaraEvent::LevelUp { old_level, new_level } => {
+            SamsaraEvent::LevelUp {
+                old_level,
+                new_level,
+            } => {
                 assert_eq!(old_level, 1);
                 assert_eq!(new_level, 2);
             }

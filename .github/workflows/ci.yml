@@ -34,10 +34,11 @@ jobs:
         run: cargo test --workspace
 
       - name: Code Coverage
-        uses: actions-rs/cargo@v1
-        with:
-          command: tarpaulin
-          args: --out Xml --workspace --exclude-files "*/tests/*"
+        run: |
+          if ! command -v cargo-tarpaulin &> /dev/null; then
+            cargo install cargo-tarpaulin --locked
+          fi
+          cargo tarpaulin --out Xml --workspace --exclude-files "*/tests/*"
           
       - name: Upload to Codecov
         uses: codecov/codecov-action@v3

@@ -1,32 +1,56 @@
 /*
  * Aiome - The Autonomous AI Operating System
  * Copyright (C) 2026 motivationstudio, LLC
- * 
+ *
  * Licensed under the Elastic License 2.0 (ELv2).
  */
 
-use async_trait::async_trait;
-use aiome_core::traits::{Job, JobStatus, SnsMetricsRecord};
+use super::try_get_optional_string;
+use super::SqliteJobQueue;
 use aiome_core::contracts::OracleVerdict;
 use aiome_core::error::AiomeError;
-use sqlx::Row;
+use aiome_core::traits::{Job, JobStatus, SnsMetricsRecord};
+use async_trait::async_trait;
 use chrono::Utc;
+use sqlx::Row;
 use uuid::Uuid;
-use super::SqliteJobQueue;
-use super::try_get_optional_string;
 
 #[async_trait]
 pub trait EvaluationOps {
-    async fn do_fetch_jobs_for_evaluation(&self, milestone_days: i64, limit: i64) -> Result<Vec<Job>, AiomeError>;
-    async fn do_record_sns_metrics(&self, job_id: &str, milestone_days: i64, views: i64, likes: i64, comments_count: i64, raw_comments: Option<&str>) -> Result<(), AiomeError>;
-    async fn do_fetch_pending_evaluations(&self, limit: i64) -> Result<Vec<SnsMetricsRecord>, AiomeError>;
-    async fn do_apply_final_verdict(&self, record_id: i64, verdict: OracleVerdict, soul_hash: &str) -> Result<(), AiomeError>;
+    async fn do_fetch_jobs_for_evaluation(
+        &self,
+        milestone_days: i64,
+        limit: i64,
+    ) -> Result<Vec<Job>, AiomeError>;
+    async fn do_record_sns_metrics(
+        &self,
+        job_id: &str,
+        milestone_days: i64,
+        views: i64,
+        likes: i64,
+        comments_count: i64,
+        raw_comments: Option<&str>,
+    ) -> Result<(), AiomeError>;
+    async fn do_fetch_pending_evaluations(
+        &self,
+        limit: i64,
+    ) -> Result<Vec<SnsMetricsRecord>, AiomeError>;
+    async fn do_apply_final_verdict(
+        &self,
+        record_id: i64,
+        verdict: OracleVerdict,
+        soul_hash: &str,
+    ) -> Result<(), AiomeError>;
     async fn do_fetch_top_performing_jobs(&self, limit: i64) -> Result<Vec<Job>, AiomeError>;
 }
 
 #[async_trait]
 impl EvaluationOps for SqliteJobQueue {
-    async fn do_fetch_jobs_for_evaluation(&self, milestone_days: i64, limit: i64) -> Result<Vec<Job>, AiomeError> {
+    async fn do_fetch_jobs_for_evaluation(
+        &self,
+        milestone_days: i64,
+        limit: i64,
+    ) -> Result<Vec<Job>, AiomeError> {
         let rows = sqlx::query(
             "SELECT id, category, topic, style_name, karma_directives, status, started_at, last_heartbeat, 
                      tech_karma_extracted, creative_rating, execution_log, error_message,
@@ -71,9 +95,17 @@ impl EvaluationOps for SqliteJobQueue {
         Ok(jobs)
     }
 
-    async fn do_record_sns_metrics(&self, job_id: &str, milestone_days: i64, views: i64, likes: i64, comments_count: i64, raw_comments: Option<&str>) -> Result<(), AiomeError> {
+    async fn do_record_sns_metrics(
+        &self,
+        job_id: &str,
+        milestone_days: i64,
+        views: i64,
+        likes: i64,
+        comments_count: i64,
+        raw_comments: Option<&str>,
+    ) -> Result<(), AiomeError> {
         let now = Utc::now().to_rfc3339();
-        
+
         let engagement_rate = if views > 0 {
             (likes as f64 / views as f64) * 100.0
         } else {
@@ -109,7 +141,10 @@ impl EvaluationOps for SqliteJobQueue {
         Ok(())
     }
 
-    async fn do_fetch_pending_evaluations(&self, limit: i64) -> Result<Vec<SnsMetricsRecord>, AiomeError> {
+    async fn do_fetch_pending_evaluations(
+        &self,
+        limit: i64,
+    ) -> Result<Vec<SnsMetricsRecord>, AiomeError> {
         let rows = sqlx::query(
             "SELECT id, job_id, milestone_days, views, likes, comments_count, raw_comments_json, hard_metric_score, engagement_rate
              FROM sns_metrics_history 
@@ -138,9 +173,19 @@ impl EvaluationOps for SqliteJobQueue {
         Ok(records)
     }
 
-    async fn do_apply_final_verdict(&self, record_id: i64, verdict: OracleVerdict, soul_hash: &str) -> Result<(), AiomeError> {
-        let mut tx = self.pool.begin().await
-            .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to start transaction: {}", e) })?;
+    async fn do_apply_final_verdict(
+        &self,
+        record_id: i64,
+        verdict: OracleVerdict,
+        soul_hash: &str,
+    ) -> Result<(), AiomeError> {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| AiomeError::Infrastructure {
+                reason: format!("Failed to start transaction: {}", e),
+            })?;
 
         // 1. Update the Metrics Ledger (The Proof)
         sqlx::query(
@@ -163,12 +208,14 @@ impl EvaluationOps for SqliteJobQueue {
             "SELECT j.id, j.topic, j.style_name, h.milestone_days 
              FROM jobs j 
              JOIN sns_metrics_history h ON j.id = h.job_id 
-             WHERE h.id = ?"
+             WHERE h.id = ?",
         )
         .bind(record_id)
         .fetch_one(&mut *tx)
         .await
-        .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to fetch job context: {}", e) })?;
+        .map_err(|e| AiomeError::Infrastructure {
+            reason: format!("Failed to fetch job context: {}", e),
+        })?;
 
         let job_id: String = job_row.get("id");
         let style_name: String = job_row.get("style_name");
@@ -213,7 +260,9 @@ impl EvaluationOps for SqliteJobQueue {
                 .execute(&mut *tx).await.ok();
         }
 
-        tx.commit().await.map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to commit transaction: {}", e) })?;
+        tx.commit().await.map_err(|e| AiomeError::Infrastructure {
+            reason: format!("Failed to commit transaction: {}", e),
+        })?;
         Ok(())
     }
 
@@ -223,12 +272,14 @@ impl EvaluationOps for SqliteJobQueue {
              JOIN sns_metrics_history s ON j.id = s.job_id 
              WHERE s.is_finalized = 1 
              ORDER BY s.views DESC 
-             LIMIT ?"
+             LIMIT ?",
         )
         .bind(limit)
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| AiomeError::Infrastructure { reason: e.to_string() })?;
+        .map_err(|e| AiomeError::Infrastructure {
+            reason: e.to_string(),
+        })?;
 
         let mut jobs = Vec::new();
         for r in rows {

@@ -1,14 +1,14 @@
 /*
  * Aiome - The Autonomous AI Operating System
  * Copyright (C) 2026 motivationstudio, LLC
- * 
+ *
  * Licensed under the Elastic License 2.0 (ELv2).
  */
 
-use async_trait::async_trait;
-use aiome_core::error::AiomeError;
-use sqlx::Row;
 use super::SqliteJobQueue;
+use aiome_core::error::AiomeError;
+use async_trait::async_trait;
+use sqlx::Row;
 
 #[async_trait]
 pub trait EvolutionOps {
@@ -16,21 +16,42 @@ pub trait EvolutionOps {
     async fn do_add_resonance(&self, amount: i32) -> Result<(), AiomeError>;
     async fn do_add_tech_exp(&self, amount: i32) -> Result<(), AiomeError>;
     async fn do_add_creativity(&self, amount: i32) -> Result<(), AiomeError>;
-    async fn do_record_soul_mutation(&self, old_hash: &str, new_hash: &str, reason: &str) -> Result<(), AiomeError>;
-    async fn do_sync_samsara_level(&self) -> Result<Option<aiome_core::contracts::SamsaraEvent>, AiomeError>;
+    async fn do_record_soul_mutation(
+        &self,
+        old_hash: &str,
+        new_hash: &str,
+        reason: &str,
+    ) -> Result<(), AiomeError>;
+    async fn do_sync_samsara_level(
+        &self,
+    ) -> Result<Option<aiome_core::contracts::SamsaraEvent>, AiomeError>;
 
     // Evolution Chronicle
-    async fn do_record_evolution_event(&self, level: i32, event_type: &str, description: &str, inspiration: Option<&str>, karma_json: Option<&str>) -> Result<(), AiomeError>;
-    async fn do_fetch_evolution_history(&self, limit: i64) -> Result<Vec<serde_json::Value>, AiomeError>;
+    async fn do_record_evolution_event(
+        &self,
+        level: i32,
+        event_type: &str,
+        description: &str,
+        inspiration: Option<&str>,
+        karma_json: Option<&str>,
+    ) -> Result<(), AiomeError>;
+    async fn do_fetch_evolution_history(
+        &self,
+        limit: i64,
+    ) -> Result<Vec<serde_json::Value>, AiomeError>;
 }
 
 #[async_trait]
 impl EvolutionOps for SqliteJobQueue {
     async fn do_get_agent_stats(&self) -> Result<shared::watchtower::AgentStats, AiomeError> {
-        let row = sqlx::query("SELECT level, exp, resonance, creativity, fatigue FROM agent_stats WHERE id = 1")
-            .fetch_one(&self.pool)
-            .await
-            .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to fetch agent stats: {}", e) })?;
+        let row = sqlx::query(
+            "SELECT level, exp, resonance, creativity, fatigue FROM agent_stats WHERE id = 1",
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| AiomeError::Infrastructure {
+            reason: format!("Failed to fetch agent stats: {}", e),
+        })?;
 
         Ok(shared::watchtower::AgentStats {
             level: row.get("level"),
@@ -51,12 +72,16 @@ impl EvolutionOps for SqliteJobQueue {
     }
 
     async fn do_add_tech_exp(&self, amount: i32) -> Result<(), AiomeError> {
-        sqlx::query("UPDATE agent_stats SET exp = exp + ?, updated_at = datetime('now') WHERE id = 1")
-            .bind(amount)
-            .execute(&self.pool)
-            .await
-            .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to update exp: {}", e) })?;
-        
+        sqlx::query(
+            "UPDATE agent_stats SET exp = exp + ?, updated_at = datetime('now') WHERE id = 1",
+        )
+        .bind(amount)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| AiomeError::Infrastructure {
+            reason: format!("Failed to update exp: {}", e),
+        })?;
+
         // Auto-sync level after adding exp
         let _ = self.do_sync_samsara_level().await;
         Ok(())
@@ -71,7 +96,12 @@ impl EvolutionOps for SqliteJobQueue {
         Ok(())
     }
 
-    async fn do_record_soul_mutation(&self, old_hash: &str, new_hash: &str, reason: &str) -> Result<(), AiomeError> {
+    async fn do_record_soul_mutation(
+        &self,
+        old_hash: &str,
+        new_hash: &str,
+        reason: &str,
+    ) -> Result<(), AiomeError> {
         sqlx::query("INSERT INTO soul_mutation_history (old_hash, new_hash, mutation_reason) VALUES (?, ?, ?)")
             .bind(old_hash)
             .bind(new_hash)
@@ -82,16 +112,22 @@ impl EvolutionOps for SqliteJobQueue {
         Ok(())
     }
 
-    async fn do_sync_samsara_level(&self) -> Result<Option<aiome_core::contracts::SamsaraEvent>, AiomeError> {
+    async fn do_sync_samsara_level(
+        &self,
+    ) -> Result<Option<aiome_core::contracts::SamsaraEvent>, AiomeError> {
         // 1. Calculate total Technical Karma weight (undeprecated)
         // Note: Technical Karma is the "Real World" anchor for growth.
-        let total_weight_row = sqlx::query("SELECT SUM(weight) as total FROM karma_logs WHERE karma_type = 'Technical'")
-            .fetch_one(&self.pool)
-            .await
-            .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to sum karma weight: {}", e) })?;
-        
+        let total_weight_row = sqlx::query(
+            "SELECT SUM(weight) as total FROM karma_logs WHERE karma_type = 'Technical'",
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| AiomeError::Infrastructure {
+            reason: format!("Failed to sum karma weight: {}", e),
+        })?;
+
         let total_weight: i64 = total_weight_row.get::<Option<i64>, _>("total").unwrap_or(0);
-        
+
         // 2. Get current stats
         let stats = self.do_get_agent_stats().await?;
         let mut current_level = stats.level;
@@ -103,17 +139,27 @@ impl EvolutionOps for SqliteJobQueue {
         // Level N: N^2 * 1000
         while total_weight >= (current_level as i64 * current_level as i64 * 1000) {
             current_level += 1;
-            if current_level >= 100 { break; } // Safety cap
+            if current_level >= 100 {
+                break;
+            } // Safety cap
         }
 
         if current_level > original_level {
-            sqlx::query("UPDATE agent_stats SET level = ?, updated_at = datetime('now') WHERE id = 1")
-                .bind(current_level)
-                .execute(&self.pool)
-                .await
-                .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to update level: {}", e) })?;
-            
-            tracing::info!("🌟 [SamsaraEngine] Level Up! {} -> {}", original_level, current_level);
+            sqlx::query(
+                "UPDATE agent_stats SET level = ?, updated_at = datetime('now') WHERE id = 1",
+            )
+            .bind(current_level)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| AiomeError::Infrastructure {
+                reason: format!("Failed to update level: {}", e),
+            })?;
+
+            tracing::info!(
+                "🌟 [SamsaraEngine] Level Up! {} -> {}",
+                original_level,
+                current_level
+            );
             return Ok(Some(aiome_core::contracts::SamsaraEvent::LevelUp {
                 old_level: original_level,
                 new_level: current_level,
@@ -123,20 +169,30 @@ impl EvolutionOps for SqliteJobQueue {
         Ok(None)
     }
 
-    async fn do_record_evolution_event(&self, level: i32, event_type: &str, description: &str, inspiration: Option<&str>, karma_json: Option<&str>) -> Result<(), AiomeError> {
+    async fn do_record_evolution_event(
+        &self,
+        level: i32,
+        event_type: &str,
+        description: &str,
+        inspiration: Option<&str>,
+        karma_json: Option<&str>,
+    ) -> Result<(), AiomeError> {
         // 1. Get previous row for hash chaining
-        let prev_record = sqlx::query("SELECT record_hash FROM evolution_chronicle ORDER BY id DESC LIMIT 1")
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(|e| AiomeError::Infrastructure { reason: e.to_string() })?;
-        
+        let prev_record =
+            sqlx::query("SELECT record_hash FROM evolution_chronicle ORDER BY id DESC LIMIT 1")
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| AiomeError::Infrastructure {
+                    reason: e.to_string(),
+                })?;
+
         let prev_hash = match prev_record {
             Some(row) => row.get::<String, _>("record_hash"),
             None => "GENESIS".to_string(),
         };
 
         // 2. Calculate new hash: hash(prev_hash + description + timestamp)
-        use sha2::{Sha256, Digest};
+        use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
         hasher.update(prev_hash.as_bytes());
         hasher.update(description.as_bytes());
@@ -159,12 +215,17 @@ impl EvolutionOps for SqliteJobQueue {
         Ok(())
     }
 
-    async fn do_fetch_evolution_history(&self, limit: i64) -> Result<Vec<serde_json::Value>, AiomeError> {
+    async fn do_fetch_evolution_history(
+        &self,
+        limit: i64,
+    ) -> Result<Vec<serde_json::Value>, AiomeError> {
         let rows = sqlx::query("SELECT * FROM evolution_chronicle ORDER BY id DESC LIMIT ?")
             .bind(limit)
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| AiomeError::Infrastructure { reason: e.to_string() })?;
+            .map_err(|e| AiomeError::Infrastructure {
+                reason: e.to_string(),
+            })?;
 
         let mut history = Vec::new();
         for row in rows {

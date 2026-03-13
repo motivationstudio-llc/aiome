@@ -3,9 +3,9 @@
  * Copyright (C) 2026 motivationstudio, LLC
  */
 
+use aiome_core::llm_provider::LlmProvider;
 use std::fs;
 use std::sync::Arc;
-use aiome_core::llm_provider::LlmProvider;
 use tokio::sync::Semaphore;
 use tracing::{info, warn};
 
@@ -16,10 +16,16 @@ pub struct UserLearner {
 
 impl UserLearner {
     pub fn new(provider: Arc<dyn LlmProvider + Send + Sync>, semaphore: Arc<Semaphore>) -> Self {
-        Self { provider, semaphore }
+        Self {
+            provider,
+            semaphore,
+        }
     }
 
-    pub async fn learn_from_session(&self, conversation_summary: &str) -> Result<bool, Box<dyn std::error::Error>> {
+    pub async fn learn_from_session(
+        &self,
+        conversation_summary: &str,
+    ) -> Result<bool, Box<dyn std::error::Error>> {
         let filename = "USER.md";
         let (user_path, current_user) = if let Ok(c) = fs::read_to_string(filename) {
             (filename.to_string(), c)
@@ -28,7 +34,7 @@ impl UserLearner {
         } else {
             (filename.to_string(), String::new())
         };
-        
+
         if let Ok(_permit) = self.semaphore.try_acquire() {
             info!("🎓 [UserLearner] Analyzing session for user preference updates...");
             let prompt = format!(
@@ -41,7 +47,10 @@ impl UserLearner {
                     let reply = reply.trim();
                     if reply != "NO_UPDATE" && !reply.is_empty() {
                         fs::write(&user_path, reply)?;
-                        info!("✅ [UserLearner] {} has been updated based on session intelligence.", user_path);
+                        info!(
+                            "✅ [UserLearner] {} has been updated based on session intelligence.",
+                            user_path
+                        );
                         return Ok(true);
                     }
                     info!("🎓 [UserLearner] No updates needed for {}.", user_path);

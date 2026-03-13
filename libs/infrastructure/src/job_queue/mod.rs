@@ -1,57 +1,57 @@
 /*
  * Aiome - The Autonomous AI Operating System
  * Copyright (C) 2026 motivationstudio, LLC
- * 
+ *
  * Licensed under the Elastic License 2.0 (ELv2).
- * You may not provide the software to third parties as a hosted or managed service, 
- * where the service provides users with access to any substantial set of the features 
+ * You may not provide the software to third parties as a hosted or managed service,
+ * where the service provides users with access to any substantial set of the features
  * or functionality of the software.
  */
 
-use async_trait::async_trait;
-use sqlx::Row;
-use aiome_core::traits::{Job, JobQueue, SnsMetricsRecord};
-use aiome_core::contracts::{OracleVerdict, ImmuneRule, ArenaMatch, FederatedKarma};
+use aiome_core::contracts::{ArenaMatch, FederatedKarma, ImmuneRule, OracleVerdict};
 use aiome_core::error::AiomeError;
-use sqlx::SqlitePool;
-use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
-use std::time::Duration;
-use chrono::Utc;
 use aiome_core::llm_provider::EmbeddingProvider;
 use aiome_core::traits::KarmaSearchResult;
-use std::sync::Arc;
+use aiome_core::traits::{Job, JobQueue, SnsMetricsRecord};
+use async_trait::async_trait;
+use chrono::Utc;
+use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
+use sqlx::Row;
+use sqlx::SqlitePool;
 use std::collections::HashMap;
+use std::sync::Arc;
+use std::time::Duration;
 use std::time::Instant;
 
 #[cfg(test)]
 mod tests;
 
-mod migrations;
 mod core_ops;
-mod karma;
+pub mod crdt;
 mod evaluation;
 mod evolution;
-mod guardrails;
-mod federation;
-mod swarm;
-mod watchtower;
-mod taxonomy;
-pub mod settings;
-pub mod crdt;
 mod expression;
+mod federation;
+mod guardrails;
+mod karma;
+mod migrations;
+pub mod settings;
+mod swarm;
+mod taxonomy;
+mod watchtower;
 
-use migrations::DbInitializer;
 use core_ops::CoreOps;
-use karma::KarmaOps;
+use crdt::CrdtOps;
 use evaluation::EvaluationOps;
 use evolution::EvolutionOps;
-use guardrails::GuardrailOps;
+use expression::ExpressionOps;
 use federation::FederationOps;
+use guardrails::GuardrailOps;
+use karma::KarmaOps;
+use migrations::DbInitializer;
+use settings::SettingsOps;
 use swarm::SwarmOps;
 use watchtower::WatchtowerOps;
-use settings::SettingsOps;
-use crdt::CrdtOps;
-use expression::ExpressionOps;
 
 /// Job Queue that utilizes SQLite in WAL Mode to allow multi-threaded queue operations.
 #[derive(Clone, Debug)]
@@ -74,7 +74,9 @@ impl SqliteJobQueue {
     pub async fn new(db_path: &str) -> Result<Self, AiomeError> {
         use std::str::FromStr;
         let options = SqliteConnectOptions::from_str(db_path)
-            .map_err(|e| AiomeError::Infrastructure { reason: format!("Invalid db_path {}: {}", db_path, e) })?
+            .map_err(|e| AiomeError::Infrastructure {
+                reason: format!("Invalid db_path {}: {}", db_path, e),
+            })?
             .create_if_missing(true)
             .journal_mode(SqliteJournalMode::Wal)
             .busy_timeout(Duration::from_millis(5000));
@@ -83,7 +85,9 @@ impl SqliteJobQueue {
             .max_connections(10)
             .connect_with(options)
             .await
-            .map_err(|e| AiomeError::Infrastructure { reason: format!("Failed to connect to SQLite: {}", e) })?;
+            .map_err(|e| AiomeError::Infrastructure {
+                reason: format!("Failed to connect to SQLite: {}", e),
+            })?;
 
         let instance = Self {
             pool,
@@ -111,8 +115,15 @@ impl SqliteJobQueue {
 
 #[async_trait]
 impl JobQueue for SqliteJobQueue {
-    async fn enqueue(&self, category: &str, topic: &str, style: &str, karma_directives: Option<&str>) -> Result<String, AiomeError> {
-        self.do_enqueue(category, topic, style, karma_directives).await
+    async fn enqueue(
+        &self,
+        category: &str,
+        topic: &str,
+        style: &str,
+        karma_directives: Option<&str>,
+    ) -> Result<String, AiomeError> {
+        self.do_enqueue(category, topic, style, karma_directives)
+            .await
     }
 
     async fn fetch_job(&self, job_id: &str) -> Result<Option<Job>, AiomeError> {
@@ -123,7 +134,11 @@ impl JobQueue for SqliteJobQueue {
         self.do_dequeue(capable_categories).await
     }
 
-    async fn complete_job(&self, job_id: &str, output_artifacts: Option<&str>) -> Result<(), AiomeError> {
+    async fn complete_job(
+        &self,
+        job_id: &str,
+        output_artifacts: Option<&str>,
+    ) -> Result<(), AiomeError> {
         self.do_complete_job(job_id, output_artifacts).await
     }
 
@@ -147,12 +162,31 @@ impl JobQueue for SqliteJobQueue {
         self.do_store_execution_log(job_id, log).await
     }
 
-    async fn fetch_relevant_karma(&self, topic: &str, skill_id: &str, limit: i64, current_soul_hash: &str) -> Result<aiome_core::traits::KarmaSearchResult, AiomeError> {
-        self.do_fetch_relevant_karma(topic, skill_id, limit, current_soul_hash).await
+    async fn fetch_relevant_karma(
+        &self,
+        topic: &str,
+        skill_id: &str,
+        limit: i64,
+        current_soul_hash: &str,
+    ) -> Result<aiome_core::traits::KarmaSearchResult, AiomeError> {
+        self.do_fetch_relevant_karma(topic, skill_id, limit, current_soul_hash)
+            .await
     }
 
-    async fn store_karma(&self, job_id: &str, skill_id: &str, lesson: &str, karma_type: &str, soul_hash: &str, domain: Option<&str>, subtopic: Option<&str>) -> Result<(), AiomeError> {
-        self.do_store_karma(job_id, skill_id, lesson, karma_type, soul_hash, domain, subtopic).await
+    async fn store_karma(
+        &self,
+        job_id: &str,
+        skill_id: &str,
+        lesson: &str,
+        karma_type: &str,
+        soul_hash: &str,
+        domain: Option<&str>,
+        subtopic: Option<&str>,
+    ) -> Result<(), AiomeError> {
+        self.do_store_karma(
+            job_id, skill_id, lesson, karma_type, soul_hash, domain, subtopic,
+        )
+        .await
     }
 
     async fn adjust_karma_weight(&self, karma_id: &str, delta: i32) -> Result<(), AiomeError> {
@@ -175,7 +209,12 @@ impl JobQueue for SqliteJobQueue {
         self.do_purge_old_jobs(days).await
     }
 
-    async fn link_sns_data(&self, job_id: &str, platform: &str, content_id: &str) -> Result<(), AiomeError> {
+    async fn link_sns_data(
+        &self,
+        job_id: &str,
+        platform: &str,
+        content_id: &str,
+    ) -> Result<(), AiomeError> {
         let now = Utc::now().to_rfc3339();
         sqlx::query("UPDATE jobs SET sns_platform = ?, sns_content_id = ?, published_at = ?, updated_at = ? WHERE id = ?")
             .bind(platform)
@@ -189,8 +228,13 @@ impl JobQueue for SqliteJobQueue {
         Ok(())
     }
 
-    async fn fetch_jobs_for_evaluation(&self, milestone_days: i64, limit: i64) -> Result<Vec<Job>, AiomeError> {
-        self.do_fetch_jobs_for_evaluation(milestone_days, limit).await
+    async fn fetch_jobs_for_evaluation(
+        &self,
+        milestone_days: i64,
+        limit: i64,
+    ) -> Result<Vec<Job>, AiomeError> {
+        self.do_fetch_jobs_for_evaluation(milestone_days, limit)
+            .await
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -203,10 +247,21 @@ impl JobQueue for SqliteJobQueue {
         comments_count: i64,
         raw_comments: Option<&str>,
     ) -> Result<(), AiomeError> {
-        self.do_record_sns_metrics(job_id, milestone_days, views, likes, comments_count, raw_comments).await
+        self.do_record_sns_metrics(
+            job_id,
+            milestone_days,
+            views,
+            likes,
+            comments_count,
+            raw_comments,
+        )
+        .await
     }
 
-    async fn fetch_pending_evaluations(&self, limit: i64) -> Result<Vec<SnsMetricsRecord>, AiomeError> {
+    async fn fetch_pending_evaluations(
+        &self,
+        limit: i64,
+    ) -> Result<Vec<SnsMetricsRecord>, AiomeError> {
         self.do_fetch_pending_evaluations(limit).await
     }
 
@@ -216,7 +271,8 @@ impl JobQueue for SqliteJobQueue {
         verdict: OracleVerdict,
         soul_hash: &str,
     ) -> Result<(), AiomeError> {
-        self.do_apply_final_verdict(record_id, verdict, soul_hash).await
+        self.do_apply_final_verdict(record_id, verdict, soul_hash)
+            .await
     }
 
     async fn fetch_recent_jobs(&self, limit: i64) -> Result<Vec<Job>, AiomeError> {
@@ -239,15 +295,28 @@ impl JobQueue for SqliteJobQueue {
         self.do_add_creativity(amount).await
     }
 
-    async fn sync_samsara_level(&self) -> Result<Option<aiome_core::contracts::SamsaraEvent>, AiomeError> {
+    async fn sync_samsara_level(
+        &self,
+    ) -> Result<Option<aiome_core::contracts::SamsaraEvent>, AiomeError> {
         self.do_sync_samsara_level().await
     }
 
-    async fn record_evolution_event(&self, level: i32, event_type: &str, description: &str, inspiration: Option<&str>, karma_json: Option<&str>) -> Result<(), AiomeError> {
-        self.do_record_evolution_event(level, event_type, description, inspiration, karma_json).await
+    async fn record_evolution_event(
+        &self,
+        level: i32,
+        event_type: &str,
+        description: &str,
+        inspiration: Option<&str>,
+        karma_json: Option<&str>,
+    ) -> Result<(), AiomeError> {
+        self.do_record_evolution_event(level, event_type, description, inspiration, karma_json)
+            .await
     }
 
-    async fn fetch_evolution_history(&self, limit: i64) -> Result<Vec<serde_json::Value>, AiomeError> {
+    async fn fetch_evolution_history(
+        &self,
+        limit: i64,
+    ) -> Result<Vec<serde_json::Value>, AiomeError> {
         self.do_fetch_evolution_history(limit).await
     }
 
@@ -255,7 +324,10 @@ impl JobQueue for SqliteJobQueue {
         self.do_get_pending_job_count().await
     }
 
-    async fn get_job_count_since(&self, since: chrono::DateTime<chrono::Utc>) -> Result<i64, AiomeError> {
+    async fn get_job_count_since(
+        &self,
+        since: chrono::DateTime<chrono::Utc>,
+    ) -> Result<i64, AiomeError> {
         self.do_get_job_count_since(since).await
     }
 
@@ -267,8 +339,14 @@ impl JobQueue for SqliteJobQueue {
         self.do_fetch_top_performing_jobs(limit).await
     }
 
-    async fn record_soul_mutation(&self, old_hash: &str, new_hash: &str, reason: &str) -> Result<(), AiomeError> {
-        self.do_record_soul_mutation(old_hash, new_hash, reason).await
+    async fn record_soul_mutation(
+        &self,
+        old_hash: &str,
+        new_hash: &str,
+        reason: &str,
+    ) -> Result<(), AiomeError> {
+        self.do_record_soul_mutation(old_hash, new_hash, reason)
+            .await
     }
 
     async fn fetch_job_retry_count(&self, job_id: &str) -> Result<i64, AiomeError> {
@@ -283,12 +361,22 @@ impl JobQueue for SqliteJobQueue {
         self.do_increment_job_retry_count(job_id).await
     }
 
-    async fn fetch_unincorporated_karma(&self, limit: i64, current_soul_hash: &str) -> Result<Vec<serde_json::Value>, AiomeError> {
-        self.do_fetch_unincorporated_karma(limit, current_soul_hash).await
+    async fn fetch_unincorporated_karma(
+        &self,
+        limit: i64,
+        current_soul_hash: &str,
+    ) -> Result<Vec<serde_json::Value>, AiomeError> {
+        self.do_fetch_unincorporated_karma(limit, current_soul_hash)
+            .await
     }
 
-    async fn mark_karma_as_incorporated(&self, karma_ids: Vec<String>, new_soul_hash: &str) -> Result<(), AiomeError> {
-        self.do_mark_karma_as_incorporated(karma_ids, new_soul_hash).await
+    async fn mark_karma_as_incorporated(
+        &self,
+        karma_ids: Vec<String>,
+        new_soul_hash: &str,
+    ) -> Result<(), AiomeError> {
+        self.do_mark_karma_as_incorporated(karma_ids, new_soul_hash)
+            .await
     }
 
     async fn store_immune_rule(&self, rule: &ImmuneRule) -> Result<(), AiomeError> {
@@ -307,11 +395,19 @@ impl JobQueue for SqliteJobQueue {
         self.do_record_arena_match(match_data).await
     }
 
-    async fn export_federated_data(&self, since: Option<&str>) -> Result<(Vec<FederatedKarma>, Vec<ImmuneRule>, Vec<ArenaMatch>), AiomeError> {
+    async fn export_federated_data(
+        &self,
+        since: Option<&str>,
+    ) -> Result<(Vec<FederatedKarma>, Vec<ImmuneRule>, Vec<ArenaMatch>), AiomeError> {
         self.do_export_federated_data(since).await
     }
 
-    async fn import_federated_data(&self, karmas: Vec<FederatedKarma>, rules: Vec<ImmuneRule>, matches: Vec<ArenaMatch>) -> Result<(), AiomeError> {
+    async fn import_federated_data(
+        &self,
+        karmas: Vec<FederatedKarma>,
+        rules: Vec<ImmuneRule>,
+        matches: Vec<ArenaMatch>,
+    ) -> Result<(), AiomeError> {
         self.do_import_federated_data(karmas, rules, matches).await
     }
 
@@ -319,7 +415,11 @@ impl JobQueue for SqliteJobQueue {
         self.do_get_peer_sync_time(peer_url).await
     }
 
-    async fn update_peer_sync_time(&self, peer_url: &str, sync_time: &str) -> Result<(), AiomeError> {
+    async fn update_peer_sync_time(
+        &self,
+        peer_url: &str,
+        sync_time: &str,
+    ) -> Result<(), AiomeError> {
         self.do_update_peer_sync_time(peer_url, sync_time).await
     }
 
@@ -348,65 +448,103 @@ impl JobQueue for SqliteJobQueue {
     }
 
     // --- Chat & Memory (The Soul Persistence) ---
-    async fn store_chat_message(&self, channel_id: &str, role: &str, content: &str) -> Result<(), AiomeError> {
+    async fn store_chat_message(
+        &self,
+        channel_id: &str,
+        role: &str,
+        content: &str,
+    ) -> Result<(), AiomeError> {
         self.do_insert_chat_message(channel_id, role, content).await
     }
 
-    async fn fetch_chat_history(&self, channel_id: &str, limit: i64) -> Result<Vec<serde_json::Value>, AiomeError> {
+    async fn fetch_chat_history(
+        &self,
+        channel_id: &str,
+        limit: i64,
+    ) -> Result<Vec<serde_json::Value>, AiomeError> {
         self.do_fetch_chat_history(channel_id, limit).await
     }
 
-    async fn get_biome_topic_status(&self, topic_id: &str) -> Result<Option<(i32, Option<String>)>, AiomeError> {
-        let row = sqlx::query("SELECT turn_count, cooldown_until FROM biome_topics WHERE topic_id = ?")
-            .bind(topic_id)
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(|e| AiomeError::Infrastructure { reason: e.to_string() })?;
-        
-        Ok(row.map(|r| (r.get("turn_count"), r.get::<Option<String>, _>("cooldown_until"))))
+    async fn get_biome_topic_status(
+        &self,
+        topic_id: &str,
+    ) -> Result<Option<(i32, Option<String>)>, AiomeError> {
+        let row =
+            sqlx::query("SELECT turn_count, cooldown_until FROM biome_topics WHERE topic_id = ?")
+                .bind(topic_id)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| AiomeError::Infrastructure {
+                    reason: e.to_string(),
+                })?;
+
+        Ok(row.map(|r| {
+            (
+                r.get("turn_count"),
+                r.get::<Option<String>, _>("cooldown_until"),
+            )
+        }))
     }
 
-    async fn advance_biome_turn(&self, topic_id: &str, cooldown_minutes: i64) -> Result<i32, AiomeError> {
+    async fn advance_biome_turn(
+        &self,
+        topic_id: &str,
+        cooldown_minutes: i64,
+    ) -> Result<i32, AiomeError> {
         let now = chrono::Utc::now();
         let cooldown_until = (now + chrono::Duration::minutes(cooldown_minutes)).to_rfc3339();
-        
-        let row = sqlx::query("INSERT INTO biome_topics (topic_id, turn_count, cooldown_until, updated_at) VALUES (?, 1, ?, datetime('now')) ON CONFLICT(topic_id) DO UPDATE SET turn_count = turn_count + 1, cooldown_until = excluded.cooldown_until, updated_at = excluded.updated_at RETURNING turn_count")
+
+        let row = sqlx::query("INSERT INTO biome_topics (topic_id, peer_pubkey, status, turn_count, cooldown_until, updated_at) VALUES (?, 'unknown_peer', 'Active', 1, ?, datetime('now')) ON CONFLICT(topic_id) DO UPDATE SET turn_count = turn_count + 1, cooldown_until = excluded.cooldown_until, updated_at = excluded.updated_at RETURNING turn_count")
             .bind(topic_id)
             .bind(&cooldown_until)
             .fetch_one(&self.pool)
             .await
             .map_err(|e| AiomeError::Infrastructure { reason: e.to_string() })?;
-        
+
         Ok(row.get("turn_count"))
     }
 
-    async fn fetch_biome_messages(&self, topic_id: &str, limit: i64) -> Result<Vec<serde_json::Value>, AiomeError> {
-        let rows = sqlx::query("SELECT * FROM biome_messages WHERE topic_id = ? ORDER BY created_at DESC LIMIT ?")
-            .bind(topic_id)
-            .bind(limit)
-            .fetch_all(&self.pool)
-            .await
-            .map_err(|e| AiomeError::Infrastructure { reason: e.to_string() })?;
-        
-        let messages = rows.into_iter().map(|row| {
-            serde_json::json!({
-                "id": row.get::<i64, _>("id"),
-                "sender_pubkey": row.get::<String, _>("sender_pubkey"),
-                "recipient_pubkey": row.get::<String, _>("recipient_pubkey"),
-                "topic_id": row.get::<String, _>("topic_id"),
-                "content": row.get::<String, _>("content"),
-                "karma_root_cid": row.get::<String, _>("karma_root_cid"),
-                "signature": row.get::<String, _>("signature"),
-                "lamport_clock": row.get::<i64, _>("lamport_clock"),
-                "encryption": row.get::<String, _>("encryption"),
-                "created_at": row.get::<Option<String>, _>("created_at"),
+    async fn fetch_biome_messages(
+        &self,
+        topic_id: &str,
+        limit: i64,
+    ) -> Result<Vec<serde_json::Value>, AiomeError> {
+        let rows = sqlx::query(
+            "SELECT * FROM biome_messages WHERE topic_id = ? ORDER BY created_at DESC LIMIT ?",
+        )
+        .bind(topic_id)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| AiomeError::Infrastructure {
+            reason: e.to_string(),
+        })?;
+
+        let messages = rows
+            .into_iter()
+            .map(|row| {
+                serde_json::json!({
+                    "id": row.get::<i64, _>("id"),
+                    "sender_pubkey": row.get::<String, _>("sender_pubkey"),
+                    "recipient_pubkey": row.get::<String, _>("recipient_pubkey"),
+                    "topic_id": row.get::<String, _>("topic_id"),
+                    "content": row.get::<String, _>("content"),
+                    "karma_root_cid": row.get::<String, _>("karma_root_cid"),
+                    "signature": row.get::<String, _>("signature"),
+                    "lamport_clock": row.get::<i64, _>("lamport_clock"),
+                    "encryption": row.get::<String, _>("encryption"),
+                    "created_at": row.get::<Option<String>, _>("created_at"),
+                })
             })
-        }).collect();
+            .collect();
 
         Ok(messages)
     }
 
-    async fn store_biome_message(&self, message: &aiome_core::biome::BiomeMessage) -> Result<(), AiomeError> {
+    async fn store_biome_message(
+        &self,
+        message: &aiome_core::biome::BiomeMessage,
+    ) -> Result<(), AiomeError> {
         sqlx::query("INSERT INTO biome_messages (sender_pubkey, recipient_pubkey, topic_id, content, karma_root_cid, signature, lamport_clock, encryption) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
             .bind(&message.sender_pubkey)
             .bind(&message.recipient_pubkey)
@@ -429,16 +567,31 @@ impl JobQueue for SqliteJobQueue {
             .fetch_one(&self.pool)
             .await
             .map_err(|e| AiomeError::Infrastructure { reason: e.to_string() })?;
-        
+
         Ok(row.get("reputation_score"))
     }
 
+    async fn archive_biome_topic(&self, topic_id: &str) -> Result<(), AiomeError> {
+        sqlx::query("UPDATE biome_topics SET status = 'Archived', updated_at = datetime('now') WHERE topic_id = ?")
+            .bind(topic_id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| AiomeError::Infrastructure { reason: e.to_string() })?;
+        Ok(())
+    }
+
     // --- Expression Engine (V4) ---
-    async fn store_expression(&self, expression: &aiome_core::expression::Expression) -> Result<(), AiomeError> {
+    async fn store_expression(
+        &self,
+        expression: &aiome_core::expression::Expression,
+    ) -> Result<(), AiomeError> {
         <Self as ExpressionOps>::store_expression(self, expression).await
     }
 
-    async fn fetch_expressions(&self, limit: i64) -> Result<Vec<aiome_core::expression::Expression>, AiomeError> {
+    async fn fetch_expressions(
+        &self,
+        limit: i64,
+    ) -> Result<Vec<aiome_core::expression::Expression>, AiomeError> {
         <Self as ExpressionOps>::fetch_expressions(self, limit).await
     }
 
@@ -453,27 +606,50 @@ impl JobQueue for SqliteJobQueue {
 
 // Inherent methods (Watchtower / Chat extension)
 impl SqliteJobQueue {
-    pub async fn insert_chat_message(&self, channel_id: &str, role: &str, content: &str) -> Result<(), AiomeError> {
+    pub async fn insert_chat_message(
+        &self,
+        channel_id: &str,
+        role: &str,
+        content: &str,
+    ) -> Result<(), AiomeError> {
         self.do_insert_chat_message(channel_id, role, content).await
     }
 
-    pub async fn fetch_chat_history(&self, channel_id: &str, limit: i64) -> Result<Vec<serde_json::Value>, AiomeError> {
+    pub async fn fetch_chat_history(
+        &self,
+        channel_id: &str,
+        limit: i64,
+    ) -> Result<Vec<serde_json::Value>, AiomeError> {
         self.do_fetch_chat_history(channel_id, limit).await
     }
 
-    pub async fn get_chat_memory_summary(&self, channel_id: &str) -> Result<Option<String>, AiomeError> {
+    pub async fn get_chat_memory_summary(
+        &self,
+        channel_id: &str,
+    ) -> Result<Option<String>, AiomeError> {
         self.do_get_chat_memory_summary(channel_id).await
     }
 
-    pub async fn update_chat_memory_summary(&self, channel_id: &str, summary: &str) -> Result<(), AiomeError> {
-        self.do_update_chat_memory_summary(channel_id, summary).await
+    pub async fn update_chat_memory_summary(
+        &self,
+        channel_id: &str,
+        summary: &str,
+    ) -> Result<(), AiomeError> {
+        self.do_update_chat_memory_summary(channel_id, summary)
+            .await
     }
 
-    pub async fn fetch_undistilled_chats_by_channel(&self) -> Result<std::collections::HashMap<String, Vec<(i64, String, String)>>, AiomeError> {
+    pub async fn fetch_undistilled_chats_by_channel(
+        &self,
+    ) -> Result<std::collections::HashMap<String, Vec<(i64, String, String)>>, AiomeError> {
         self.do_fetch_undistilled_chats_by_channel().await
     }
 
-    pub async fn mark_chats_as_distilled(&self, channel_id: &str, up_to_id: i64) -> Result<(), AiomeError> {
+    pub async fn mark_chats_as_distilled(
+        &self,
+        channel_id: &str,
+        up_to_id: i64,
+    ) -> Result<(), AiomeError> {
         self.do_mark_chats_as_distilled(channel_id, up_to_id).await
     }
 
@@ -481,16 +657,38 @@ impl SqliteJobQueue {
         self.do_purge_old_distilled_chats(days).await
     }
 
-    pub async fn fetch_skills_for_distillation(&self, threshold: i64) -> Result<Vec<String>, AiomeError> {
+    pub async fn fetch_skills_for_distillation(
+        &self,
+        threshold: i64,
+    ) -> Result<Vec<String>, AiomeError> {
         self.do_fetch_skills_for_distillation(threshold).await
     }
 
-    pub async fn fetch_raw_karma_for_skill(&self, skill: &str) -> Result<Vec<(String, String)>, AiomeError> {
+    pub async fn fetch_raw_karma_for_skill(
+        &self,
+        skill: &str,
+    ) -> Result<Vec<(String, String)>, AiomeError> {
         self.do_fetch_raw_karma_for_skill(skill).await
     }
 
-    pub async fn apply_distilled_karma(&self, skill: &str, distilled_lesson: &str, old_karma_ids: &[String], soul_hash: &str, domain: Option<&str>, subtopic: Option<&str>) -> Result<(), AiomeError> {
-        self.do_apply_distilled_karma(skill, distilled_lesson, old_karma_ids, soul_hash, domain, subtopic).await
+    pub async fn apply_distilled_karma(
+        &self,
+        skill: &str,
+        distilled_lesson: &str,
+        old_karma_ids: &[String],
+        soul_hash: &str,
+        domain: Option<&str>,
+        subtopic: Option<&str>,
+    ) -> Result<(), AiomeError> {
+        self.do_apply_distilled_karma(
+            skill,
+            distilled_lesson,
+            old_karma_ids,
+            soul_hash,
+            domain,
+            subtopic,
+        )
+        .await
     }
 
     pub async fn increment_oracle_retry_count(&self, record_id: i64) -> Result<bool, AiomeError> {
@@ -509,11 +707,17 @@ impl SqliteJobQueue {
         self.do_record_global_api_success().await
     }
 
-    pub async fn fetch_unfederated_data(&self) -> Result<(Vec<FederatedKarma>, Vec<ImmuneRule>), AiomeError> {
+    pub async fn fetch_unfederated_data(
+        &self,
+    ) -> Result<(Vec<FederatedKarma>, Vec<ImmuneRule>), AiomeError> {
         self.do_fetch_unfederated_data().await
     }
 
-    pub async fn mark_as_federated(&self, karma_ids: Vec<String>, rule_ids: Vec<String>) -> Result<(), AiomeError> {
+    pub async fn mark_as_federated(
+        &self,
+        karma_ids: Vec<String>,
+        rule_ids: Vec<String>,
+    ) -> Result<(), AiomeError> {
         self.do_mark_as_federated(karma_ids, rule_ids).await
     }
 
@@ -522,16 +726,24 @@ impl SqliteJobQueue {
         self.get_setting(key).await
     }
 
-    pub async fn update_setting(&self, key: &str, value: &str, category: &str, is_secret: bool) -> Result<(), AiomeError> {
+    pub async fn update_setting(
+        &self,
+        key: &str,
+        value: &str,
+        category: &str,
+        is_secret: bool,
+    ) -> Result<(), AiomeError> {
         self.set_setting(key, value, category, is_secret).await
     }
 
-    pub async fn fetch_all_settings(&self) -> Result<Vec<aiome_core::contracts::SystemSetting>, AiomeError> {
+    pub async fn fetch_all_settings(
+        &self,
+    ) -> Result<Vec<aiome_core::contracts::SystemSetting>, AiomeError> {
         self.get_all_settings().await
     }
 }
 
-// Helper function because `get` on Option panics if type is unexpected, 
+// Helper function because `get` on Option panics if type is unexpected,
 // using try_get is safer if column can be NULL.
 pub(crate) fn try_get_optional_string(row: &sqlx::sqlite::SqliteRow, col: &str) -> Option<String> {
     use sqlx::Row;
@@ -542,6 +754,8 @@ pub(crate) fn cosine_similarity(a: &[f64], b: &[f64]) -> f64 {
     let dot_product: f64 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
     let norm_a: f64 = a.iter().map(|x| x * x).sum::<f64>().sqrt();
     let norm_b: f64 = b.iter().map(|x| x * x).sum::<f64>().sqrt();
-    if norm_a == 0.0 || norm_b == 0.0 { return 0.0; }
+    if norm_a == 0.0 || norm_b == 0.0 {
+        return 0.0;
+    }
     dot_product / (norm_a * norm_b)
 }

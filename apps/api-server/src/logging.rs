@@ -1,8 +1,8 @@
-use tracing::{Subscriber, Event};
-use tracing_subscriber::{layer::Context, Layer};
+use serde::Serialize;
 use sqlx::SqlitePool;
 use tokio::sync::mpsc;
-use serde::Serialize;
+use tracing::{Event, Subscriber};
+use tracing_subscriber::{layer::Context, Layer};
 
 pub struct DbLoggerLayer {
     tx: mpsc::Sender<LogEntry>,
@@ -18,7 +18,7 @@ pub struct LogEntry {
 impl DbLoggerLayer {
     pub fn new(pool: SqlitePool) -> Self {
         let (tx, mut rx) = mpsc::channel::<LogEntry>(1000);
-        
+
         tokio::spawn(async move {
             // Ensure table exists
             let _ = sqlx::query(
@@ -28,16 +28,20 @@ impl DbLoggerLayer {
                     level TEXT NOT NULL,
                     target TEXT NOT NULL,
                     message TEXT NOT NULL
-                )"
-            ).execute(&pool).await;
+                )",
+            )
+            .execute(&pool)
+            .await;
 
             while let Some(entry) = rx.recv().await {
                 // Ignore inserts if queue is too large or db fails (silent drop for logging layer)
-                let _ = sqlx::query("INSERT INTO app_logs (level, target, message) VALUES (?, ?, ?)")
-                    .bind(entry.level)
-                    .bind(entry.target)
-                    .bind(entry.message)
-                    .execute(&pool).await;
+                let _ =
+                    sqlx::query("INSERT INTO app_logs (level, target, message) VALUES (?, ?, ?)")
+                        .bind(entry.level)
+                        .bind(entry.target)
+                        .bind(entry.message)
+                        .execute(&pool)
+                        .await;
             }
         });
 
@@ -50,7 +54,9 @@ impl<S: Subscriber> Layer<S> for DbLoggerLayer {
         let level = event.metadata().level().to_string();
         let target = event.metadata().target().to_string();
 
-        let mut visitor = MessageVisitor { message: String::new() };
+        let mut visitor = MessageVisitor {
+            message: String::new(),
+        };
         event.record(&mut visitor);
 
         let entry = LogEntry {
@@ -74,7 +80,7 @@ impl tracing::field::Visit for MessageVisitor {
             self.message = format!("{:?}", value);
             // remove surrounding quotes if any
             if self.message.starts_with('"') && self.message.ends_with('"') {
-                self.message = self.message[1..self.message.len()-1].to_string();
+                self.message = self.message[1..self.message.len() - 1].to_string();
             }
         }
     }

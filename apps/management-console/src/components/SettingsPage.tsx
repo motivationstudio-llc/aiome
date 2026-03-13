@@ -199,7 +199,7 @@ const SettingsPage: React.FC = () => {
                                 <SettingInput
                                     label="Ollama API Host"
                                     value={getSetting('ollama_host')}
-                                    placeholder="http://localhost:11434"
+                                    placeholder="http://127.0.0.1:11434"
                                     onBlur={(v) => update_setting_handler(v, 'ollama_host', 'llm')}
                                     saving={saving === 'ollama_host'}
                                 />
@@ -216,7 +216,7 @@ const SettingsPage: React.FC = () => {
                                 <SettingInput
                                     label="LM Studio Host"
                                     value={getSetting('lm_studio_host')}
-                                    placeholder="http://localhost:1234"
+                                    placeholder="http://127.0.0.1:1234"
                                     onBlur={(v) => update_setting_handler(v, 'lm_studio_host', 'llm')}
                                     saving={saving === 'lm_studio_host'}
                                 />
