@@ -80,4 +80,8 @@ DISCORD_TOKEN, DISCORD_LOG_CHANNEL_ID, DISCORD_COMMAND_CHANNEL_ID, DISCORD_CHAT_
 ```
 
 ---
+<<<<<<< HEAD
 *Last Auto-Generated: 2026-03-14 01:28:35 UTC*
+=======
+*Last Auto-Generated: 2026-03-14 02:59:48 UTC*
+>>>>>>> 4743416 (feat(api): complete Phase 21 including OpenAPI coverage, E2E type safety, and AppError migration)
