@@ -28,7 +28,7 @@ echo "--- Starting Agent Forge Test ---"
 # We ask the agent to create a skill that returns a greeting.
 curl -X POST http://127.0.0.1:3015/api/agent/chat/stream \
      -H "Content-Type: application/json" \
-     -H "Authorization: Bearer dev_secret" \
+     -H "Authorization: Bearer DUMMY_DEV_SECRET_FOR_TESTING" \
      -d '{
        "prompt": "新しいスキル '\''greet_skill'\'' を作成してください。このスキルは引数として名前を受け取り、'\''Hello, [name] from Aiome Forge!'\'' という文字列を返すものです。forge_skill を使ってコードを書き、そのあと forge_test_run で確認し、最後に forge_publish してください。",
        "history": []

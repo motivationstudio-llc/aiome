@@ -1,27 +1,23 @@
-Elastic License 2.0 (ELv2)
+Business Source License 1.1
 
-Acceptance
+Parameters
 
-By using the software, you agree to all of the terms and conditions below.
+Licensor: motivationstudio, LLC
+Licensed Work: Aiome OSS (modular-open-claw) and its associated modules.
+Additional Use Grant: None.
+Change Date: 2030-01-01
+Change License: Apache License 2.0
 
-Copyright License
+Terms
 
-The licensor grants you a non-exclusive, royalty-free, worldwide, non-sublicensable, non-transferable license to use, copy, distribute, make available, and prepare derivative works of the software.
+1. The Licensor hereby grants you the right to copy, modify, create derivative works, redistribute, and make the Licensed Work available, for any purpose, subject to the conditions in this License.
 
-Limitations
+2. You may make use of the Licensed Work for any purpose, provided that you do not make use of the Licensed Work in a Production Setting, and you do not provide it to third parties as a hosted or managed service.
 
-You may not provide the software to third parties as a hosted or managed service, where the service provides users with access to any substantial set of the features or functionality of the software.
+3. If you make use of the Licensed Work in a Production Setting, you must obtain a separate commercial license from the Licensor.
 
-You may not move, alter, or obscure any enclosed license, notice, or other status in the software.
+4. On the Change Date, or on the tenth anniversary of the first public availability of a specific version of the Licensed Work, whichever comes first, the Licensed Work will be licensed under the Change License.
 
-Trademarks
+5. This License does not grant you any right to use the Licensor's trademarks, logos, or other designations.
 
-The licensor does not grant you any right to use its trademarks, service marks, logos, or other designations without prior written permission.
-
-Notices
-
-If you distribute the software or any derivative works of the software, you must retain all copyright and other proprietary notices contained in the original software.
-
-No Warranty
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE LICENSOR BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+6. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.

@@ -1,0 +1,46 @@
+name: Audit Trail (Weekly)
+
+on:
+  schedule:
+    - cron: '0 10 * * 1'  # 毎週月曜 10:00 UTC
+  workflow_dispatch:
+
+jobs:
+  static-analysis:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with: { components: clippy }
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Ensure Audit Dirs
+        run: mkdir -p docs/audit-trail docs/dataroom
+
+      - name: Clippy Analysis
+        run: |
+          cargo clippy --workspace --all-targets --message-format json \
+            2>&1 | tee docs/audit-trail/clippy_$(date +%Y%m%d).json
+
+      - name: Security Audit  
+        run: |
+          if ! command -v cargo-audit &> /dev/null; then
+            cargo install cargo-audit --locked
+          fi
+          cargo audit --json > docs/audit-trail/audit_$(date +%Y%m%d).json || true
+
+      - name: ScanCode Deep Scan
+        run: |
+          pip install scancode-toolkit
+          scancode --license --copyright --package \
+            --json-pp docs/dataroom/scancode_$(date +%Y%m%d).json \
+            --strip-root --only-findings --processes 4 \
+            --ignore "target/*" --ignore "*.lock" .
+
+      - name: Commit Audit Trail
+        run: |
+          git config user.name "audit-bot"
+          git config user.email "audit@aiome.dev"
+          git add docs/audit-trail/ docs/dataroom/
+          git commit -m "audit: weekly compliance report $(date +%Y-%m-%d)" || true
+          git push

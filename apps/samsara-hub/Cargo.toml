@@ -2,7 +2,7 @@
 name = "samsara-hub"
 version = "0.1.0"
 edition = "2021"
-license = "ELv2"
+license = "BUSL-1.1"
 
 [dependencies]
 tokio = { version = "1.0", features = ["full"] }

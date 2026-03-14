@@ -2,7 +2,7 @@
 name = "watchtower"
 version = "0.1.0"
 edition = "2021"
-license = "ELv2"
+license = "BUSL-1.1"
 
 [dependencies]
 tokio = { workspace = true, features = ["full"] }
