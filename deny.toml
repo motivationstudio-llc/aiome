@@ -103,8 +103,7 @@ allow = [
     "CC-BY-4.0",
     "MPL-2.0",
     "CDLA-Permissive-2.0",
-    "AGPL-3.0-only",
-    "AGPL-3.0-or-later",
+    "BUSL-1.1",
 ]
 # The confidence threshold for detecting a license from license text.
 # The higher the value, the more closely the license text must be to the
