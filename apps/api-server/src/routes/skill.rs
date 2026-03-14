@@ -1,8 +1,13 @@
 /*
  * Aiome - The Autonomous AI Operating System
  * Copyright (C) 2026 motivationstudio, LLC
+ *
+ * Licensed under the Business Source License 1.1 (BSL 1.1).
+ * Change Date: 2030-01-01
+ * Change License: Apache License 2.0
  */
 
+use crate::error::AppError;
 use crate::AppState;
 use axum::{extract::State, http::StatusCode, response::Json};
 use serde::{Deserialize, Serialize};
@@ -32,7 +37,9 @@ pub struct ImportSkillRequest {
     ),
     security(("api_key" = []))
 )]
-pub async fn list_skills(State(state): State<AppState>) -> Json<Vec<SkillSummary>> {
+pub async fn list_skills(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<SkillSummary>>, AppError> {
     let mut skills = Vec::new();
 
     // 1. Wasm Skills
@@ -105,7 +112,7 @@ pub async fn list_skills(State(state): State<AppState>) -> Json<Vec<SkillSummary
         }
     }
 
-    Json(skills)
+    Ok(Json(skills))
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]
@@ -135,7 +142,7 @@ pub struct McpSpawnRequest {
 pub async fn import_skill(
     State(state): State<AppState>,
     Json(payload): Json<ImportRequest>,
-) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<Json<serde_json::Value>, AppError> {
     info!(
         "👹 [Vampire Attack] Attempting to import skill from: {}",
         payload.url
@@ -146,11 +153,8 @@ pub async fn import_skill(
         .security_policy
         .validate_url(&payload.url)
         .await
-        .map_err(|e| {
-            (
-                StatusCode::FORBIDDEN,
-                Json(serde_json::json!({"error": e.to_string()})),
-            )
+        .map_err(|e| aiome_core::error::AiomeError::SecurityViolation {
+            reason: format!("SSRF Blocked: {}", e),
         })?;
 
     // 2. Fetch the content
@@ -159,18 +163,15 @@ pub async fn import_skill(
         .get(&payload.url)
         .send()
         .await
-        .map_err(|e| {
-            (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({"error": format!("Failed to fetch URL: {}", e)})),
-            )
+        .map_err(|e| aiome_core::error::AiomeError::RemoteServiceError {
+            url: payload.url.clone(),
+            source: e.into(),
         })?;
 
     let content = resp.text().await.map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": format!("Failed to read body: {}", e)})),
-        )
+        aiome_core::error::AiomeError::RemoteServiceExecutionFailed {
+            reason: format!("Failed to read body: {}", e),
+        }
     })?;
 
     // 2. Parse using SkillImporter (Infrastructure)
@@ -190,14 +191,13 @@ pub async fn import_skill(
     };
 
     if manifests.is_empty() {
-        return Err((
-            StatusCode::UNPROCESSABLE_ENTITY,
-            Json(serde_json::json!({"error": "No valid skills found in the content."})),
-        ));
+        return Err(aiome_core::error::AiomeError::RemoteServiceExecutionFailed {
+            reason: "No valid skills found in the content.".to_string(),
+        }
+        .into());
     }
 
     // 3. Process via Cleanroom (N2)
-    // Instantiate a temporary cleanroom with the existing forge and a workspace
     let cleanroom = Cleanroom::new(
         (*state.skill_forge).clone(),
         std::path::PathBuf::from("workspace/cleanroom"),
@@ -227,14 +227,10 @@ pub async fn import_skill(
     }
 
     if imported_skills.is_empty() && !errors.is_empty() {
-        return Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({
-                "status": "error",
-                "error": "All skill imports failed.",
-                "details": errors
-            })),
-        ));
+        return Err(aiome_core::error::AiomeError::RemoteServiceExecutionFailed {
+            reason: format!("All skill imports failed: {:?}", errors),
+        }
+        .into());
     }
 
     Ok(Json(serde_json::json!({
@@ -246,21 +242,27 @@ pub async fn import_skill(
     })))
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/skills/mcp/spawn",
+    request_body = McpSpawnRequest,
+    responses(
+        (status = 200, description = "MCP Server spawned", body = serde_json::Value),
+        (status = 500, description = "Spawn failed")
+    ),
+    security(("api_key" = []))
+)]
 pub async fn spawn_mcp_server(
     State(state): State<AppState>,
     Json(payload): Json<McpSpawnRequest>,
-) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    match state
+) -> Result<Json<serde_json::Value>, AppError> {
+    state
         .mcp_manager
         .spawn_stdio_server(payload.id.clone(), &payload.command, payload.args)
         .await
-    {
-        Ok(_) => Ok(Json(
-            serde_json::json!({"status": "success", "id": payload.id}),
-        )),
-        Err(e) => Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": e.to_string()})),
-        )),
-    }
+        .map_err(|e| aiome_core::error::AiomeError::Infrastructure {
+            reason: format!("MCP Spawn Error: {}", e),
+        })?;
+
+    Ok(Json(serde_json::json!({"status": "success", "id": payload.id})))
 }

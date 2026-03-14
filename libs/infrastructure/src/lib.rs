@@ -2,18 +2,17 @@
  * Aiome - The Autonomous AI Operating System
  * Copyright (C) 2026 motivationstudio, LLC
  *
- * Licensed under the Elastic License 2.0 (ELv2).
- * You may not provide the software to third parties as a hosted or managed service,
- * where the service provides users with access to any substantial set of the features
- * or functionality of the software.
+ * Licensed under the Business Source License 1.1 (BSL 1.1).
+ * Change Date: 2030-01-01
+ * Change License: Apache License 2.0
  */
 
 //! # Infrastructure — I/O実装層
 //!
 //! `core` で定義されたトレイトの具体実装を提供する。
-//! 外部サービスとの通信やデータ永続化を担当する。
+#![forbid(unsafe_code)]
+#![warn(missing_docs)]
 
-#![allow(warnings)]
 
 pub mod aiome_log;
 pub mod artifact_store;

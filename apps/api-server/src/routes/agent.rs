@@ -1,4 +1,14 @@
+/*
+ * Aiome - The Autonomous AI Operating System
+ * Copyright (C) 2026 motivationstudio, LLC
+ *
+ * Licensed under the Business Source License 1.1 (BSL 1.1).
+ * Change Date: 2030-01-01
+ * Change License: Apache License 2.0
+ */
+
 use crate::docker;
+use crate::error::AppError;
 use crate::skill_handler;
 use crate::AppState;
 use aiome_core::llm_provider::LlmProvider;
@@ -194,7 +204,7 @@ pub fn build_system_instructions(
 
 #[utoipa::path(
     post,
-    path = "/api/v1/agent/chat",
+    path = "/api/agent/chat",
     request_body = AgentChatRequest,
     responses(
         (status = 200, description = "Agent reply", body = serde_json::Value),
@@ -206,15 +216,14 @@ pub async fn trigger_agent_chat(
     State(state): State<AppState>,
     _auth: crate::auth::Authenticated,
     Json(payload): Json<AgentChatRequest>,
-) -> impl IntoResponse {
+) -> Result<Json<serde_json::Value>, AppError> {
     if let shared::guardrails::ValidationResult::Blocked(reason) =
         shared::guardrails::validate_input(&payload.prompt)
     {
-        return Json(serde_json::json!({
+        return Ok(Json(serde_json::json!({
             "status": "blocked",
             "reply": format!("🚨 [GUARDRAIL BLOCK] {}", reason)
-        }))
-        .into_response();
+        })));
     }
 
     let provider = state.provider.clone();
@@ -224,12 +233,12 @@ pub async fn trigger_agent_chat(
         .verify_intent(&payload.prompt, state.job_queue.as_ref())
         .await
     {
-        return Json(serde_json::json!({
+        return Ok(Json(serde_json::json!({
             "status": "blocked",
             "reply": format!("🚨 [SENTINEL BLOCK] Security violation detected.\nPattern: {}\nAction: {}", rule.pattern, rule.action),
             "barrier_ja": "Aiome 第1層: 静動センチネル",
             "barrier_en": "Aiome Layer 1: Hybrid Sentinel"
-        })).into_response();
+        })));
     }
 
     let soul_hash = {
@@ -487,11 +496,10 @@ pub async fn trigger_agent_chat(
         let _ = ce.maintain_context(&cid, 20).await;
     });
 
-    Json(serde_json::json!({
+    Ok(Json(serde_json::json!({
         "status": "success",
         "reply": final_reply
-    }))
-    .into_response()
+    })))
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]
@@ -502,7 +510,7 @@ pub struct KarmaFeedbackRequest {
 
 #[utoipa::path(
     post,
-    path = "/api/v1/karma/feedback",
+    path = "/api/agent/feedback",
     request_body = KarmaFeedbackRequest,
     responses(
         (status = 200, description = "Feedback recorded"),
@@ -512,14 +520,12 @@ pub struct KarmaFeedbackRequest {
 pub async fn handle_karma_feedback(
     State(state): State<AppState>,
     Json(payload): Json<KarmaFeedbackRequest>,
-) -> impl IntoResponse {
+) -> Result<Json<serde_json::Value>, AppError> {
     let delta = if payload.is_positive { 5 } else { -10 };
-    match state
+    state
         .job_queue
         .adjust_karma_weight(&payload.karma_id, delta)
-        .await
-    {
-        Ok(_) => (StatusCode::OK, "Feedback recorded").into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Error: {}", e)).into_response(),
-    }
+        .await?;
+
+    Ok(Json(serde_json::json!({"status": "success"})))
 }

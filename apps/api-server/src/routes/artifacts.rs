@@ -1,3 +1,12 @@
+/*
+ * Aiome - The Autonomous AI Operating System
+ * Copyright (C) 2026 motivationstudio, LLC
+ *
+ * Licensed under the Business Source License 1.1 (BSL 1.1).
+ * Change Date: 2030-01-01
+ * Change License: Apache License 2.0
+ */
+
 use crate::error::AppError;
 use crate::AppState;
 use aiome_core::traits::{ArtifactCategory, ArtifactMeta, ArtifactStore};
@@ -19,7 +28,7 @@ pub struct ListArtifactsParams {
 
 #[utoipa::path(
     get,
-    path = "/api/v1/artifacts",
+    path = "/api/artifacts",
     params(
         ("category" = Option<String>, Query, description = "Filter by category"),
         ("q" = Option<String>, Query, description = "Semantic search query"),
@@ -62,7 +71,7 @@ pub async fn list_artifacts_handler(
 
 #[utoipa::path(
     get,
-    path = "/api/v1/artifacts/{id}",
+    path = "/api/artifacts/{id}",
     params(
         ("id" = String, Path, description = "Artifact ID")
     ),
@@ -84,7 +93,7 @@ pub async fn get_artifact_handler(
 
 #[utoipa::path(
     get,
-    path = "/api/v1/artifacts/{id}/files/{filename}",
+    path = "/api/artifacts/{id}/files/{filename}",
     params(
         ("id" = String, Path, description = "Artifact ID"),
         ("filename" = String, Path, description = "File name")
@@ -154,7 +163,7 @@ pub async fn download_artifact_file_handler(
 
 #[utoipa::path(
     delete,
-    path = "/api/v1/artifacts/{id}",
+    path = "/api/artifacts/{id}",
     params(
         ("id" = String, Path, description = "Artifact ID")
     ),
@@ -175,7 +184,7 @@ pub async fn delete_artifact_handler(
 }
 #[utoipa::path(
     get,
-    path = "/api/v1/artifacts/{id}/edges",
+    path = "/api/artifacts/{id}/edges",
     params(
         ("id" = String, Path, description = "Artifact ID")
     ),

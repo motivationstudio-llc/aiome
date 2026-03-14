@@ -1,13 +1,17 @@
 /*
  * Aiome - The Autonomous AI Operating System
  * Copyright (C) 2026 motivationstudio, LLC
+ *
+ * Licensed under the Business Source License 1.1 (BSL 1.1).
+ * Change Date: 2030-01-01
+ * Change License: Apache License 2.0
  */
 
+use crate::error::AppError;
 use crate::{auth::Authenticated, AppState};
 use axum::{
     extract::{Json, State},
     http::StatusCode,
-    response::IntoResponse,
 };
 use serde::{Deserialize, Serialize};
 use std::net::{IpAddr, ToSocketAddrs};
@@ -47,20 +51,17 @@ pub struct TestConnectionResponse {
 pub async fn get_settings(
     State(state): State<AppState>,
     _auth: Authenticated,
-) -> impl IntoResponse {
-    match state.job_queue.fetch_all_settings().await {
-        Ok(settings) => {
-            // Mask secrets
-            let mut masked = settings;
-            for s in &mut masked {
-                if s.is_secret {
-                    s.value = "••••••••".to_string();
-                }
-            }
-            Json(masked).into_response()
+) -> Result<Json<Vec<aiome_core::contracts::SystemSetting>>, AppError> {
+    let settings = state.job_queue.fetch_all_settings().await?;
+
+    // Mask secrets
+    let mut masked = settings;
+    for s in &mut masked {
+        if s.is_secret {
+            s.value = "••••••••".to_string();
         }
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
+    Ok(Json(masked))
 }
 
 #[utoipa::path(
@@ -78,7 +79,7 @@ pub async fn update_setting(
     State(state): State<AppState>,
     _auth: Authenticated,
     Json(payload): Json<UpdateSettingsRequest>,
-) -> impl IntoResponse {
+) -> Result<Json<serde_json::Value>, AppError> {
     // 1. Key whitelist check
     let allowed_keys = [
         "ollama_host",
@@ -110,18 +111,27 @@ pub async fn update_setting(
             "🚨 [Security] Unauthorized settings key attempt: {}",
             payload.key
         );
-        return (StatusCode::BAD_REQUEST, "Unauthorized setting key").into_response();
+        return Err(aiome_core::error::AiomeError::SecurityViolation {
+            reason: "Unauthorized setting key".to_string(),
+        }
+        .into());
     }
 
     // 2. Category validation
     let allowed_categories = ["llm", "channel", "system", "security", "cors", "identity"];
     if !allowed_categories.contains(&payload.category.as_str()) {
-        return (StatusCode::BAD_REQUEST, "Invalid category").into_response();
+        return Err(aiome_core::error::AiomeError::RemoteServiceExecutionFailed {
+            reason: "Invalid category".to_string(),
+        }
+        .into());
     }
 
     // 3. Value length limit (DoS protection)
     if payload.value.len() > 1024 {
-        return (StatusCode::BAD_REQUEST, "Value too long (max 1024 chars)").into_response();
+        return Err(aiome_core::error::AiomeError::RemoteServiceExecutionFailed {
+            reason: "Value too long (max 1024 chars)".to_string(),
+        }
+        .into());
     }
 
     // 4. Server-side is_secret determination
@@ -140,17 +150,12 @@ pub async fn update_setting(
         payload.key, payload.category, is_secret
     );
 
-    match state
+    state
         .job_queue
         .update_setting(&payload.key, &payload.value, &payload.category, is_secret)
-        .await
-    {
-        Ok(_) => StatusCode::OK.into_response(),
-        Err(e) => {
-            error!("❌ [Settings] Update failed for {}: {}", payload.key, e);
-            (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error").into_response()
-        }
-    }
+        .await?;
+
+    Ok(Json(serde_json::json!({"status": "ok"})))
 }
 
 #[utoipa::path(
@@ -167,33 +172,32 @@ pub async fn test_connection(
     _state: State<AppState>,
     _auth: Authenticated,
     Json(payload): Json<TestConnectionRequest>,
-) -> impl IntoResponse {
+) -> Result<Json<TestConnectionResponse>, AppError> {
     // SSRF Protection
     if let Err(e) = validate_safe_url(&payload.url) {
-        return Json(TestConnectionResponse {
+        return Ok(Json(TestConnectionResponse {
             success: false,
             message: format!("SSRF Blocked: {}", e),
-        })
-        .into_response();
+        }));
     }
 
-    match payload.service.as_str() {
-        "ollama" => test_ollama(&payload.url, payload.model.as_deref())
+    let res = match payload.service.as_str() {
+        "ollama" => test_ollama(&payload.url, payload.model.as_deref()).await,
+        "gemini" | "openai" | "anthropic" => {
+            test_cloud_connection(
+                &payload.service,
+                payload.token.as_deref(),
+                payload.model.as_deref(),
+            )
             .await
-            .into_response(),
-        "gemini" | "openai" | "anthropic" => test_cloud_connection(
-            &payload.service,
-            payload.token.as_deref(),
-            payload.model.as_deref(),
-        )
-        .await
-        .into_response(),
+        }
         _ => Json(TestConnectionResponse {
             success: false,
             message: format!("Service '{}' testing not implemented yet", payload.service),
-        })
-        .into_response(),
-    }
+        }),
+    };
+
+    Ok(res)
 }
 
 async fn test_cloud_connection(
@@ -407,10 +411,19 @@ async fn test_ollama(host: &str, model: Option<&str>) -> Json<TestConnectionResp
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/ollama/models",
+    responses(
+        (status = 200, description = "List available Ollama models", body = serde_json::Value),
+        (status = 401, description = "Unauthorized")
+    ),
+    security(("api_key" = []))
+)]
 pub async fn get_ollama_models(
     State(state): State<AppState>,
     _auth: Authenticated,
-) -> impl IntoResponse {
+) -> Result<Json<serde_json::Value>, AppError> {
     let host = state
         .job_queue
         .get_setting_value("ollama_host")
@@ -427,27 +440,26 @@ pub async fn get_ollama_models(
         .build()
         .unwrap_or_default();
 
-    match client.get(&url).send().await {
-        Ok(res) if res.status().is_success() => {
-            if let Ok(json) = res.json::<serde_json::Value>().await {
-                Json(json).into_response()
-            } else {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Failed to parse Ollama response",
-                )
-                    .into_response()
-            }
+    let res = client.get(&url).send().await.map_err(|e| {
+        aiome_core::error::AiomeError::RemoteServiceError {
+            url: url.clone(),
+            source: e.into(),
         }
-        Ok(res) => (
-            StatusCode::BAD_GATEWAY,
-            format!("Ollama returned error: {}", res.status()),
-        )
-            .into_response(),
-        Err(e) => (
-            StatusCode::SERVICE_UNAVAILABLE,
-            format!("Ollama connection failed: {}", e),
-        )
-            .into_response(),
+    })?;
+
+    if res.status().is_success() {
+        let json = res
+            .json::<serde_json::Value>()
+            .await
+            .map_err(|e| aiome_core::error::AiomeError::RemoteServiceExecutionFailed {
+                reason: format!("JSON Parse Error: {}", e),
+            })?;
+        Ok(Json(json))
+    } else {
+        Err(aiome_core::error::AiomeError::RemoteServiceError {
+            url,
+            source: anyhow::anyhow!("Ollama returned error: {}", res.status()),
+        }
+        .into())
     }
 }

@@ -1,3 +1,12 @@
+/*
+ * Aiome - The Autonomous AI Operating System
+ * Copyright (C) 2026 motivationstudio, LLC
+ *
+ * Licensed under the Business Source License 1.1 (BSL 1.1).
+ * Change Date: 2030-01-01
+ * Change License: Apache License 2.0
+ */
+
 use crate::error::AppError;
 use crate::AppState;
 use aiome_core::contracts::ImmuneRule;
@@ -11,7 +20,7 @@ use tracing::{info, warn};
 
 #[utoipa::path(
     get,
-    path = "/api/v1/karma",
+    path = "/api/synergy/karma",
     responses(
         (status = 200, description = "List recent karma", body = [serde_json::Value])
     )
@@ -25,12 +34,14 @@ pub async fn get_karma_stream(
 
 #[utoipa::path(
     post,
-    path = "/api/v1/karma/demo/failure",
+    path = "/api/synergy/test/failure",
     responses(
         (status = 200, description = "Demo failure triggered", body = serde_json::Value)
     )
 )]
-pub async fn trigger_failure_demo(State(state): State<AppState>) -> Json<serde_json::Value> {
+pub async fn trigger_failure_demo(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, AppError> {
     info!("🧪 [DemoHandler] Triggering failure demo and storing karma...");
 
     let _ = state
@@ -64,7 +75,7 @@ pub async fn trigger_failure_demo(State(state): State<AppState>) -> Json<serde_j
         Err(e) => warn!("❌ [DemoHandler] Failed to store karma: {:?}", e),
     }
 
-    Json(serde_json::json!({
+    Ok(Json(serde_json::json!({
         "status": "success",
         "steps": [
             {"actor": "Gateway", "type": "info", "action_ja": "ジョブ要求を検知: scraper_trigger", "action_en": "Job request detected: scraper_trigger"},
@@ -74,18 +85,18 @@ pub async fn trigger_failure_demo(State(state): State<AppState>) -> Json<serde_j
         ],
         "message_ja": "Aiome OS がエージェントの死を教訓に変え、システムの脆弱性を自動的に塞ぎました。",
         "message_en": "Aiome OS transformed the agent death into a lesson, automatically patching the system vulnerability."
-    }))
+    })))
 }
 
 #[utoipa::path(
     post,
-    path = "/api/v1/karma/demo/security",
+    path = "/api/synergy/test/security",
     responses(
         (status = 200, description = "Demo security triggered", body = serde_json::Value)
     )
 )]
-pub async fn trigger_security_demo() -> Json<serde_json::Value> {
-    Json(serde_json::json!({
+pub async fn trigger_security_demo() -> Result<Json<serde_json::Value>, AppError> {
+    Ok(Json(serde_json::json!({
         "status": "success",
         "steps": [
             {"actor": "Agent", "type": "info", "action_ja": "内部APIキーへのアクセスを試行中...", "action_en": "Attempting to access internal API keys..."},
@@ -94,18 +105,18 @@ pub async fn trigger_security_demo() -> Json<serde_json::Value> {
         ],
         "message_ja": "Abyss Vault はエージェントの届かない物理隔離レイヤーで構成されています。",
         "message_en": "Abyss Vault consists of a physically isolated layer that the Agent cannot reach."
-    }))
+    })))
 }
 
 #[utoipa::path(
     post,
-    path = "/api/v1/karma/demo/federation",
+    path = "/api/synergy/test/federation",
     responses(
         (status = 200, description = "Demo federation triggered", body = serde_json::Value)
     )
 )]
-pub async fn trigger_federation_demo() -> Json<serde_json::Value> {
-    Json(serde_json::json!({
+pub async fn trigger_federation_demo() -> Result<Json<serde_json::Value>, AppError> {
+    Ok(Json(serde_json::json!({
         "status": "success",
         "steps": [
             {"actor": "Gateway", "type": "info", "action_ja": "Samsara Hub への免疫同期を開始...", "action_en": "Initiating immunity sync with Samsara Hub..."},
@@ -114,7 +125,7 @@ pub async fn trigger_federation_demo() -> Json<serde_json::Value> {
         ],
         "message_ja": "世界中のノードが互いの失敗を共有し、システム全体で進化します。",
         "message_en": "Nodes worldwide share each other failures, evolving as a collective system."
-    }))
+    })))
 }
 
 #[derive(serde::Serialize, utoipa::ToSchema)]
@@ -138,7 +149,7 @@ pub struct GraphData {
 
 #[utoipa::path(
     get,
-    path = "/api/v1/synergy-graph",
+    path = "/api/synergy/graph",
     responses(
         (status = 200, description = "Synergy graph data", body = GraphData)
     )
@@ -210,7 +221,7 @@ pub async fn synergy_graph_handler(
 
 #[utoipa::path(
     get,
-    path = "/api/v1/immune-rules",
+    path = "/api/synergy/rules",
     responses(
         (status = 200, description = "List immune rules", body = [serde_json::Value])
     )
@@ -224,7 +235,7 @@ pub async fn get_immune_rules_handler(
 
 #[utoipa::path(
     post,
-    path = "/api/v1/immune-rules",
+    path = "/api/synergy/rules",
     request_body = ImmuneRule,
     responses(
         (status = 200, description = "Rule added", body = serde_json::Value)
@@ -251,7 +262,7 @@ pub async fn add_immune_rule_handler(
 
 #[utoipa::path(
     delete,
-    path = "/api/v1/immune-rules/{id}",
+    path = "/api/synergy/rules/{id}",
     params(
         ("id" = String, Path, description = "Rule ID")
     ),
@@ -270,7 +281,7 @@ pub async fn delete_immune_rule_handler(
 
 #[utoipa::path(
     get,
-    path = "/api/v1/evolution",
+    path = "/api/system/evolution",
     responses(
         (status = 200, description = "Evolution history", body = [serde_json::Value])
     )

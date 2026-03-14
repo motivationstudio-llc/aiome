@@ -1,14 +1,27 @@
+/*
+ * Aiome - The Autonomous AI Operating System
+ * Copyright (C) 2026 motivationstudio, LLC
+ *
+ * Licensed under the Business Source License 1.1 (BSL 1.1).
+ * Change Date: 2030-01-01
+ * Change License: Apache License 2.0
+ */
+
 use utoipa::OpenApi;
 
 #[derive(OpenApi)]
 #[openapi(
     paths(
         crate::routes::general::get_logs,
+        crate::routes::general::list_wiki_files,
+        crate::routes::general::get_wiki_content,
         crate::routes::settings::get_settings,
         crate::routes::settings::update_setting,
         crate::routes::settings::test_connection,
+        crate::routes::settings::get_ollama_models,
         crate::routes::skill::list_skills,
         crate::routes::skill::import_skill,
+        crate::routes::skill::spawn_mcp_server,
         crate::routes::general::get_health_status,
         // Agent
         crate::routes::agent::trigger_agent_chat,

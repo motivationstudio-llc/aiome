@@ -80,12 +80,4 @@ DISCORD_TOKEN, DISCORD_LOG_CHANNEL_ID, DISCORD_COMMAND_CHANNEL_ID, DISCORD_CHAT_
 ```
 
 ---
-<<<<<<< HEAD
-<<<<<<< HEAD
-*Last Auto-Generated: 2026-03-14 01:28:35 UTC*
-=======
-*Last Auto-Generated: 2026-03-14 02:59:48 UTC*
->>>>>>> 4743416 (feat(api): complete Phase 21 including OpenAPI coverage, E2E type safety, and AppError migration)
-=======
-*Last Auto-Generated: 2026-03-14 21:36:09 UTC*
->>>>>>> b7362e0 (chore: update licenses to BSL 1.1 and update bastion-core branch)
+*Last Auto-Generated: 2026-03-14 22:30:34 UTC*

@@ -1,6 +1,10 @@
 /*
  * Aiome - The Autonomous AI Operating System
  * Copyright (C) 2026 motivationstudio, LLC
+ *
+ * Licensed under the Business Source License 1.1 (BSL 1.1).
+ * Change Date: 2030-01-01
+ * Change License: Apache License 2.0
  */
 
 use crate::error::AppError;
@@ -26,12 +30,14 @@ pub struct AutoToggle {
 
 #[utoipa::path(
     get,
-    path = "/api/v1/expression/status",
+    path = "/api/expression/status",
     responses(
         (status = 200, description = "Expression engine status", body = serde_json::Value)
     )
 )]
-pub async fn expression_status(State(state): State<AppState>) -> Json<serde_json::Value> {
+pub async fn expression_status(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, AppError> {
     let pending_count = state.job_queue.get_pending_job_count().await.unwrap_or(0);
     let auto_enabled = state
         .job_queue
@@ -50,19 +56,19 @@ pub async fn expression_status(State(state): State<AppState>) -> Json<serde_json
         .and_then(|k| k["lesson"].as_str())
         .unwrap_or("Waiting for new insights...");
 
-    Json(serde_json::json!({
+    Ok(Json(serde_json::json!({
         "status": status,
         "auto_expression": auto_enabled,
         "pending_expressions": pending_count,
         "last_insight": last_lesson,
         "message_ja": format!("自律表現パイプライン: {} (自動: {})。現在の洞察: {}", status, if auto_enabled { "ON" } else { "OFF" }, last_lesson),
         "message_en": format!("Autonomous expression pipeline {} (Auto: {}). Current insight: {}", status, if auto_enabled { "ON" } else { "OFF" }, last_lesson)
-    }))
+    })))
 }
 
 #[utoipa::path(
     post,
-    path = "/api/v1/expression/generate",
+    path = "/api/expression/generate",
     responses(
         (status = 200, description = "Generated expression", body = serde_json::Value),
         (status = 400, description = "No karma available")
@@ -96,7 +102,7 @@ pub async fn generate_expression(
 
 #[utoipa::path(
     get,
-    path = "/api/v1/expression/list",
+    path = "/api/expression/list",
     params(
         ("limit" = Option<i64>, Query, description = "Limit results")
     ),
@@ -116,7 +122,7 @@ pub async fn list_expressions(
 
 #[utoipa::path(
     post,
-    path = "/api/v1/expression/auto",
+    path = "/api/expression/auto",
     request_body = AutoToggle,
     responses(
         (status = 200, description = "Toggled auto-expression", body = serde_json::Value)
