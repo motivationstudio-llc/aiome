@@ -129,12 +129,11 @@ pub async fn create_topic(
         })?;
 
     let status = res.status();
-    let body = res
-        .json::<serde_json::Value>()
-        .await
-        .map_err(|e| aiome_core::error::AiomeError::RemoteServiceExecutionFailed {
+    let body = res.json::<serde_json::Value>().await.map_err(|e| {
+        aiome_core::error::AiomeError::RemoteServiceExecutionFailed {
             reason: e.to_string(),
-        })?;
+        }
+    })?;
 
     if status.is_success() {
         Ok(Json(body))

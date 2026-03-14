@@ -66,6 +66,21 @@ impl AdaptiveImmuneSystem {
             signature: None,
         };
 
+        // 重複チェック (類似するパターンが既に存在すればスキップ)
+        let active_rules = jq.fetch_active_immune_rules().await?;
+        for existing in active_rules {
+            if existing.pattern == rule.pattern
+                || existing.pattern.contains(&rule.pattern)
+                || rule.pattern.contains(&existing.pattern)
+            {
+                info!(
+                    "🛡️ 類似する免疫ルールが既に存在するため、ルールの生成をスキップします: {}",
+                    rule.pattern
+                );
+                return Ok(0);
+            }
+        }
+
         info!(
             "🛡️ 新しい免疫ルールを生成しました: [{}] {}",
             rule.action, rule.pattern

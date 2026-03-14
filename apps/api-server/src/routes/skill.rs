@@ -191,10 +191,12 @@ pub async fn import_skill(
     };
 
     if manifests.is_empty() {
-        return Err(aiome_core::error::AiomeError::RemoteServiceExecutionFailed {
-            reason: "No valid skills found in the content.".to_string(),
-        }
-        .into());
+        return Err(
+            aiome_core::error::AiomeError::RemoteServiceExecutionFailed {
+                reason: "No valid skills found in the content.".to_string(),
+            }
+            .into(),
+        );
     }
 
     // 3. Process via Cleanroom (N2)
@@ -227,10 +229,12 @@ pub async fn import_skill(
     }
 
     if imported_skills.is_empty() && !errors.is_empty() {
-        return Err(aiome_core::error::AiomeError::RemoteServiceExecutionFailed {
-            reason: format!("All skill imports failed: {:?}", errors),
-        }
-        .into());
+        return Err(
+            aiome_core::error::AiomeError::RemoteServiceExecutionFailed {
+                reason: format!("All skill imports failed: {:?}", errors),
+            }
+            .into(),
+        );
     }
 
     Ok(Json(serde_json::json!({
@@ -264,5 +268,7 @@ pub async fn spawn_mcp_server(
             reason: format!("MCP Spawn Error: {}", e),
         })?;
 
-    Ok(Json(serde_json::json!({"status": "success", "id": payload.id})))
+    Ok(Json(
+        serde_json::json!({"status": "success", "id": payload.id}),
+    ))
 }

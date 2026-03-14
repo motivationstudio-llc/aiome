@@ -21,6 +21,10 @@ pub struct SoulMutator {
 }
 
 impl SoulMutator {
+    /// 最小 Drift 閾値 (レベル1)
+    const MIN_DRIFT_THRESHOLD: f64 = 0.30;
+    /// 最大 Drift 閾値 (経験を積んだエージェント)
+    const MAX_DRIFT_THRESHOLD: f64 = 0.55;
     pub fn new(provider: Arc<dyn LlmProvider>, workspace_dir: PathBuf) -> Self {
         Self {
             provider,
@@ -117,6 +121,32 @@ impl SoulMutator {
 
         if old_hash == new_hash {
             info!("🧬 [SoulMutator] Mutation resulted in no change. Staying in current state.");
+            return Ok(false);
+        }
+
+        // --- Soul Drift Guard (Adaptive Intelligence v1.0) ---
+        let stats = job_queue.get_agent_stats().await?;
+        let drift = self.measure_drift(&master_soul, &new_soul_content);
+        let threshold = self.get_adaptive_threshold(stats.level);
+
+        if drift > threshold {
+            use tracing::warn;
+            warn!(
+                "🛡️ [SoulDriftGuard] Mutation Drift {:.2} exceeds Level {} threshold {:.2}. Blocking transmute.",
+                drift, stats.level, threshold
+            );
+            let _ = job_queue
+                .record_evolution_event(
+                    stats.level,
+                    "DriftBlocked",
+                    &format!(
+                        "Transmute drift {:.2} > threshold {:.2}. Evolution protected.",
+                        drift, threshold
+                    ),
+                    None,
+                    None,
+                )
+                .await;
             return Ok(false);
         }
 
@@ -219,6 +249,33 @@ impl SoulMutator {
 
         let proposal = self.provider.complete(&prompt, Some(&preamble)).await?;
 
+        // --- Soul Drift Guard (Adaptive Intelligence v1.0) ---
+        let current_evolving_soul = fs::read_to_string(&evolving_soul_path).await?;
+        let candidate_soul = format!("{}\n\n{}", current_evolving_soul, proposal);
+        let drift = self.measure_drift(&master_soul, &candidate_soul);
+        let threshold = self.get_adaptive_threshold(new_level);
+
+        if drift > threshold {
+            use tracing::warn;
+            warn!(
+                "🛡️ [SoulDriftGuard] Tactical Drift {:.2} exceeds Level {} threshold {:.2}. Blocking evolution.",
+                drift, new_level, threshold
+            );
+            let _ = job_queue
+                .record_evolution_event(
+                    new_level,
+                    "DriftBlocked",
+                    &format!(
+                        "Tactical shift drift {:.2} > threshold {:.2}. Personality protected.",
+                        drift, threshold
+                    ),
+                    None,
+                    None,
+                )
+                .await;
+            return Ok(());
+        }
+
         // 2. Verification
         if let Some(prosecutor) = &self.prosecutor_provider {
             use aiome_core::traits::ConstitutionalValidator;
@@ -280,5 +337,31 @@ impl SoulMutator {
         let mut hasher = Sha256::new();
         hasher.update(content);
         format!("{:x}", hasher.finalize())
+    }
+
+    /// Adaptive Threshold: レベルが上がるほど、人格の変位許容度（自律性）を拡大する。
+    fn get_adaptive_threshold(&self, level: i32) -> f64 {
+        let base = Self::MIN_DRIFT_THRESHOLD;
+        let growth = (level as f64 * 0.025).min(Self::MAX_DRIFT_THRESHOLD - base);
+        base + growth
+    }
+
+    /// Measure Drift via Jaccard Distance (Adaptive Intelligence v1.0)
+    /// 0.0 = 同一, 1.0 = 全く異なる
+    fn measure_drift(&self, original: &str, mutated: &str) -> f64 {
+        use std::collections::HashSet;
+
+        // 簡易的な単語抽出（将来的にセマンティック類似度へ拡張可能）
+        let orig_words: HashSet<&str> = original.split_whitespace().collect();
+        let new_words: HashSet<&str> = mutated.split_whitespace().collect();
+
+        let intersection = orig_words.intersection(&new_words).count();
+        let union = orig_words.union(&new_words).count();
+
+        if union == 0 {
+            return 0.0;
+        }
+
+        1.0 - (intersection as f64 / union as f64)
     }
 }

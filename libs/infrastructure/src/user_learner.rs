@@ -50,10 +50,20 @@ impl UserLearner {
                 Ok(reply) => {
                     let reply = reply.trim();
                     if reply != "NO_UPDATE" && !reply.is_empty() {
+                        // 異常サイズ・内容検知 (短すぎる、またはMarkdown構造を成していない場合はブロック)
+                        if reply.len() < 50 || (!reply.contains('#') && !reply.contains("- ")) {
+                            warn!("⚠️ [UserLearner] 生成された内容が異常に短いか、不正な形式です。上書きを中止します。");
+                            return Ok(false);
+                        }
+
+                        // 上書き前にバックアップを作成
+                        let backup_path = format!("{}.bak", user_path);
+                        let _ = fs::copy(&user_path, &backup_path);
+
                         fs::write(&user_path, reply)?;
                         info!(
-                            "✅ [UserLearner] {} has been updated based on session intelligence.",
-                            user_path
+                            "✅ [UserLearner] {} has been updated based on session intelligence. Backup saved to {}.",
+                            user_path, backup_path
                         );
                         return Ok(true);
                     }

@@ -16,21 +16,26 @@ use tracing::{info, warn};
 pub struct HeartbeatWakeupService {
     provider: Arc<dyn LlmProvider + Send + Sync>,
     semaphore: Arc<Semaphore>,
+    workspace_dir: std::path::PathBuf,
 }
 
 impl HeartbeatWakeupService {
-    pub fn new(provider: Arc<dyn LlmProvider + Send + Sync>, semaphore: Arc<Semaphore>) -> Self {
+    pub fn new(
+        provider: Arc<dyn LlmProvider + Send + Sync>,
+        semaphore: Arc<Semaphore>,
+        workspace_dir: std::path::PathBuf,
+    ) -> Self {
         Self {
             provider,
             semaphore,
+            workspace_dir,
         }
     }
 
     pub async fn run_wakeup_ping(&self) -> Option<String> {
         let filename = "HEARTBEAT.md";
-        let content = if let Ok(c) = fs::read_to_string(filename) {
-            c
-        } else if let Ok(c) = fs::read_to_string(format!("../../{}", filename)) {
+        let target_path = self.workspace_dir.join(filename);
+        let content = if let Ok(c) = fs::read_to_string(&target_path) {
             c
         } else {
             String::new()

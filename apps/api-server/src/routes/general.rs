@@ -25,9 +25,7 @@ use std::fs;
     ),
     security(("api_key" = []))
 )]
-pub async fn list_wiki_files(
-    State(state): State<AppState>,
-) -> Result<Json<Vec<String>>, AppError> {
+pub async fn list_wiki_files(State(state): State<AppState>) -> Result<Json<Vec<String>>, AppError> {
     let mut files = Vec::new();
     if let Ok(entries) = fs::read_dir(&state.docs_path) {
         for entry in entries.flatten() {
@@ -66,12 +64,8 @@ pub async fn get_wiki_content(
     }
 
     let path = std::path::PathBuf::from(&state.docs_path).join(filename);
-    fs::read_to_string(path).map_err(|e| {
-        aiome_core::error::AiomeError::OsError {
-            source: e.into(),
-        }
-        .into()
-    })
+    fs::read_to_string(path)
+        .map_err(|e| aiome_core::error::AiomeError::OsError { source: e.into() }.into())
 }
 
 #[utoipa::path(

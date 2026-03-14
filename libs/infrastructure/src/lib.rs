@@ -13,10 +13,10 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
-
 pub mod aiome_log;
 pub mod artifact_store;
 pub mod channel_bridge;
+pub mod circuit_breaker;
 pub mod concept_manager;
 pub mod context_engine;
 pub mod dream_state;
@@ -31,6 +31,7 @@ pub mod publisher;
 pub mod security;
 pub mod skill_arena;
 pub mod skills;
+pub mod slo_engine;
 pub mod soul_mutator;
 pub mod trend_sonar;
 pub mod user_learner;

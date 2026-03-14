@@ -17,6 +17,7 @@
 
 pub mod biome;
 pub mod budget;
+pub mod commerce;
 pub mod contracts;
 pub mod error;
 pub mod expression;

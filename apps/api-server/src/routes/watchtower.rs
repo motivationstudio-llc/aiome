@@ -135,7 +135,20 @@ async fn handle_chat_command(state: AppState, payload: AgentChatRequest) -> anyh
         .await
         .ok()
         .flatten();
-    let system_instructions = build_system_instructions(&state, karma_str, summary, ai_name, None);
+    let mut economic_context = None;
+    if let Some(engine) = &state.commerce_engine {
+        let agent_id = uuid::Uuid::nil();
+        if let Ok(balance) = engine.get_balance(agent_id).await {
+            economic_context = Some(aiome_core::commerce::EconomicContext {
+                balance,
+                spent_today: 0,
+                daily_limit: 1000,
+            });
+        }
+    }
+
+    let system_instructions =
+        build_system_instructions(&state, karma_str, summary, ai_name, None, economic_context);
     let full_prompt = format!("{}\nUSER: {}\nAI: ", system_instructions, payload.prompt);
 
     // 4. LLM Call

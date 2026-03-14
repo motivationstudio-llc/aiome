@@ -56,10 +56,17 @@ impl ContextEngine {
         // Fetch more than recent to check for compression need
         let all_recent = self
             .job_queue
-            .fetch_chat_history(channel_id, (threshold * 2) as i64)
+            .fetch_chat_history(channel_id, 100) // 常に多めに取得
             .await?;
 
-        if all_recent.len() > threshold {
+        // 概算トークン数（文字数 * 0.5 程度だが、ここでは単純に文字数で閾値を判定する）
+        let total_chars: usize = all_recent
+            .iter()
+            .map(|m| m["content"].as_str().unwrap_or("").len())
+            .sum();
+
+        // threshold が文字数基準とする
+        if total_chars > threshold {
             if let Ok(_permit) = self.semaphore.try_acquire() {
                 info!(
                     "🧠 [ContextEngine] Compressing history for channel: {}",
@@ -72,8 +79,9 @@ impl ContextEngine {
                     .await?
                     .unwrap_or_else(|| "なし".to_string());
 
-                // Take the oldest half to compress
-                let to_compress = &all_recent[..all_recent.len() - (threshold / 2)];
+                // Take the oldest half of messages to compress
+                let compress_count = all_recent.len() / 2;
+                let to_compress = &all_recent[..compress_count];
                 let recent_context = to_compress
                     .iter()
                     .map(|m| format!("{}: {}", m["role"], m["content"]))

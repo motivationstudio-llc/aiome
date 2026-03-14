@@ -40,6 +40,13 @@ utoipa.workspace = true
 utoipa-swagger-ui = { version = "8", features = ["axum"] }
 dotenvy = "0.15"
 sysinfo = "0.33"
+nurture-api = { path = "../../../ProjectーNurture/apps/nurture-api", optional = true }
+nurture-core = { path = "../../../ProjectーNurture/libs/nurture-core", optional = true }
+nurture-infra = { path = "../../../ProjectーNurture/libs/nurture-infra", optional = true }
+commerce-protocol = { path = "../../../ProjectーNurture/libs/commerce-protocol", optional = true }
+
+[features]
+nurture = ["dep:nurture-api", "dep:nurture-core", "dep:nurture-infra", "dep:commerce-protocol", "aiome_core/nurture"]
 
 [dev-dependencies]
 axum-test = "16"

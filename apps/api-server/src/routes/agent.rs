@@ -112,6 +112,7 @@ pub fn build_system_instructions(
     summary: Option<&str>,
     ai_name: Option<String>,
     knowledge_str: Option<&str>,
+    economic_context: Option<aiome_core::commerce::EconomicContext>,
 ) -> String {
     let skill_list = state
         .wasm_skill_manager
@@ -172,6 +173,15 @@ pub fn build_system_instructions(
         "".to_string()
     };
 
+    let economy_info = if let Some(ctx) = economic_context {
+        format!(
+            "\n[現在の経済状況]\n- 手元資金: {} コイン\n- 本日の支出: {} コイン (上限: {})\n---\n",
+            ctx.balance, ctx.spent_today, ctx.daily_limit
+        )
+    } else {
+        "".to_string()
+    };
+
     format!(
         "{}[利用可能なスキル (概要)]\n\
         {}\n\n\
@@ -186,6 +196,7 @@ pub fn build_system_instructions(
         3. 自分が現在使えるスキルの全スキーマは上記リストを参照。\n\n\
         現在のディレクトリ: {}\n\
         過去の教訓: {}\n\n\
+        {}\n\
         {}\n\n\
         [これまでの会話の要約]\n\
         {}\n\n\
@@ -196,6 +207,7 @@ pub fn build_system_instructions(
         std::env::current_dir().unwrap_or_default().display(),
         karma_str,
         project_knowledge,
+        economy_info,
         summary.unwrap_or("なし"),
         forge_prompt,
         supplemental_context
@@ -327,12 +339,27 @@ pub async fn trigger_agent_chat(
         .await
         .ok()
         .flatten();
+
+    let mut economic_context = None;
+    if let Some(engine) = &state.commerce_engine {
+        // TODO: ユーザー/エージェント固有の ID を使用する
+        let agent_id = uuid::Uuid::nil();
+        if let Ok(balance) = engine.get_balance(agent_id).await {
+            economic_context = Some(aiome_core::commerce::EconomicContext {
+                balance,
+                spent_today: 0,
+                daily_limit: 1000,
+            });
+        }
+    }
+
     let system_instructions = build_system_instructions(
         &state,
         &karma_str,
         summary.as_deref(),
         ai_name,
         knowledge_str.as_deref(),
+        economic_context,
     );
 
     let mut turn = 0;
@@ -493,7 +520,7 @@ pub async fn trigger_agent_chat(
     let ce = state.context_engine.clone();
     let cid = channel_id.clone();
     tokio::spawn(async move {
-        let _ = ce.maintain_context(&cid, 20).await;
+        let _ = ce.maintain_context(&cid, 8000).await; // 文字数基準 (≒4000トークン)
     });
 
     Ok(Json(serde_json::json!({

@@ -15,7 +15,7 @@ use async_trait::async_trait;
 use chrono::Utc;
 use sqlx::Row;
 use std::time::Instant;
-use tracing::{info, warn};
+use tracing::warn;
 use uuid::Uuid;
 
 #[async_trait]
@@ -80,7 +80,9 @@ impl KarmaOps for SqliteJobQueue {
         let candidate_limit = limit * 5;
         let rows = sqlx::query(
             "SELECT k.id, k.lesson, k.soul_version_hash, k.karma_embedding,
-              (k.weight * 0.1 + (CASE WHEN k.rowid IN (SELECT rowid FROM karma_fts WHERE lesson MATCH ?) THEN 50.0 ELSE 0.0 END)) AS sql_weight
+              (k.weight * 0.1 
+                + (CASE WHEN k.tier = 'HOT' THEN 30.0 WHEN k.tier = 'WARM' THEN 10.0 ELSE 0.0 END)
+                + (CASE WHEN k.rowid IN (SELECT rowid FROM karma_fts WHERE lesson MATCH ?) THEN 50.0 ELSE 0.0 END)) AS sql_weight
              FROM karma_logs k
              WHERE k.weight > 0 AND k.is_archived = 0 AND (k.related_skill = ? OR k.related_skill = 'global') 
              ORDER BY sql_weight DESC, k.created_at DESC LIMIT ?"
@@ -193,7 +195,7 @@ impl KarmaOps for SqliteJobQueue {
         let now = Utc::now().to_rfc3339();
         for r in &rows {
             let id: String = r.get("id");
-            let _ = sqlx::query("UPDATE karma_logs SET last_applied_at = ? WHERE id = ?")
+            let _ = sqlx::query("UPDATE karma_logs SET last_applied_at = ?, apply_count = apply_count + 1 WHERE id = ?")
                 .bind(&now)
                 .bind(id)
                 .execute(&self.pool)

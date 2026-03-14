@@ -120,18 +120,22 @@ pub async fn update_setting(
     // 2. Category validation
     let allowed_categories = ["llm", "channel", "system", "security", "cors", "identity"];
     if !allowed_categories.contains(&payload.category.as_str()) {
-        return Err(aiome_core::error::AiomeError::RemoteServiceExecutionFailed {
-            reason: "Invalid category".to_string(),
-        }
-        .into());
+        return Err(
+            aiome_core::error::AiomeError::RemoteServiceExecutionFailed {
+                reason: "Invalid category".to_string(),
+            }
+            .into(),
+        );
     }
 
     // 3. Value length limit (DoS protection)
     if payload.value.len() > 1024 {
-        return Err(aiome_core::error::AiomeError::RemoteServiceExecutionFailed {
-            reason: "Value too long (max 1024 chars)".to_string(),
-        }
-        .into());
+        return Err(
+            aiome_core::error::AiomeError::RemoteServiceExecutionFailed {
+                reason: "Value too long (max 1024 chars)".to_string(),
+            }
+            .into(),
+        );
     }
 
     // 4. Server-side is_secret determination
@@ -448,12 +452,11 @@ pub async fn get_ollama_models(
     })?;
 
     if res.status().is_success() {
-        let json = res
-            .json::<serde_json::Value>()
-            .await
-            .map_err(|e| aiome_core::error::AiomeError::RemoteServiceExecutionFailed {
+        let json = res.json::<serde_json::Value>().await.map_err(|e| {
+            aiome_core::error::AiomeError::RemoteServiceExecutionFailed {
                 reason: format!("JSON Parse Error: {}", e),
-            })?;
+            }
+        })?;
         Ok(Json(json))
     } else {
         Err(aiome_core::error::AiomeError::RemoteServiceError {

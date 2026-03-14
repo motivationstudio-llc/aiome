@@ -64,6 +64,9 @@ impl SecurityConfig {
     }
 }
 
+pub static GLOBAL_SECURITY_CONFIG: once_cell::sync::Lazy<SecurityConfig> =
+    once_cell::sync::Lazy::new(SecurityConfig::load_or_default);
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PermissionManifest {
     pub allow_network: bool,
@@ -137,9 +140,11 @@ impl BastionGuard {
         let binary = parts[0];
         let args = &parts[1..];
 
-        // Strict Whitelist check against SecurityConfig
-        let config = SecurityConfig::load_or_default();
-        if !config.allowed_binaries.contains(&binary.to_string()) {
+        // Strict Whitelist check against SecurityConfig (Global Singleton)
+        if !GLOBAL_SECURITY_CONFIG
+            .allowed_binaries
+            .contains(&binary.to_string())
+        {
             return Err(AiomeError::Infrastructure {
                 reason: format!(
                     "Security Violation: Binary '{}' is not in the whitelist.",

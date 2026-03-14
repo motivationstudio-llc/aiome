@@ -33,6 +33,7 @@ mod expression;
 mod federation;
 mod guardrails;
 mod karma;
+mod karma_maintenance;
 mod migrations;
 pub mod settings;
 mod swarm;
@@ -739,6 +740,10 @@ impl SqliteJobQueue {
         &self,
     ) -> Result<Vec<aiome_core::contracts::SystemSetting>, AiomeError> {
         self.get_all_settings().await
+    }
+
+    pub async fn run_karma_tier_maintenance(&self) -> Result<(), AiomeError> {
+        karma_maintenance::run_karma_tier_maintenance(&self.pool).await
     }
 }
 

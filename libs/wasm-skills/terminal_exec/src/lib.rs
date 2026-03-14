@@ -9,11 +9,10 @@
 
 // WASM ゲストはホスト関数を unsafe で呼ぶ必要がある。
 // Wasmtime サンドボックスにより安全性は保証される。
-#[allow(unsafe_code)]
+#![allow(unsafe_code)]
 #![warn(missing_docs)]
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-
 use extism_pdk::*;
 use serde::{Deserialize, Serialize};
 

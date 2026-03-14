@@ -128,7 +128,20 @@ pub async fn trigger_agent_chat_stream(
         }
 
         let ai_name = state.job_queue.get_setting_value("ai_name").await.ok().flatten();
-        let system_instructions = build_system_instructions(&state, &karma_str, summary.as_deref(), ai_name, knowledge_str.as_deref());
+
+        let mut economic_context = None;
+        if let Some(engine) = &state.commerce_engine {
+            let agent_id = uuid::Uuid::nil();
+            if let Ok(balance) = engine.get_balance(agent_id).await {
+                economic_context = Some(aiome_core::commerce::EconomicContext {
+                    balance,
+                    spent_today: 0,
+                    daily_limit: 1000,
+                });
+            }
+        }
+
+        let system_instructions = build_system_instructions(&state, &karma_str, summary.as_deref(), ai_name, knowledge_str.as_deref(), economic_context);
 
         let mut turn = 0;
         let max_turns = 15;
@@ -260,7 +273,7 @@ pub async fn trigger_agent_chat_stream(
         let ce = state.context_engine.clone();
         let cid = channel_id.clone();
         tokio::spawn(async move {
-            let _ = ce.maintain_context(&cid, 20).await;
+            let _ = ce.maintain_context(&cid, 8000).await; // 文字数基準 (≒4000トークン)
         });
 
         yield Ok(Event::default().event("done").data("stream finished"));

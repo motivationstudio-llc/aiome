@@ -7,8 +7,6 @@
  * Change License: Apache License 2.0
  */
 
-
-
 use aiome_core::llm_provider::EmbeddingProvider;
 
 use async_trait::async_trait;
@@ -41,6 +39,15 @@ mod routes;
 mod skill_handler;
 mod stream;
 
+#[cfg(feature = "nurture")]
+use commerce_protocol;
+#[cfg(feature = "nurture")]
+use nurture_api;
+#[cfg(feature = "nurture")]
+use nurture_core;
+#[cfg(feature = "nurture")]
+use nurture_infra;
+
 use aiome_core::traits::JobQueue;
 use shared::health::HealthMonitor;
 
@@ -69,6 +76,7 @@ pub struct AppState {
     pub http_client: reqwest::Client,
     pub docker_failures: Arc<tokio::sync::RwLock<std::collections::HashMap<String, u32>>>,
     pub security_policy: shared::security::SecurityPolicy,
+    pub commerce_engine: Option<Arc<dyn aiome_core::commerce::CommerceEngine>>,
 }
 
 #[tokio::main]
@@ -762,6 +770,26 @@ async fn main() {
         .unwrap_or_default();
     let client_bg_clone = http_client.clone();
 
+    let mut commerce_engine = None;
+    #[cfg(feature = "nurture")]
+    let nurture_state = {
+        info!("💰 [NURTURE] Initializing Economy Engine...");
+        let nurture_policy = nurture_core::policy::EconomyPolicy::default();
+        let system_id = uuid::Uuid::nil();
+        let ns = nurture_api::state::AppState::init(
+            job_queue.get_pool().clone(),
+            nurture_policy,
+            commerce_protocol::identity::ActorId(system_id),
+        );
+        commerce_engine = Some(
+            Arc::new(nurture_infra::economy::bridge::NurtureCommerceBridge::new(
+                ns.ledger.clone(),
+                ns.interceptor.clone(),
+            )) as Arc<dyn aiome_core::commerce::CommerceEngine>,
+        );
+        ns
+    };
+
     let app = build_app(
         AppState {
             health_monitor,
@@ -790,9 +818,12 @@ async fn main() {
             http_client: http_client,
             docker_failures: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
             security_policy: shared::security::SecurityPolicy::default(),
+            commerce_engine,
         },
         cors_layer,
         static_path,
+        #[cfg(feature = "nurture")]
+        nurture_state,
     );
 
     // Initial Security Check (C1)
@@ -832,6 +863,9 @@ async fn main() {
         let heartbeat_service = infrastructure::heartbeat_wakeup::HeartbeatWakeupService::new(
             wakeup_provider.clone(),
             llm_semaphore.clone(),
+            std::path::PathBuf::from(
+                std::env::var("WORKSPACE_DIR").unwrap_or_else(|_| ".".to_string()),
+            ),
         );
         let crystallizer = infrastructure::memory_crystallizer::MemoryCrystallizer::new(
             wakeup_provider.clone(),
@@ -1315,6 +1349,16 @@ async fn main() {
                 }
             }
 
+            // Adaptive Intelligence v1.0: Karma Tier Maintenance (6-hour cycle)
+            if wakeup_counter % 72 == 0 {
+                if let Err(e) = jq_clone.run_karma_tier_maintenance().await {
+                    warn!(
+                        "⚠️ [BackgroundWorker] Karma tier maintenance failed: {:?}",
+                        e
+                    );
+                }
+            }
+
             // 4. Storage GC: Maintain clean environment (Threshold: 10GB)
             if let Ok(purged) = jq_clone.storage_gc(10.0).await {
                 if purged > 0 {
@@ -1490,46 +1534,148 @@ async fn shutdown_signal(token: CancellationToken) {
     info!("👋 [api-server] Graceful shutdown complete.");
 }
 
-pub fn build_app(state: AppState, cors_layer: CorsLayer, static_path: &str) -> Router {
-    Router::new()
+pub fn build_app(
+    state: AppState,
+    cors_layer: CorsLayer,
+    static_path: &str,
+    #[cfg(feature = "nurture")] nurture_state: nurture_api::state::SharedState,
+) -> Router {
+    let mut router = Router::new()
         // --- Protected Routes (Require Authentication) ---
         .route("/api/wiki", get(routes::general::list_wiki_files))
-        .route("/api/wiki/:filename", get(routes::general::get_wiki_content))
+        .route(
+            "/api/wiki/:filename",
+            get(routes::general::get_wiki_content),
+        )
         .route("/api/synergy/karma", get(routes::karma::get_karma_stream))
-        .route("/api/synergy/graph", get(routes::karma::synergy_graph_handler))
-        .route("/api/synergy/test/failure", axum::routing::post(routes::karma::trigger_failure_demo))
-        .route("/api/synergy/test/security", axum::routing::post(routes::karma::trigger_security_demo))
-        .route("/api/synergy/test/federation", axum::routing::post(routes::karma::trigger_federation_demo))
-        .route("/api/synergy/rules", get(routes::karma::get_immune_rules_handler).post(routes::karma::add_immune_rule_handler).put(routes::karma::add_immune_rule_handler))
-        .route("/api/synergy/rules/:id", axum::routing::delete(routes::karma::delete_immune_rule_handler))
-        .route("/api/artifacts", get(routes::artifacts::list_artifacts_handler))
-        .route("/api/artifacts/:id", get(routes::artifacts::get_artifact_handler).delete(routes::artifacts::delete_artifact_handler))
-        .route("/api/artifacts/:id/edges", get(routes::artifacts::get_artifact_edges_handler))
-        .route("/api/artifacts/:id/files/:filename", get(routes::artifacts::download_artifact_file_handler))
-        .route("/api/agent/chat", axum::routing::post(routes::agent::trigger_agent_chat))
-        .route("/api/agent/chat/stream", axum::routing::post(stream::trigger_agent_chat_stream))
-        .route("/api/agent/feedback", axum::routing::post(routes::agent::handle_karma_feedback))
-        .route("/api/system/evolution", get(routes::karma::get_evolution_history_handler))
-        .route("/api/v1/settings", get(routes::settings::get_settings).put(routes::settings::update_setting))
-        .route("/api/v1/settings/test", axum::routing::post(routes::settings::test_connection))
-        .route("/api/v1/ollama/models", get(routes::settings::get_ollama_models))
+        .route(
+            "/api/synergy/graph",
+            get(routes::karma::synergy_graph_handler),
+        )
+        .route(
+            "/api/synergy/test/failure",
+            axum::routing::post(routes::karma::trigger_failure_demo),
+        )
+        .route(
+            "/api/synergy/test/security",
+            axum::routing::post(routes::karma::trigger_security_demo),
+        )
+        .route(
+            "/api/synergy/test/federation",
+            axum::routing::post(routes::karma::trigger_federation_demo),
+        )
+        .route(
+            "/api/synergy/rules",
+            get(routes::karma::get_immune_rules_handler)
+                .post(routes::karma::add_immune_rule_handler)
+                .put(routes::karma::add_immune_rule_handler),
+        )
+        .route(
+            "/api/synergy/rules/:id",
+            axum::routing::delete(routes::karma::delete_immune_rule_handler),
+        )
+        .route(
+            "/api/artifacts",
+            get(routes::artifacts::list_artifacts_handler),
+        )
+        .route(
+            "/api/artifacts/:id",
+            get(routes::artifacts::get_artifact_handler)
+                .delete(routes::artifacts::delete_artifact_handler),
+        )
+        .route(
+            "/api/artifacts/:id/edges",
+            get(routes::artifacts::get_artifact_edges_handler),
+        )
+        .route(
+            "/api/artifacts/:id/files/:filename",
+            get(routes::artifacts::download_artifact_file_handler),
+        )
+        .route(
+            "/api/agent/chat",
+            axum::routing::post(routes::agent::trigger_agent_chat),
+        )
+        .route(
+            "/api/agent/chat/stream",
+            axum::routing::post(stream::trigger_agent_chat_stream),
+        )
+        .route(
+            "/api/agent/feedback",
+            axum::routing::post(routes::agent::handle_karma_feedback),
+        )
+        .route(
+            "/api/system/evolution",
+            get(routes::karma::get_evolution_history_handler),
+        )
+        .route(
+            "/api/v1/settings",
+            get(routes::settings::get_settings).put(routes::settings::update_setting),
+        )
+        .route(
+            "/api/v1/settings/test",
+            axum::routing::post(routes::settings::test_connection),
+        )
+        .route(
+            "/api/v1/ollama/models",
+            get(routes::settings::get_ollama_models),
+        )
         .route("/api/v1/logs", get(routes::general::get_logs))
         .route("/api/biome/status", get(routes::biome::biome_status))
-        .route("/api/biome/topics", get(routes::biome::list_topics).post(routes::biome::create_topic))
+        .route(
+            "/api/biome/topics",
+            get(routes::biome::list_topics).post(routes::biome::create_topic),
+        )
         .route("/api/biome/list", get(routes::biome::list_messages))
-        .route("/api/biome/send", axum::routing::post(routes::biome::send_message))
-        .route("/api/biome/autonomous/start", axum::routing::post(routes::biome::autonomous_start))
-        .route("/api/biome/autonomous/stop", axum::routing::post(routes::biome::autonomous_stop))
-        .route("/api/biome/autonomous/status", get(routes::biome::autonomous_status))
-        .route("/api/expression/status", get(routes::expression::expression_status))
-        .route("/api/expression/generate", axum::routing::post(routes::expression::generate_expression))
-        .route("/api/expression/list", get(routes::expression::list_expressions))
-        .route("/api/expression/auto", axum::routing::post(routes::expression::toggle_auto_expression))
+        .route(
+            "/api/biome/send",
+            axum::routing::post(routes::biome::send_message),
+        )
+        .route(
+            "/api/biome/autonomous/start",
+            axum::routing::post(routes::biome::autonomous_start),
+        )
+        .route(
+            "/api/biome/autonomous/stop",
+            axum::routing::post(routes::biome::autonomous_stop),
+        )
+        .route(
+            "/api/biome/autonomous/status",
+            get(routes::biome::autonomous_status),
+        )
+        .route(
+            "/api/expression/status",
+            get(routes::expression::expression_status),
+        )
+        .route(
+            "/api/expression/generate",
+            axum::routing::post(routes::expression::generate_expression),
+        )
+        .route(
+            "/api/expression/list",
+            get(routes::expression::list_expressions),
+        )
+        .route(
+            "/api/expression/auto",
+            axum::routing::post(routes::expression::toggle_auto_expression),
+        )
         .route("/api/skills", get(routes::skill::list_skills))
-        .route("/api/skills/import", axum::routing::post(routes::skill::import_skill))
-        .route("/api/skills/mcp/spawn", axum::routing::post(routes::skill::spawn_mcp_server))
+        .route(
+            "/api/skills/import",
+            axum::routing::post(routes::skill::import_skill),
+        )
+        .route(
+            "/api/skills/mcp/spawn",
+            axum::routing::post(routes::skill::spawn_mcp_server),
+        )
         .route("/api/health", get(routes::general::get_health_status))
-        .nest("/api/v1/mcp", mcp::router())
+        .nest("/api/v1/mcp", mcp::router());
+
+    #[cfg(feature = "nurture")]
+    {
+        router = router.merge(nurture_api::routes::nurture_routes(nurture_state));
+    }
+
+    router
         .route_layer(axum::middleware::from_extractor::<auth::Authenticated>())
 
         // --- Public Routes (Internal Monitoring / SSE / WS) ---

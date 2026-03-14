@@ -9,6 +9,7 @@
 
 use crate::trend_sonar::ExternalTrendSonar;
 use aiome_core::traits::{JobQueue, JobStatus, TrendSource};
+use rand::Rng;
 use std::error::Error;
 use tracing::{info, warn};
 
@@ -40,7 +41,7 @@ impl DreamState {
         }
 
         // 2. Decide Dream Type
-        let rand_val = chrono::Utc::now().timestamp() % 100;
+        let rand_val = rand::thread_rng().gen_range(0..100);
 
         // Level-based Behavioral Shift: Probability of communicative dream increases with level
         // Lv 1: 0%
@@ -75,7 +76,7 @@ impl DreamState {
             "lo-fi horror",
             "solarpunk architecture",
         ];
-        let seed = seeds[(chrono::Utc::now().timestamp() as usize) % seeds.len()];
+        let seed = seeds[rand::thread_rng().gen_range(0..seeds.len())];
 
         match trend_sonar.get_trends(seed).await {
             Ok(trends) if !trends.is_empty() => {
